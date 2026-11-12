@@ -62,12 +62,19 @@ Three properties make it safe to hand to an LLM:
 ## Install
 
 ```bash
-# run without installing (ephemeral, great for --doctor)
+# from git (works today)
+uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
+
+# from PyPI (once v1.0.0 is published there -- the name `omada-mcp` is reserved-free)
 uvx omada-mcp --doctor
 
-# or install the command
+# or install the command (once published to PyPI)
 uv tool install omada-mcp     # or: pipx install omada-mcp
 pip install omada-mcp         # plain pip
+
+# today, without PyPI:
+git clone https://github.com/falehsub/omada-mcp && cd omada-mcp
+uv tool install .             # installs the `omada-mcp` command from the checkout
 ```
 
 Requires Python 3.10+ and nothing else. There are **no runtime dependencies** —
