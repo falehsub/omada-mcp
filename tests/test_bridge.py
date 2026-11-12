@@ -7,6 +7,7 @@ Run with::
 
 from __future__ import annotations
 
+import http.cookiejar
 import io
 import json
 import os
@@ -26,7 +27,9 @@ from omada_mcp.client import (  # noqa: E402
     OmadaClient,
     OmadaError,
     build_ssl_context,
+    classify_controller_family,
     describe_error,
+    explain_error_code,
 )
 from omada_mcp.config import (  # noqa: E402
     Config,
@@ -66,12 +69,24 @@ WLANS = [
      "security": "wpa2", "vlanId": 20, "securityKey": "super-secret-passphrase"},
 ]
 
+LAN_NETWORKS = [
+    {"id": "n1", "name": "Default", "vlan": 1, "gatewaySubnet": "192.168.1.1/24",
+     "accessControlRule": False, "isolation": False,
+     "dhcpSettings": {"enable": True, "ipRangePool": [{"ipaddrStart": "192.168.1.10", "ipaddrEnd": "192.168.1.200"}]}},
+    {"id": "n20", "name": "IoT", "vlan": 20, "gatewaySubnet": "192.168.20.1/24",
+     "accessControlRule": True, "isolation": False,
+     "dhcpSettings": {"enable": True, "ipRangePool": [{"ipaddrStart": "192.168.20.10", "ipaddrEnd": "192.168.20.200"}]}},
+]
+
 
 class FakeController:
     """Minimal stateful stand-in for the controller's Web API v2."""
 
     def __init__(self, username="admin", password="pw", sites=None, devices=None,
-                 clients=None, wlans=None, token="tok-abc123"):
+                 clients=None, wlans=None, lan_networks=None, ssids_by_group=None,
+                 token="tok-abc123", cookie_name="TPOMADA_SESSIONID",
+                 controller_ver="5.13.30.8", controller_info_extra=None,
+                 legacy_login_shape=False):
         self.username = username
         self.password = password
         self.token = token
@@ -79,11 +94,30 @@ class FakeController:
         self.devices = devices if devices is not None else DEVICES
         self.clients = clients if clients is not None else CLIENTS
         self.wlans = wlans if wlans is not None else WLANS
+        self.lan_networks = lan_networks if lan_networks is not None else LAN_NETWORKS
+        self.ssids_by_group = ssids_by_group or {}
+        self.cookie_name = cookie_name
+        self.controller_ver = controller_ver
+        self.controller_info_extra = controller_info_extra or {}
+        self.legacy_login_shape = legacy_login_shape
+        self.cookie_jar = http.cookiejar.CookieJar()
         self.requests = []
         self.logins = 0
         self.html_once_for = set()   # endpoint fragments answered with HTML exactly once
         self.html_always_for = set()  # fragments answered with HTML every time
         self.burst_once_for = set()  # endpoint fragments answered with -1600 once
+
+    def _set_session_cookie(self):
+        if not self.cookie_name:
+            return
+        cookie = http.cookiejar.Cookie(
+            version=0, name=self.cookie_name, value="sess-123", port=None,
+            port_specified=False, domain="controller.test", domain_specified=True,
+            domain_initial_dot=False, path="/", path_specified=True,
+            secure=True, expires=None, discard=True, comment=None,
+            comment_url=None, rest={}, rfc2109=False,
+        )
+        self.cookie_jar.set_cookie(cookie)
 
     # transport protocol
     def request(self, method, url, headers=None, data=None, timeout=None):
@@ -91,16 +125,22 @@ class FakeController:
                               "headers": dict(headers or {}), "body": data})
         path = url.split("?")[0]
         if path.endswith("/api/info"):
+            info_result = {"omadacId": CONTROLLER_ID, "controllerVer": self.controller_ver}
+            info_result.update(self.controller_info_extra)
             return 200, json.dumps({
                 "errorCode": 0,
-                "result": {"omadacId": CONTROLLER_ID, "controllerVer": "5.13.30.8"},
+                "result": info_result,
             }).encode()
         if path.endswith("/api/v2/login"):
             self.logins += 1
             payload = json.loads(data or b"{}")
             if payload.get("username") != self.username or payload.get("password") != self.password:
                 return 200, json.dumps({"errorCode": -30109, "msg": "wrong credentials"}).encode()
-            return 200, json.dumps({"errorCode": 0, "result": {"token": self.token}}).encode()
+            self._set_session_cookie()
+            login_result = {"token": self.token}
+            if self.legacy_login_shape:
+                login_result["omadacId"] = CONTROLLER_ID
+            return 200, json.dumps({"errorCode": 0, "result": login_result}).encode()
 
         fragment = path.split("/api/v2/", 1)[-1]
         for key in list(self.html_once_for):
@@ -136,8 +176,15 @@ class FakeController:
             return 200, json.dumps({"errorCode": 0, "result": {
                 "data": self.clients if page == 1 else [],
                 "totalRows": len(self.clients)}}).encode()
+        if fragment.startswith(site_prefix + "/setting/wlans/") and "/ssids" in fragment:
+            group_id = fragment.split("/setting/wlans/", 1)[1].split("/ssids", 1)[0]
+            return 200, json.dumps({"errorCode": 0, "result": {
+                "data": self.ssids_by_group.get(group_id, [])}}).encode()
         if fragment.startswith(site_prefix + "/setting/wlans"):
             return 200, json.dumps({"errorCode": 0, "result": {"data": self.wlans}}).encode()
+        if fragment.startswith(site_prefix + "/setting/lan/networks"):
+            return 200, json.dumps({"errorCode": 0, "result": {
+                "data": self.lan_networks, "totalRows": len(self.lan_networks)}}).encode()
         return 200, json.dumps({"errorCode": -1600, "msg": "unsupported request path"}).encode()
 
 
@@ -425,17 +472,19 @@ class ProtocolTests(unittest.TestCase):
     def test_tools_list_annotations(self):
         server, _, _ = self._server()
         tools = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
-        self.assertEqual(len(tools), 8)
+        self.assertEqual(len(tools), 10)
         self.assertEqual({t["name"] for t in tools},
                          {"list_devices", "list_clients", "list_wifi_clients",
                           "list_wired_clients", "get_device", "get_client",
-                          "list_wlans", "get_site_info"})
+                          "list_wlans", "get_site_info", "network_audit",
+                          "explain_error"})
         for tool in tools:
             annotations = tool["annotations"]
             self.assertIs(annotations["readOnlyHint"], True, tool["name"])
             self.assertIs(annotations["destructiveHint"], False, tool["name"])
             self.assertIs(annotations["idempotentHint"], True, tool["name"])
-            self.assertIs(annotations["openWorldHint"], True, tool["name"])
+            expected_open = tool["name"] != "explain_error"
+            self.assertIs(annotations["openWorldHint"], expected_open, tool["name"])
             self.assertEqual(tool["inputSchema"]["type"], "object")
 
     def test_read_only_mode_refuses_non_read_only_names(self):
@@ -827,35 +876,288 @@ class CliTests(unittest.TestCase):
         finally:
             sys.stdout = original
         payload = json.loads(buffer.getvalue())
-        self.assertEqual(len(payload["tools"]), 8)
+        self.assertEqual(len(payload["tools"]), 10)
 
     def test_missing_config_exits_non_zero(self):
         from omada_mcp.cli import main
 
-        tmp = tempfile.mkdtemp()
-        original_cwd = os.getcwd()
-        environ_backup = dict(os.environ)
-        for key in list(os.environ):
-            if key.startswith("OMADA_"):
-                del os.environ[key]
-        stderr = io.StringIO()
-        original = sys.stderr
-        sys.stderr = stderr
-        try:
-            os.chdir(tmp)
-            code = main([])
-        finally:
-            os.chdir(original_cwd)
-            sys.stderr = original
-            os.environ.clear()
-            os.environ.update(environ_backup)
-        self.assertEqual(code, 2)
-        self.assertIn("omada-mcp --doctor", stderr.getvalue())
+        with tempfile.TemporaryDirectory() as tmp:
+            original_cwd = os.getcwd()
+            environ_backup = dict(os.environ)
+            for key in list(os.environ):
+                if key.startswith("OMADA_"):
+                    del os.environ[key]
+            # Isolate per-user config dirs and stdin so developer machines with
+            # an existing ~/.config/omada-mcp/.env or %APPDATA%\omada-mcp\.env
+            # never start the stdio server loop and hang the test suite.
+            os.environ["APPDATA"] = tmp
+            os.environ["XDG_CONFIG_HOME"] = tmp
+            os.environ["HOME"] = tmp
+            os.environ["USERPROFILE"] = tmp
+            stderr = io.StringIO()
+            original_stderr = sys.stderr
+            original_stdin = sys.stdin
+            sys.stderr = stderr
+            sys.stdin = io.StringIO("")
+            try:
+                os.chdir(tmp)
+                code = main([])
+            finally:
+                os.chdir(original_cwd)
+                sys.stderr = original_stderr
+                sys.stdin = original_stdin
+                os.environ.clear()
+                os.environ.update(environ_backup)
+            self.assertEqual(code, 2)
+            self.assertIn("omada-mcp --doctor", stderr.getvalue())
 
     def test_normalize_mac_variants(self):
         self.assertEqual(normalize_mac("AABBCCDDEEFF"), "aa:bb:cc:dd:ee:ff")
         self.assertEqual(normalize_mac("aa-bb-cc-dd-ee-ff"), "aa:bb:cc:dd:ee:ff")
         self.assertEqual(normalize_mac("not-a-mac"), "not-a-mac")
+
+
+class V11FeatureTests(unittest.TestCase):
+    def test_tls_server_name_is_configurable_and_masked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = load_config(
+                environ={
+                    "OMADA_BASE_URL": "https://192.0.2.10:8043",
+                    "OMADA_USERNAME": "u",
+                    "OMADA_PASSWORD": "p",
+                    "OMADA_TLS_SERVER_NAME": "Omada",
+                },
+                cwd=tmp,
+            )
+        self.assertEqual(cfg.tls_server_name, "Omada")
+        self.assertEqual(cfg.masked()["tls_server_name"], "Omada")
+
+    def test_isolated_environ_does_not_read_host_xdg_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # Even if the host machine has ~/.config/omada-mcp/.env, passing
+            # an isolated environ={} must not discover it.
+            with mock.patch("pathlib.Path.home", return_value=Path(tmp)):
+                cfg_dir = Path(tmp) / ".config" / "omada-mcp"
+                cfg_dir.mkdir(parents=True)
+                (cfg_dir / ".env").write_text(
+                    "OMADA_BASE_URL=https://host:8043\nOMADA_USERNAME=u\nOMADA_PASSWORD=p\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ConfigError):
+                    load_config(environ={}, cwd=tmp)
+
+    def test_ssl_context_overrides_server_hostname_when_configured(self):
+        import ssl
+
+        cfg = make_config(verify_ssl=True, tls_server_name="Omada")
+        ctx = build_ssl_context(cfg)
+        self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(ctx.check_hostname)
+        self.assertNotEqual(ctx.wrap_socket.__func__ if hasattr(ctx.wrap_socket, "__func__") else None,
+                            ssl.SSLContext.wrap_socket)
+
+    def test_login_30109_does_not_say_session_expired(self):
+        msg = describe_error(-30109, "wrong credentials", endpoint="/api/v2/login", method="POST")
+        self.assertIn("Invalid username or password", msg)
+        self.assertNotIn("Session expired", msg)
+
+        session_msg = describe_error(-30109, "expired", endpoint="sites/abc/devices", method="GET")
+        self.assertIn("Session expired", session_msg)
+
+    def test_describe_error_1600_includes_method_context(self):
+        get_msg = describe_error(-1600, "unsupported", endpoint="sites/x/devices", method="GET")
+        self.assertIn("burst rate-limiting", get_msg)
+        del_msg = describe_error(-1600, "unsupported", endpoint="sites/x/profiles/groups/1",
+                                 method="DELETE")
+        self.assertIn("DELETE", del_msg)
+
+    def test_explain_error_code_catalog_and_unknown(self):
+        e33726 = explain_error_code(-33726)
+        self.assertTrue(e33726["known"])
+        self.assertIn("16 entries", e33726["meaning"])
+        self.assertIn("CIDR", e33726["fix"])
+
+        e1600 = explain_error_code(-1600, endpoint="sites/abc/devices")
+        self.assertTrue(e1600["ambiguous"])
+        self.assertEqual(len(e1600["causes"]), 2)
+        self.assertIsNotNone(e1600["endpointContext"])
+
+        unknown = explain_error_code(-999999)
+        self.assertFalse(unknown["known"])
+        self.assertEqual(unknown["code"], -999999)
+
+    def test_controller_family_classification(self):
+        self.assertEqual(classify_controller_family({"controllerVer": "6.2.10.17"}), "software-6.x")
+        self.assertEqual(classify_controller_family({"controllerVer": "5.13.30.8"}), "software-5.x")
+        self.assertEqual(
+            classify_controller_family({"controllerVer": "5.12.7", "hardware": True}),
+            "hardware-5.x",
+        )
+        self.assertEqual(
+            classify_controller_family({"controllerVer": "5.9.32", "model": "OC200"}),
+            "hardware-5.x",
+        )
+        self.assertEqual(
+            classify_controller_family({}, session_cookie="TPEAP_SESSIONID"),
+            "software-5.x",
+        )
+
+    def test_tpeap_cookie_and_legacy_login_shape(self):
+        fake = FakeController(
+            cookie_name="TPEAP_SESSIONID",
+            controller_ver="5.13.30.8",
+            controller_info_extra={"hardware": True},
+            legacy_login_shape=True,
+        )
+        client = OmadaClient(make_config(), transport=fake, sleep=lambda _s: None,
+                             clock=lambda: 0.0, log_fn=lambda _m: None)
+        auth = client.authenticate()
+        self.assertEqual(auth.session_cookie, "TPEAP_SESSIONID")
+        self.assertEqual(auth.controller_family, "hardware-5.x")
+        self.assertEqual(auth.controller_id, CONTROLLER_ID)
+
+    def test_list_wlans_expands_v6_groups_and_redacts_psk_setting(self):
+        fake = FakeController(
+            wlans=[{"id": "grp1", "name": "Default", "primary": True}],
+            ssids_by_group={
+                "grp1": [
+                    {
+                        "id": "s1",
+                        "name": "corp_wifi",
+                        "band": 3,
+                        "broadcast": True,
+                        "guestNetEnable": False,
+                        "security": 3,
+                        "vlanSetting": {"mode": 1, "currentVlanId": 10},
+                        "pskSetting": {"securityKey": "top-secret-v6-key", "versionPsk": 2},
+                        "ppskSetting": {"enabled": False},
+                    }
+                ]
+            },
+        )
+        client = OmadaClient(make_config(), transport=fake, sleep=lambda _s: None,
+                             clock=lambda: 0.0, log_fn=lambda _m: None)
+        server = Server(client.config, client=client)
+        resp = server.handle({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "list_wlans", "arguments": {}},
+        })
+        result = resp["result"]
+        self.assertNotIn("top-secret-v6-key", json.dumps(result))
+        self.assertNotIn("pskSetting", json.dumps(result))
+        item = result["structuredContent"]["items"][0]
+        self.assertEqual(item["ssid"], "corp_wifi")
+        self.assertEqual(item["vlanId"], 10)
+        self.assertEqual(item["wlanGroup"], "Default")
+        self.assertTrue(item["hasPresharedKey"])
+
+    def test_explain_error_tool_works_without_controller_auth(self):
+        client, fake, _ = make_client(password="wrong")
+        server = Server(client.config, client=client)
+        resp = server.handle({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "explain_error", "arguments": {"code": -33726}},
+        })
+        self.assertNotIn("error", resp)
+        sc = resp["result"]["structuredContent"]
+        self.assertEqual(sc["code"], -33726)
+        self.assertIn("16 entries", sc["meaning"])
+        self.assertEqual(fake.requests, [])
+
+    def test_network_audit_is_idempotent_and_reports_findings(self):
+        devices = [
+            {"mac": "AA-BB-CC-00-00-01", "name": "gw", "type": "gateway", "showModel": "ER7206",
+             "ip": "10.0.0.1", "firmwareVersion": "2.3.2", "needUpgrade": True,
+             "clientNum": 0, "statusCategory": 1},
+            {"mac": "AA-BB-CC-00-00-02", "name": "ap-empty", "type": "ap", "showModel": "EAP650",
+             "ip": "10.0.0.2", "firmwareVersion": "1.2.0", "needUpgrade": False,
+             "clientNum": 0, "statusCategory": 1},
+            {"mac": "AA-BB-CC-00-00-03", "name": "sw-down", "type": "switch", "showModel": "ES220",
+             "ip": "10.0.0.3", "firmwareVersion": "1.0.0", "needUpgrade": False,
+             "clientNum": 0, "statusCategory": 0, "status": 0},
+        ]
+        clients = [
+            {"mac": "AA-BB-CC-11-11-01", "name": "guest-phone", "wireless": True,
+             "guest": True, "vid": 50},
+            {"mac": "AA-BB-CC-11-11-02", "name": "rogue-box", "wireless": False,
+             "guest": False, "vid": 99},
+            {"mac": "AA-BB-CC-11-11-03", "name": "iot-1", "wireless": True,
+             "guest": False, "vid": 20},
+            {"mac": "AA-BB-CC-11-11-04", "name": "iot-2", "wireless": True,
+             "guest": False, "vid": 20},
+        ]
+        lan_networks = [
+            {"id": "n20", "name": "IoT", "vlan": 20, "gatewaySubnet": "192.168.20.1/24",
+             "accessControlRule": False, "isolation": False,
+             "dhcpSettings": {"enable": True, "ipRangePool": [
+                 {"ipaddrStart": "192.168.20.10", "ipaddrEnd": "192.168.20.11"}]}},
+            {"id": "n50", "name": "Guest", "vlan": 50, "gatewaySubnet": "192.168.50.1/24",
+             "accessControlRule": True, "isolation": False,
+             "dhcpSettings": {"enable": False}},
+        ]
+        fake = FakeController(devices=devices, clients=clients, lan_networks=lan_networks)
+        client = OmadaClient(make_config(), transport=fake, sleep=lambda _s: None,
+                             clock=lambda: 0.0, log_fn=lambda _m: None)
+        server = Server(client.config, client=client)
+
+        r1 = server.handle({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "network_audit", "arguments": {}},
+        })["result"]["structuredContent"]
+        r2 = server.handle({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "network_audit", "arguments": {}},
+        })["result"]["structuredContent"]
+
+        self.assertEqual(r1, r2)
+        self.assertFalse(r1["healthy"])
+        codes = {f["code"] for f in r1["findings"]}
+        self.assertEqual(codes, {
+            "DEVICE_OFFLINE",
+            "DEVICE_FIRMWARE_UPGRADE_AVAILABLE",
+            "AP_ZERO_CLIENTS",
+            "CLIENT_ON_GUEST_NETWORK",
+            "CLIENT_UNEXPECTED_VLAN",
+            "VLAN_UNISOLATED",
+            "DHCP_POOL_NEAR_EXHAUSTION",
+        })
+
+    def test_doctor_json_matches_schema_and_reports_family_and_cookie(self):
+        schema_path = Path(__file__).resolve().parents[1] / "schemas" / "doctor.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+        fake = FakeController(controller_ver="6.2.10.17", cookie_name="TPOMADA_SESSIONID")
+        client = OmadaClient(make_config(), transport=fake, sleep=lambda _s: None,
+                             clock=lambda: 0.0, log_fn=lambda _m: None)
+        stream = io.StringIO()
+        rc = run_doctor(config_factory=lambda: client.config,
+                        client_factory=lambda _cfg: client,
+                        stream=stream, json_output=True)
+        self.assertEqual(rc, 0)
+        doc = json.loads(stream.getvalue())
+        self.assertEqual(set(doc.keys()), set(schema["required"]))
+        self.assertEqual(doc["status"], "pass")
+        self.assertTrue(doc["ready"])
+        self.assertEqual(doc["exitCode"], 0)
+        self.assertEqual(doc["controller"]["family"], "software-6.x")
+        self.assertEqual(doc["controller"]["sessionCookie"], "TPOMADA_SESSIONID")
+        self.assertEqual(doc["summary"]["passed"], 5)
+        self.assertEqual(doc["summary"]["failed"], 0)
+
+    def test_doctor_json_failure_sets_exit_code_one(self):
+        stream = io.StringIO()
+
+        def bad_cfg():
+            raise ConfigError("missing required variable(s): OMADA_PASSWORD", hint="add to .env")
+
+        rc = run_doctor(config_factory=bad_cfg, stream=stream, json_output=True)
+        self.assertEqual(rc, 1)
+        doc = json.loads(stream.getvalue())
+        self.assertEqual(doc["status"], "fail")
+        self.assertFalse(doc["ready"])
+        self.assertEqual(doc["exitCode"], 1)
+        self.assertIsNone(doc["site"])
+        self.assertEqual(doc["phases"][0]["status"], "FAIL")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,48 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-11-13
+
+Hardware/v5.x session compatibility, error-code decoder, composite network audit,
+machine-readable `--doctor --json`, and CA-pinned TLS hostname override.
+
+### Added
+
+- **Composite `network_audit` tool (`readOnlyHint: true`)**: One idempotent, paced
+  call checking WAN state, offline devices, pending firmware upgrades (`needUpgrade`),
+  0-client APs, guest/unexpected VLAN clients, unisolated VLANs, and DHCP pool
+  utilization (`ipRangePool`), emitting stable finding codes.
+- **First-class `explain_error` tool + `ERROR_CATALOG`**: Exposes the Omada
+  `errorCode` decoder (`-1`, `-1001`, `-1505`, `-1600`, `-30104`, `-30109`, `-33726`,
+  `-41011`, `-44116`) offline without touching the controller, with endpoint context
+  for `-1600` (GET vs write) and `-30109` (login vs session expiry).
+- **`omada-mcp --doctor --json` + `schemas/doctor.schema.json`**: Machine-readable
+  doctor report including `controller.family` (`software-6.x`, `hardware-5.x`, etc.)
+  and `controller.sessionCookie` (`TPOMADA_SESSIONID` / `TPEAP_SESSIONID`).
+- **`OMADA_TLS_SERVER_NAME`**: Optional TLS `server_hostname` override (e.g. `Omada`)
+  so connecting by IP against the controller's default certificate (`SAN=DNS:Omada`)
+  works with `OMADA_CA_BUNDLE` + `OMADA_VERIFY_SSL=true` instead of disabling TLS
+  verification.
+- **`docs/compatibility.md`**: Tracked compatibility matrix for software and hardware
+  controllers.
+
+### Fixed
+
+- **`test_missing_config_exits_non_zero` hang on configured developer machines**:
+  Isolated `_xdg_config_home` when an explicit `environ` dict is provided and
+  isolated `APPDATA`, `XDG_CONFIG_HOME`, `HOME`, `USERPROFILE`, and `stdin` in the
+  CLI test so `python -m unittest discover -s tests` runs cleanly even when
+  `~/.config/omada-mcp/.env` or `%APPDATA%\omada-mcp\.env` exists.
+- **Misleading `-30109` message on `/api/v2/login`**: Wrong credentials on login
+  now report `"Invalid username or password (or account temporarily locked)"`
+  instead of `"Session expired or invalid; re-authenticate."`.
+- **v6.x `list_wlans` WLAN group expansion**: `list_wlans` now expands v6.x WLAN
+  groups into their SSIDs via `setting/wlans/{groupId}/ssids` while still redacting
+  `securityKey`, `pskSetting`, and `ppskSetting` and reporting `hasPresharedKey`.
+- **v5.x / OC200 / OC300 compatibility**: Added `TPEAP_SESSIONID` cookie detection,
+  legacy `result.omadacId` / top-level `token` login handling, and `needUpgrade` on
+  device projections.
+
 ## [1.0.1] - 2026-11-13
 
 Windows support, without changing the tool surface or the safety model.

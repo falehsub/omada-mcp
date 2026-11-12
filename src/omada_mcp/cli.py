@@ -36,6 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="self-test: dotenv, TLS/CA, login, controller version, site discovery, one read call",
     )
     parser.add_argument(
+        "--json", action="store_true",
+        help="with --doctor: emit machine-readable JSON output",
+    )
+    parser.add_argument(
         "--show-config", action="store_true",
         help="print the resolved configuration with the password masked, then exit",
     )
@@ -64,7 +68,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.doctor:
-        return run_doctor()
+        return run_doctor(json_output=args.json)
 
     if args.list_tools:
         print(json.dumps({"tools": tool_descriptors()}, indent=2, ensure_ascii=False))

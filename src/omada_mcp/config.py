@@ -83,6 +83,7 @@ class Config:
     ca_bundle: Optional[Path] = None
     verify_ssl: bool = True
     strict_x509: bool = True
+    tls_server_name: Optional[str] = None
     read_only: bool = False
     use_system_proxy: bool = False
     timeout: float = DEFAULT_TIMEOUT
@@ -103,6 +104,7 @@ class Config:
             "ca_bundle": str(self.ca_bundle) if self.ca_bundle else None,
             "verify_ssl": self.verify_ssl,
             "strict_x509": self.strict_x509,
+            "tls_server_name": self.tls_server_name,
             "read_only": self.read_only,
             "use_system_proxy": self.use_system_proxy,
             "timeout": self.timeout,
@@ -187,6 +189,13 @@ def _xdg_config_home(environ: Optional[Mapping[str, str]] = None) -> Path:
     explicit = env.get("XDG_CONFIG_HOME")
     if explicit:
         return Path(explicit).expanduser()
+    if environ is not None:
+        home = (env.get("HOME") or env.get("USERPROFILE") or "").strip()
+        if home:
+            return Path(home).expanduser() / ".config"
+        # An explicitly isolated environ without HOME/XDG_CONFIG_HOME must not
+        # fall back to the host user's real ~/.config directory.
+        return Path("/nonexistent-xdg-config-home")
     return Path.home() / ".config"
 
 
@@ -353,6 +362,7 @@ def load_config(
 
     site_id = (values.get("OMADA_SITE_ID") or "").strip() or None
     site_name = (values.get("OMADA_SITE_NAME") or "").strip() or None
+    tls_server_name = (values.get("OMADA_TLS_SERVER_NAME") or "").strip() or None
 
     return Config(
         base_url=normalize_base_url(values["OMADA_BASE_URL"]),
@@ -363,6 +373,7 @@ def load_config(
         ca_bundle=ca_bundle,
         verify_ssl=parse_bool(values.get("OMADA_VERIFY_SSL"), "OMADA_VERIFY_SSL", True),
         strict_x509=parse_bool(values.get("OMADA_STRICT_X509"), "OMADA_STRICT_X509", True),
+        tls_server_name=tls_server_name,
         read_only=parse_bool(values.get("OMADA_READ_ONLY"), "OMADA_READ_ONLY", False),
         use_system_proxy=parse_bool(values.get("OMADA_USE_SYSTEM_PROXY"),
                                     "OMADA_USE_SYSTEM_PROXY", False),

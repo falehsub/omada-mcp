@@ -37,10 +37,10 @@ SERVER_NAME = "omada-mcp"
 
 INSTRUCTIONS = (
     "Read-only access to a TP-Link Omada SDN controller through its Web API v2. "
-    "All eight tools are read-only and idempotent. Prefer get_site_info for an "
-    "overview, then list_devices / list_clients for detail, then get_device or "
-    "get_client for one object. Timestamps are UTC ISO-8601. Error messages "
-    "include the controller's numeric errorCode and a fix hint."
+    "All ten tools are read-only and idempotent. Prefer network_audit or get_site_info "
+    "for an overview, list_devices / list_clients for detail, get_device or get_client "
+    "for one object, and explain_error to decode any Omada errorCode. Timestamps are UTC "
+    "ISO-8601. Error messages include the controller's numeric errorCode and a fix hint."
 )
 
 
@@ -284,11 +284,12 @@ class Server:
         # Authentication problems are protocol-level, not tool results: the host
         # should surface them as a failed call, not as data the model can reason
         # over as if it were an answer.
-        try:
-            self.client.authenticate()
-        except OmadaError as exc:
-            raise RpcError(-32002, str(exc.message), exc.hint,
-                           {"errorCode": exc.code} if exc.code else None) from None
+        if spec.requires_auth:
+            try:
+                self.client.authenticate()
+            except OmadaError as exc:
+                raise RpcError(-32002, str(exc.message), exc.hint,
+                               {"errorCode": exc.code} if exc.code else None) from None
 
         try:
             data = spec.handler(self.client, **arguments)
@@ -329,3 +330,11 @@ class Server:
                 arguments["limit"] = max(1, min(5000, int(limit)))
             except (TypeError, ValueError):
                 raise RpcError(-32602, "limit must be an integer between 1 and 5000") from None
+        code = arguments.get("code")
+        if code is not None and "code" in (schema.get("properties") or {}):
+            if isinstance(code, bool):
+                raise RpcError(-32602, "code must be an integer")
+            try:
+                arguments["code"] = int(code)
+            except (TypeError, ValueError):
+                raise RpcError(-32602, "code must be an integer") from None

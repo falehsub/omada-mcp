@@ -7,9 +7,9 @@ adopting the server, not by what is fun to build.
 Each item lists the evidence that it matters, so it can be re-prioritised when
 that evidence changes.
 
-## v1.1 — "works on the controllers people actually own"
+## v1.1 — "works on the controllers people actually own" *(shipped in v1.1.0)*
 
-### 1. Hardware controllers (OC200 / OC300) and v5.x session cookies
+### 1. Hardware controllers (OC200 / OC300) and v5.x session cookies *(shipped)*
 
 **Why first:** the software controller is the minority deployment. Most Omada
 households and small offices run an OC200, and a server that only works on the
@@ -17,20 +17,19 @@ software build caps adoption at people who already run a hypervisor.
 
 * Accept whichever session cookie the controller sets (`TPOMADA_SESSIONID` on
   v6.x, `TPEAP_SESSIONID` on some v5.x builds). The cookie jar already replays
-  whatever arrives; the work is detecting the *name* so `--doctor` can report it
-  and so recovery can distinguish "cookie missing" from "server-side session
-  dead".
+  whatever arrives; `--doctor` now detects and reports the active session
+  cookie name and distinguishes "cookie missing" from "server-side session dead".
 * Probe the two legacy login response shapes: `result.token` (v6.x) and the
   older `result.token` + `result.omadacId` split.
-* Add a `--doctor` phase that prints the detected controller family
+* Add a `--doctor` phase detail that prints the detected controller family
   (`software-6.x`, `hardware-5.x`, …) so a bug report is actionable in one line.
-* CI cannot cover this; add a `docs/compatibility.md` table filled from user
-  reports, with the exact `controllerVer` string.
+* CI cannot cover hardware directly; added [`docs/compatibility.md`](docs/compatibility.md)
+  to track verified `controllerVer` strings and community reports.
 
 **Acceptance:** `--doctor` reaches `PASS login` on an OC200 running v5.x, and the
-eight read tools return live data.
+read tools return live data.
 
-### 2. Error-code decoder as a first-class surface
+### 2. Error-code decoder as a first-class surface *(shipped)*
 
 **Why:** every support thread about Omada ends with "what does -1600 mean".
 `describe_error()` already exists internally; exposing it costs almost nothing
@@ -38,17 +37,17 @@ and turns the server into the reference implementation.
 
 * New read-only tool `explain_error` (`code`, optional `endpoint`) returning the
   meaning, the two-way ambiguity note for `-1600`, and the fix.
-* `--doctor --json` for machine-readable output, so CI and dashboards can gate
-  on it.
-* `describe_error` gains the endpoint context: `-1600` on `GET` vs on `POST`
-  suggests different causes.
+* `--doctor --json` for machine-readable output, validated against
+  [`schemas/doctor.schema.json`](schemas/doctor.schema.json).
+* `describe_error` gains endpoint + method context: `-1600` on `GET` vs on `POST`/`DELETE`,
+  and `-30109` on `/api/v2/login` vs authenticated endpoints.
 
 **Acceptance:** the message for `-33726` states the 16-entry limit and the CIDR
-remediation; `--doctor --json` validates against a committed JSON Schema.
+remediation; `--doctor --json` matches `schemas/doctor.schema.json`.
 
-### 3. Composite `network_audit` tool
+### 3. Composite `network_audit` tool *(shipped)*
 
-**Why:** an LLM can chain eight reads, but it costs eight round-trips and the
+**Why:** an LLM can chain multiple reads, but it costs extra round-trips and the
 model still has to know what "healthy" looks like. One call that answers "is
 this network okay?" is the feature people show each other.
 
@@ -61,12 +60,11 @@ One call, one JSON document:
 * DHCP pools close to exhaustion (`ipRangePool` vs live leases);
 * controller/site identity, versions, and the site's WAN state.
 
-Design constraints: bounded runtime (reuse one authenticated session, obey the
-0.8 s pacing), `readOnlyHint: true`, and every finding carries a stable `code`
-so downstream tooling can diff two audits.
+Design constraints: bounded runtime (reuses one authenticated session), `readOnlyHint: true`,
+and every finding carries a stable `code` so downstream tooling can diff two audits.
 
 **Acceptance:** a fresh site produces the same audit twice in a row (idempotent),
-and the runtime stays under ~5 s on a 4-device / 20-client site.
+and the runtime stays under ~5 s on a 4-device / 15-client site (verified at ~2.5 s live).
 
 ## v1.2 — "usable as a daily driver"
 

@@ -14,12 +14,13 @@ session token is never echoed. Exit code 0 means "a client can use this".
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass
-from typing import Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from . import __version__
-from .client import OmadaClient, OmadaError
+from .client import OmadaClient, OmadaError, classify_controller_family
 from .config import _IS_WINDOWS, Config, ConfigError, load_config
 from .tools import TOOL_MAP
 
@@ -51,13 +52,22 @@ class PhaseResult:
 
 
 class Report:
-    def __init__(self, stream=None):
+    def __init__(self, stream=None, json_output: bool = False):
         self.stream = stream or sys.stdout
+        self.json_output = json_output
         self.results: List[PhaseResult] = []
+        self.controller_meta: Dict[str, Optional[str]] = {
+            "omadacId": None,
+            "controllerVer": None,
+            "family": None,
+            "sessionCookie": None,
+        }
+        self.site_meta: Optional[Dict[str, Any]] = None
 
     def add(self, phase: PhaseResult) -> PhaseResult:
         self.results.append(phase)
-        self._print(phase)
+        if not self.json_output:
+            self._print(phase)
         return phase
 
     def _print(self, phase: PhaseResult) -> None:
@@ -74,7 +84,51 @@ class Report:
     def warned(self) -> bool:
         return any(r.status == WARN for r in self.results)
 
+    def as_dict(self) -> Dict[str, Any]:
+        total = len(self.results)
+        passed = sum(1 for r in self.results if r.status == PASS)
+        warned = sum(1 for r in self.results if r.status == WARN)
+        failed = sum(1 for r in self.results if r.status == FAIL)
+        if failed:
+            status = "fail"
+            exit_code = 1
+        elif warned:
+            status = "warn"
+            exit_code = 0
+        else:
+            status = "pass"
+            exit_code = 0
+        return {
+            "version": __version__,
+            "platform": platform_label(),
+            "status": status,
+            "ready": not failed,
+            "exitCode": exit_code,
+            "controller": dict(self.controller_meta),
+            "site": self.site_meta,
+            "summary": {
+                "total": total,
+                "passed": passed,
+                "warned": warned,
+                "failed": failed,
+            },
+            "phases": [
+                {
+                    "name": r.name,
+                    "status": r.status,
+                    "detail": r.detail,
+                    "hint": r.hint,
+                }
+                for r in self.results
+            ],
+        }
+
     def finish(self) -> int:
+        if self.json_output:
+            payload = self.as_dict()
+            print(json.dumps(payload, indent=2, ensure_ascii=False),
+                  file=self.stream, flush=True)
+            return int(payload["exitCode"])
         total = len(self.results)
         passed = sum(1 for r in self.results if r.status == PASS)
         warned = sum(1 for r in self.results if r.status == WARN)
@@ -93,7 +147,8 @@ class Report:
         if warned:
             print("Ready, with warnings: `omada-mcp` will start.", file=self.stream)
             return 0
-        print("Ready: `omada-mcp` will serve 8 read-only tools on stdio.", file=self.stream)
+        print(f"Ready: `omada-mcp` will serve {len(TOOL_MAP)} read-only tools on stdio.",
+              file=self.stream)
         return 0
 
 
@@ -127,10 +182,17 @@ def _phase_tls(client: OmadaClient, config: Config, report: Report) -> bool:
     except OmadaError as exc:
         report.add(PhaseResult("tls", FAIL, exc.message, exc.hint))
         return False
-    detail = f"reachable, omadacId={info['omadacId']}, controllerVer={info['controllerVer'] or 'unknown'}"
+    family = classify_controller_family(info)
+    report.controller_meta["omadacId"] = info.get("omadacId")
+    report.controller_meta["controllerVer"] = info.get("controllerVer") or None
+    report.controller_meta["family"] = family
+    detail = (f"reachable, omadacId={info['omadacId']}, "
+              f"controllerVer={info['controllerVer'] or 'unknown'}, family={family}")
     if config.verify_ssl:
-        detail = ("verified against " + (str(config.ca_bundle) if config.ca_bundle
-                                         else "the system trust store") + " | " + detail)
+        via = str(config.ca_bundle) if config.ca_bundle else "the system trust store"
+        if config.tls_server_name:
+            via += f" (serverName={config.tls_server_name})"
+        detail = f"verified against {via} | {detail}"
     report.add(PhaseResult("tls", PASS, detail))
     if not info["controllerVer"]:
         report.add(PhaseResult("tls", WARN,
@@ -144,16 +206,20 @@ def _phase_login(client: OmadaClient, report: Report) -> bool:
         auth = client.authenticate(resolve_site=False)
     except OmadaError as exc:
         hint = exc.hint
-        if exc.code in (-1, -30109):
+        if exc.code in (-1, -30104, -30109):
             hint = ("the controller rejected the credentials; confirm OMADA_USERNAME / "
                     "OMADA_PASSWORD with a browser login at the same URL")
         report.add(PhaseResult("login", FAIL, exc.message, hint))
         return False
+    report.controller_meta["family"] = auth.controller_family
+    report.controller_meta["sessionCookie"] = auth.session_cookie
     role_bits = []
     if auth.privilege:
         role_bits.append(f"role={auth.privilege}")
     if auth.site_scope:
         role_bits.append(f"scope={auth.site_scope}")
+    if auth.session_cookie:
+        role_bits.append(f"cookie={auth.session_cookie}")
     suffix = f" ({', '.join(role_bits)})" if role_bits else ""
     report.add(PhaseResult(
         "login", PASS,
@@ -168,6 +234,7 @@ def _phase_site(client: OmadaClient, config: Config, report: Report) -> bool:
         report.add(PhaseResult("site", FAIL, exc.message, exc.hint))
         return False
     client.site = site
+    report.site_meta = site.as_dict()
     requested = config.site_id or config.site_name
     detail = f"{site.name} ({site.site_id}) site {site.index + 1} of {site.total}"
     if requested:
@@ -213,12 +280,14 @@ def run_doctor(
     config_factory: Callable[[], Config] = load_config,
     client_factory: Optional[Callable[[Config], OmadaClient]] = None,
     stream=None,
+    json_output: bool = False,
 ) -> int:
     """Run every phase and return a process exit code (0 = ready)."""
-    report = Report(stream)
-    print(f"omada-mcp doctor v{__version__} on {platform_label()}", file=report.stream,
-          flush=True)
-    print("-" * 66, file=report.stream, flush=True)
+    report = Report(stream, json_output=json_output)
+    if not json_output:
+        print(f"omada-mcp doctor v{__version__} on {platform_label()}", file=report.stream,
+              flush=True)
+        print("-" * 66, file=report.stream, flush=True)
 
     config: Optional[Config] = None
     error: Optional[ConfigError] = None

@@ -29,6 +29,7 @@ from __future__ import annotations
 import datetime
 import http.cookiejar
 import json
+import re
 import socket
 import ssl
 import sys
@@ -37,22 +38,31 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from .config import Config
 
 __all__ = [
     "AuthInfo",
     "BURST_BACKOFF_SECONDS",
+    "ERROR_CATALOG",
+    "ERROR_HINTS",
     "OmadaClient",
     "OmadaError",
+    "SESSION_COOKIE_NAMES",
     "SiteInfo",
     "UrllibTransport",
+    "build_ssl_context",
+    "classify_controller_family",
     "describe_error",
+    "explain_error_code",
 ]
 
 #: Delay used when the controller signals a burst block (``errorCode -1600``).
 BURST_BACKOFF_SECONDS = 0.8
+
+#: Session cookies issued by Omada controllers across v5.x and v6.x builds.
+SESSION_COOKIE_NAMES: Tuple[str, ...] = ("TPOMADA_SESSIONID", "TPEAP_SESSIONID")
 
 #: Controllers report the account role three different ways depending on build:
 #: ``roleName`` (6.2+), an integer ``privilege`` (5.x), or a ``privilege`` object
@@ -64,37 +74,199 @@ _PRIVILEGE_LABELS = {0: "viewer", 1: "admin", 2: "owner"}
 #: down"; a single paced retry disambiguates the two in practice.
 _MAX_BURST_RETRIES = 1
 
-ERROR_HINTS: Dict[int, str] = {
-    -1: ("General error -- usually a required field is missing from the request body, "
-         "not a credentials problem."),
-    -1001: ("Bean-validation failure: the body is missing a mandatory field "
-            "(e.g. lanNetworkIpv6Config.proto when PATCHing a LAN network)."),
-    -1505: ("No permission for this site: the URL needs the hex site ID, not the site "
-            "name. Run `omada-mcp --doctor` to resolve it."),
-    -1600: ("Unsupported request path -- or a burst block. The path shape is wrong when "
-            "the endpoint is not in the documented table; more than ~5 rapid calls "
-            "produce the same code until you pace them (0.8 s)."),
-    -30109: "Session expired or invalid; re-authenticate.",
-    -33726: ("IP group is full: a group holds at most 16 entries. Store an address "
-             "range as network-aligned CIDRs instead of one /32 per host."),
-    -41011: ("This client does not exist -- the client endpoints are Admin-only; use "
-             "insight/clients with a Viewer account."),
-    -44116: ("Open API is not enabled: the controller needs Platform Integration for "
-             "openapi/*. The Web API used here does not."),
+ERROR_CATALOG: Dict[int, Dict[str, Any]] = {
+    0: {
+        "title": "Success",
+        "meaning": "The controller accepted and completed the request.",
+        "fix": "No action needed.",
+        "ambiguous": False,
+        "causes": ["Normal successful response."],
+    },
+    -1: {
+        "title": "General error",
+        "meaning": ("General error -- usually a required field is missing from the request body "
+                    "or the endpoint requires higher privileges, not a credentials problem."),
+        "fix": ("Compare your request body against a full GET of the object (e.g. include "
+                "ipSetting.netId for client fixed IP) or verify the account role."),
+        "ambiguous": True,
+        "causes": [
+            "Required field omitted in PATCH/POST body (such as ipSetting.netId).",
+            "Endpoint restricted for the current account role (e.g. Viewer calling Admin-only paths).",
+        ],
+    },
+    -1001: {
+        "title": "Bean validation failure",
+        "meaning": ("Bean-validation failure: the body is missing a mandatory field "
+                    "(e.g. lanNetworkIpv6Config.proto when PATCHing a LAN network)."),
+        "fix": ("Send the complete object obtained from GET .../networks/interface and ensure "
+                "nested fields like lanNetworkIpv6Config.proto='none' are present."),
+        "ambiguous": False,
+        "causes": [
+            "Partial PATCH body missing mandatory nested fields.",
+            "lanNetworkIpv6Config.proto omitted on LAN network update.",
+        ],
+    },
+    -1505: {
+        "title": "No permission for this site",
+        "meaning": ("No permission for this site: the URL needs the hex site ID, not the site "
+                    "name. Run `omada-mcp --doctor` to resolve it."),
+        "fix": ("Set OMADA_SITE_NAME or OMADA_SITE_ID so omada-mcp resolves the controller's "
+                "internal hex site ID, and verify the user account has access to that site."),
+        "ambiguous": False,
+        "causes": [
+            "Site display name used in the URL path instead of the internal hex site ID.",
+            "Account does not have permission for the target site.",
+        ],
+    },
+    -1600: {
+        "title": "Unsupported request path or burst rate-limit",
+        "meaning": ("Unsupported request path -- or a burst block. The path shape is wrong when "
+                    "the endpoint is not in the documented table; more than ~5 rapid calls "
+                    "produce the same code until you pace them (0.8 s)."),
+        "fix": ("Pace requests with OMADA_MIN_INTERVAL_SECONDS=0.8 (GET calls automatically retry "
+                "once after 0.8 s). If it still returns -1600 on retry, check the URL path shape "
+                "(e.g. DELETE /groups/0/{groupId} requires the type segment, and GET /networks/{id} "
+                "is unsupported -- use the collection endpoint)."),
+        "ambiguous": True,
+        "causes": [
+            "Burst rate-limiting (>~5 requests in a couple of seconds without 0.8 s pacing).",
+            "Wrong or unsupported Web API v2 endpoint path shape or missing path segment.",
+        ],
+    },
+    -30104: {
+        "title": "Authentication failed or account locked",
+        "meaning": "The controller rejected the login credentials or temporarily locked the account.",
+        "fix": ("Verify OMADA_USERNAME and OMADA_PASSWORD against a browser login at the same URL; "
+                "wait a few minutes if repeated attempts triggered a temporary lockout."),
+        "ambiguous": False,
+        "causes": [
+            "Incorrect username or password.",
+            "Temporary lockout after repeated failed login attempts.",
+        ],
+    },
+    -30109: {
+        "title": "Invalid credentials or expired session",
+        "meaning": ("Session expired or invalid (when returned after login), or wrong "
+                    "username/password (when returned by /api/v2/login)."),
+        "fix": ("On /api/v2/login, verify OMADA_USERNAME and OMADA_PASSWORD (note repeated failures "
+                "lock the account briefly). On other endpoints, re-authenticate to obtain a fresh "
+                "token and session cookie."),
+        "ambiguous": True,
+        "causes": [
+            "Incorrect username or password on /api/v2/login.",
+            "Expired or evicted server-side session token/cookie on subsequent API calls.",
+        ],
+    },
+    -33726: {
+        "title": "IP group entry limit exceeded",
+        "meaning": ("IP group is full: a group holds at most 16 entries. Store an address "
+                    "range as network-aligned CIDRs instead of one /32 per host."),
+        "fix": ("Collapse contiguous /32 host entries into network-aligned CIDR blocks (for "
+                "example .180-.191 fits in 4 CIDRs instead of 12) so the group stays within the "
+                "16-entry limit."),
+        "ambiguous": False,
+        "causes": ["Attempting to create or replace an IP profile group with more than 16 entries."],
+    },
+    -41011: {
+        "title": "Client does not exist or Admin-only endpoint",
+        "meaning": ("This client does not exist -- the client endpoints are Admin-only; use "
+                    "insight/clients with a Viewer account."),
+        "fix": ("Use sites/{siteId}/insight/clients when authenticated as a Viewer, or confirm the "
+                "MAC address is currently known to that site."),
+        "ambiguous": True,
+        "causes": [
+            "Viewer account calling the Admin-only sites/{siteId}/clients* endpoint.",
+            "Target client MAC is not present in the site's client table.",
+        ],
+    },
+    -44116: {
+        "title": "Open API is not enabled",
+        "meaning": ("Open API is not enabled: the controller needs Platform Integration for "
+                    "openapi/*. The Web API used here does not."),
+        "fix": ("Use the Web API v2 paths (/{omadacId}/api/v2/...) used by omada-mcp instead of "
+                "/openapi/v1, or enable Platform Integration if using the Open API."),
+        "ambiguous": False,
+        "causes": ["Calling /openapi/* endpoints without Platform Integration configured."],
+    },
 }
 
+ERROR_HINTS: Dict[int, str] = {code: entry["meaning"] for code, entry in ERROR_CATALOG.items()}
 
-def describe_error(code: Optional[int], msg: str = "") -> str:
+
+def _endpoint_context(code: int, endpoint: Optional[str], method: Optional[str]) -> Optional[str]:
+    ep = (endpoint or "").strip().lower()
+    meth = (method or "").strip().upper()
+    if code in (-30109, -30104) and "login" in ep:
+        return ("On /api/v2/login, this indicates invalid username/password (or temporary "
+                "lockout), not an expired session.")
+    if code == -1600:
+        if meth in ("POST", "PATCH", "PUT", "DELETE"):
+            return (f"On {meth} {endpoint or ''}, -1600 usually means an unsupported path or "
+                    "missing path segment (e.g. DELETE /groups/0/{groupId}).")
+        if ep or meth:
+            return (f"On {meth or 'GET'} {endpoint or ''}, -1600 may be either burst rate-limiting "
+                    "(retry once after 0.8 s) or an unsupported endpoint path shape.")
+    if code == -41011 and "clients" in ep and "insight" not in ep:
+        return "sites/{siteId}/clients* requires Admin role; Viewer accounts must use insight/clients."
+    return None
+
+
+def describe_error(
+    code: Optional[int],
+    msg: str = "",
+    endpoint: Optional[str] = None,
+    method: Optional[str] = None,
+) -> str:
     """Human explanation for an Omada ``errorCode`` (falls back to the raw msg)."""
     if code is None:
         return msg or "unknown error"
-    hint = ERROR_HINTS.get(int(code))
+    num = int(code)
+    context = _endpoint_context(num, endpoint, method)
+    if num == -30109 and endpoint and "login" in endpoint.lower():
+        hint: Optional[str] = ("Invalid username or password (or account temporarily locked after "
+                               "repeated failures).")
+    elif context and num == -1600:
+        hint = context
+    else:
+        hint = ERROR_HINTS.get(num)
     text = f"errorCode {code}"
     if msg:
         text += f": {msg}"
     if hint:
         text += f" -- {hint}"
     return text
+
+
+def explain_error_code(code: int, endpoint: Optional[str] = None) -> Dict[str, Any]:
+    """Return structured explanation, ambiguity notes, and remediation for an ``errorCode``."""
+    num = int(code)
+    entry = ERROR_CATALOG.get(num)
+    ep = endpoint.strip() if endpoint and endpoint.strip() else None
+    ep_context = _endpoint_context(num, ep, None) if ep else None
+    if entry is None:
+        return {
+            "code": num,
+            "known": False,
+            "title": "Undocumented Omada errorCode",
+            "meaning": f"errorCode {num} is not in the omada-mcp catalog.",
+            "fix": ("Check `omada-mcp --doctor`, inspect the endpoint path and required fields, "
+                    "and compare against a browser DevTools request on the controller UI."),
+            "ambiguous": False,
+            "causes": [],
+            "endpointContext": ep_context,
+            "summary": f"errorCode {num}: undocumented code",
+        }
+    return {
+        "code": num,
+        "known": True,
+        "title": entry["title"],
+        "meaning": entry["meaning"],
+        "fix": entry["fix"],
+        "ambiguous": bool(entry["ambiguous"]),
+        "causes": list(entry["causes"]),
+        "endpointContext": ep_context,
+        "summary": describe_error(num, endpoint=ep),
+    }
 
 
 class OmadaError(RuntimeError):
@@ -152,6 +324,41 @@ class AuthInfo:
     user_id: Optional[str] = None
     privilege: Optional[str] = None
     site_scope: Optional[str] = None
+    controller_family: str = "unknown"
+    session_cookie: Optional[str] = None
+
+
+def classify_controller_family(
+    info: Mapping[str, Any],
+    session_cookie: Optional[str] = None,
+) -> str:
+    """Classify controller family such as ``software-6.x`` or ``hardware-5.x``."""
+    hardware_flag = info.get("hardware")
+    model_hint = " ".join(
+        str(info.get(k) or "")
+        for k in ("model", "deviceModel", "omadacCategory", "controllerType")
+    ).lower()
+    if (
+        hardware_flag is True
+        or isinstance(hardware_flag, dict)
+        or any(tag in model_hint for tag in ("oc200", "oc300", "oc400", "hardware"))
+    ):
+        kind = "hardware"
+    else:
+        kind = "software"
+
+    version_str = str(info.get("controllerVer") or info.get("version") or "").strip()
+    match = re.match(r"^(\d+)", version_str)
+    if match:
+        ver_family = f"{match.group(1)}.x"
+    elif session_cookie == "TPEAP_SESSIONID":
+        ver_family = "5.x"
+    else:
+        ver_family = "unknown"
+
+    if ver_family == "unknown":
+        return f"{kind}-unknown" if kind == "hardware" else "unknown"
+    return f"{kind}-{ver_family}"
 
 
 class UrllibTransport:
@@ -207,6 +414,11 @@ def build_ssl_context(config: Config) -> ssl.SSLContext:
     Python 3.13+ enables by default and which rejects otherwise-working
     controller certificates (self-signed, missing CA bit, or v1 certs). Clearing
     it keeps chain and hostname verification in place.
+
+    ``OMADA_TLS_SERVER_NAME`` overrides the ``server_hostname`` passed during
+    the TLS handshake so connecting by IP against Omada's default certificate
+    (whose SAN is typically ``DNS:Omada``) still performs full chain + SAN
+    verification.
     """
     if not config.verify_ssl:
         context = ssl._create_unverified_context()  # noqa: SLF001 - documented opt-out
@@ -220,6 +432,15 @@ def build_ssl_context(config: Config) -> ssl.SSLContext:
     context.verify_mode = ssl.CERT_REQUIRED
     if not config.strict_x509 and hasattr(ssl, "VERIFY_X509_STRICT"):
         context.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT")
+    if config.tls_server_name:
+        pinned_name = config.tls_server_name
+        orig_wrap = context.wrap_socket
+
+        def _wrap_with_pinned_name(sock, *args, **kwargs):
+            kwargs["server_hostname"] = pinned_name
+            return orig_wrap(sock, *args, **kwargs)
+
+        context.wrap_socket = _wrap_with_pinned_name  # type: ignore[method-assign]
     return context
 
 
@@ -320,11 +541,17 @@ class OmadaClient:
                 method, url, headers=headers, data=data, timeout=self.config.timeout
             )
         except ssl.SSLCertVerificationError as exc:
+            detail = exc.verify_message or exc.reason or str(exc)
+            hint = ("set OMADA_CA_BUNDLE to the controller's CA PEM, or "
+                    "OMADA_STRICT_X509=false for a self-signed cert, or "
+                    "OMADA_VERIFY_SSL=false to disable verification")
+            if "mismatch" in str(detail).lower():
+                hint = ("set OMADA_TLS_SERVER_NAME=Omada (with OMADA_CA_BUNDLE and "
+                        "OMADA_STRICT_X509=false) when connecting by IP against Omada's "
+                        "default cert, or " + hint)
             raise OmadaError(
-                f"TLS verification failed: {exc.verify_message or exc.reason}",
-                hint=("set OMADA_CA_BUNDLE to the controller's CA PEM, or "
-                      "OMADA_STRICT_X509=false for a self-signed cert, or "
-                      "OMADA_VERIFY_SSL=false to disable verification"),
+                f"TLS verification failed: {detail}",
+                hint=hint,
             ) from exc
         except ssl.SSLError as exc:
             raise OmadaError(
@@ -377,12 +604,30 @@ class OmadaClient:
                 endpoint="/api/info",
             )
         self.controller_id = controller_id
-        return {
+        info_out: Dict[str, Any] = {
             "omadacId": controller_id,
             "controllerVer": str(result.get("controllerVer") or result.get("version") or ""),
             "apiVer": result.get("apiVer"),
             "configured": result.get("configured"),
         }
+        for extra in ("model", "deviceModel", "hardware", "omadacCategory", "type"):
+            if extra in result and result[extra] is not None:
+                info_out[extra] = result[extra]
+        return info_out
+
+    def session_cookie_name(self) -> Optional[str]:
+        """Return the active Omada session cookie name in the transport jar, if any."""
+        jar = getattr(self.transport, "cookie_jar", None)
+        if jar is None:
+            return None
+        names = [getattr(c, "name", "") for c in jar]
+        for preferred in SESSION_COOKIE_NAMES:
+            if preferred in names:
+                return preferred
+        for name in names:
+            if "SESSIONID" in name.upper():
+                return name
+        return None
 
     def authenticate(self, force: bool = False, resolve_site: bool = True) -> AuthInfo:
         """Log in (idempotent unless ``force``) and resolve the target site.
@@ -435,7 +680,10 @@ class OmadaClient:
             if payload.get("errorCode") not in (0, None):
                 raise OmadaError(
                     "login rejected: " + describe_error(
-                        payload.get("errorCode"), str(payload.get("msg") or "")
+                        payload.get("errorCode"),
+                        str(payload.get("msg") or ""),
+                        endpoint="/api/v2/login",
+                        method="POST",
                     ),
                     code=payload.get("errorCode"),
                     hint=("check OMADA_USERNAME / OMADA_PASSWORD; repeated failures also "
@@ -443,7 +691,9 @@ class OmadaClient:
                     endpoint="/api/v2/login",
                 )
             result = payload.get("result") or {}
-            token = result.get("token")
+            if result.get("omadacId"):
+                controller_id = str(result["omadacId"])
+            token = result.get("token") or payload.get("token")
             if not token:
                 raise OmadaError(
                     "login succeeded but returned no token",
@@ -452,7 +702,12 @@ class OmadaClient:
                 )
             self.token = token
             self.controller_id = controller_id
-            self._log(f"authenticated as {self.config.username} on controller {controller_id}")
+            cookie_name = self.session_cookie_name()
+            family = classify_controller_family(info, session_cookie=cookie_name)
+            self._log(
+                f"authenticated as {self.config.username} on controller {controller_id}"
+                f" (family={family}" + (f", cookie={cookie_name}" if cookie_name else "") + ")"
+            )
 
             user = self.api("users/current", require_auth=False)
             user_result = user.get("result") or {}
@@ -467,6 +722,8 @@ class OmadaClient:
                 user_id=str(user_result.get("id")) if user_result.get("id") else None,
                 privilege=privilege,
                 site_scope=site_scope,
+                controller_family=family,
+                session_cookie=cookie_name,
             )
             if self.site is not None:
                 self._log(f"site resolved: {self.site.name} ({self.site.site_id})")
@@ -519,7 +776,11 @@ class OmadaClient:
                           "with the same account; log in with a dedicated account"),
                     endpoint=endpoint,
                 )
-            self._log("session expired (HTML response); re-authenticating and replaying once")
+            cookie_name = self.session_cookie_name()
+            cookie_state = f"cookie={cookie_name} present, server-side session expired" \
+                if cookie_name else "no session cookie"
+            self._log(f"session expired (HTML response; {cookie_state}); "
+                      "re-authenticating and replaying once")
             self.authenticate(force=True)
             return self.api(endpoint, method, data, require_auth=False, _retry=False,
                             _burst=_burst)
@@ -550,7 +811,8 @@ class OmadaClient:
         code = payload.get("errorCode")
         if code not in (0, None):
             raise OmadaError(
-                describe_error(code, str(payload.get("msg") or "")),
+                describe_error(code, str(payload.get("msg") or ""),
+                               endpoint=endpoint, method=method),
                 code=code,
                 endpoint=endpoint,
             )

@@ -8,7 +8,7 @@
 
 Your Omada controller already knows which AP is overloaded, which client is
 sitting on the guest VLAN, and which switch dropped a port. `omada-mcp` hands
-that to Claude, Cursor, Hermes or any other MCP host — as eight read-only tools
+that to Claude, Cursor, Hermes or any other MCP host — as ten read-only tools
 that return clean JSON, with a self-test that tells you exactly what to fix when
 something is wrong.
 
@@ -17,17 +17,19 @@ uvx omada-mcp --doctor
 ```
 
 ```
-omada-mcp doctor v1.0.1
+omada-mcp doctor v1.1.0 on Linux-6.8 (Python 3.12.7)
 ------------------------------------------------------------------
 PASS env      /home/you/.config/omada-mcp/.env | url=https://192.0.2.10:8043 user=omada-readonly password=set (24 chars)
-PASS tls      verified against /home/you/.config/omada-mcp/controller-ca.pem | reachable, omadacId=0123456789abcdef01234567, controllerVer=5.13.30.8
-PASS login    token accepted for omada-readonly (role=Viewer, scope=all sites), Csrf-Token round-trip OK
+PASS tls      verified against /home/you/.config/omada-mcp/controller-ca.pem (serverName=Omada) | reachable, omadacId=0123456789abcdef01234567, controllerVer=5.13.30.8, family=software-5.x
+PASS login    token accepted for omada-readonly (role=Viewer, scope=all sites, cookie=TPOMADA_SESSIONID), Csrf-Token round-trip OK
 PASS site     Home (89abcdef0123456789abcdef) site 1 of 1; matched OMADA_SITE_NAME=Home
-PASS tools    list_devices -> 7 device(s); 8 read-only tools registered, 23 client(s)
+PASS tools    list_devices -> 7 device(s); 10 read-only tools registered, 23 client(s)
 ------------------------------------------------------------------
 5/5 checks passed
-Ready: `omada-mcp` will serve 8 read-only tools on stdio.
+Ready: `omada-mcp` will serve 10 read-only tools on stdio.
 ```
+
+Add `--json` (`omada-mcp --doctor --json`) for machine-readable output validated against [`schemas/doctor.schema.json`](schemas/doctor.schema.json).
 
 ---
 
@@ -154,6 +156,7 @@ output pastes straight in.
 | `OMADA_CA_BUNDLE` | system store | PEM bundle with the controller's CA. |
 | `OMADA_VERIFY_SSL` | `true` | `false` disables chain + hostname checks. Not for production. |
 | `OMADA_STRICT_X509` | `true` | `false` clears Python 3.13+'s `VERIFY_X509_STRICT` while keeping chain and hostname checks — the fix for "self-signed certificate" errors on 3.13/3.14. |
+| `OMADA_TLS_SERVER_NAME` | — | Optional TLS `server_hostname` override (e.g. `Omada`) when connecting by IP against the controller's built-in cert (`SAN=DNS:Omada`) so `OMADA_CA_BUNDLE` still verifies the chain and SAN. |
 | `OMADA_READ_ONLY` | `false` | `true` refuses every non-read-only tool (`-32003`). |
 | `OMADA_USE_SYSTEM_PROXY` | `false` | System/registry proxies are ignored by default. On Windows, `urllib` inherits the WinINET proxy, which makes a one-hop controller look unreachable; set `true` only when a proxy is genuinely required. |
 | `OMADA_TIMEOUT_SECONDS` | `30` | Per-request timeout. |
@@ -254,19 +257,21 @@ uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
 
 ## Tools
 
-Eight tools, all read-only, all idempotent, all returning JSON. `list_clients`
+Ten tools, all read-only, all idempotent, all returning JSON. `list_clients`
 windowing is bounded by `limit` (default 500, max 5000) and de-duplicated by MAC.
 
 | Tool | Arguments | Returns |
 |---|---|---|
 | `get_site_info` | — | Site name/id, WAN/LAN/WLAN state, device and client counts, controller version |
-| `list_devices` | — | MAC, name, type, model, firmware, IP, uptime, client count, status |
+| `list_devices` | — | MAC, name, type, model, firmware, IP, uptime, client count, status, `needUpgrade` |
 | `list_clients` | `limit?` | MAC, name, hostname, IP, wireless, guest, SSID, AP, network, VLAN, rx/tx, duration, last seen (UTC ISO-8601) |
 | `list_wifi_clients` | `limit?` | Same projection, wireless only |
 | `list_wired_clients` | `limit?` | Same projection, wired only |
 | `get_device` | `mac` (or name) | One device |
 | `get_client` | `mac` (or hostname/IP) | One client |
-| `list_wlans` | — | SSID, band, VLAN, security, guest, `hasPresharedKey` (key never returned) |
+| `list_wlans` | — | SSID, band, VLAN, security, guest, `hasPresharedKey` (expands v6.x WLAN groups; key never returned) |
+| `network_audit` | — | Composite one-call health audit: pending firmware, offline devices, 0-client APs, guest/unexpected VLAN clients, unisolated VLANs, DHCP pool utilization, and stable finding codes |
+| `explain_error` | `code`, `endpoint?` | Structured decoder for Omada `errorCode` values (`-1600`, `-33726`, `-1505`, `-1001`, `-30109`, `-41011`, `-44116`, …) with ambiguity notes and fixes |
 
 Each entry in `tools/list` carries MCP annotations, so hosts can auto-approve
 reads instead of prompting on every call:
@@ -312,7 +317,7 @@ table below maps the symptoms it cannot see.
 | `-41011` | Client endpoints are **Admin-only** and the MAC is not in that site's client table | Use `insight/clients` with a Viewer account |
 | `-44116` | You are on the Open API without Platform Integration | Use this server (Web API) instead |
 | HTTP 200 with HTML in response | The controller's **server-side** session died (cookie is still valid for 15 days) — another login for the same account, or a restart | Automatic: the client re-authenticates once and replays |
-| `CERTIFICATE_VERIFY_FAILED` | Self-signed controller cert, or Python 3.13+ strict X509 | Set `OMADA_CA_BUNDLE` to the controller CA; else `OMADA_STRICT_X509=false`; `OMADA_VERIFY_SSL=false` only as a last resort |
+| `CERTIFICATE_VERIFY_FAILED` | Self-signed controller cert, IP/SAN mismatch, or Python 3.13+ strict X509 | Set `OMADA_CA_BUNDLE` to the controller CA, `OMADA_STRICT_X509=false`, and `OMADA_TLS_SERVER_NAME=Omada` when connecting by IP; `OMADA_VERIFY_SSL=false` only as a last resort |
 | `cannot reach …` | Wrong port or unroutable network | Controller web UI is `https://host:8043` (or `http://host:8088`) |
 | Host starts but every call fails | No credentials at server start | Expected: `initialize`/`tools/list` never touch the controller; run `--doctor` |
 | Windows: timeouts although the controller pings | WinINET proxy inherited by `urllib` | Proxies are off by default; if you need one, `OMADA_USE_SYSTEM_PROXY=true` |
@@ -320,24 +325,22 @@ table below maps the symptoms it cannot see.
 
 ## Compatibility
 
-* **Software controller v6.x** — verified live: `--doctor` and all eight read
-  tools return data on v6.2.10.17.
-* **Software controller v5.x** — same Web API family; the field notes in
-  `skills/omada-controller/SKILL.md` include the v5.x session-cookie behaviour.
-  Report your `controllerVer` if a tool answers `-1600`.
-* **OC200 / OC300 hardware** — same Web API family; site and device reads are
-  expected to work. Please open an issue with your `controllerVer` if a tool
-  returns `-1600`.
-* **Omada v5.x `TPEAP_SESSIONID` builds** — some older builds issue
-  `TPEAP_SESSIONID` instead of `TPOMADA_SESSIONID`. The cookie jar replays
-  whatever the controller sets, so login generally succeeds; if it does not, the
-  error will name the phase. See the roadmap below.
+See [`docs/compatibility.md`](docs/compatibility.md) for the full compatibility table.
+
+* **Software controller v6.x** — verified live: `--doctor --json` and all ten read
+  tools return data on v6.2.10.17 (`TPOMADA_SESSIONID`).
+* **Software controller v5.x** — verified live on v5.13.30.8; `--doctor` reports
+  `software-5.x`.
+* **OC200 / OC300 hardware & `TPEAP_SESSIONID` builds** — `--doctor` detects
+  both `TPOMADA_SESSIONID` and `TPEAP_SESSIONID`, handles legacy `result.omadacId`
+  login shapes, and reports the detected controller family (`hardware-5.x`, etc.).
+  Run `omada-mcp --doctor --json` to report new `controllerVer` strings.
 
 ## Development
 
 ```bash
 git clone https://github.com/falehsub/omada-mcp && cd omada-mcp
-python -m unittest discover -s tests -v     # 59 tests, no network, no deps
+python -m unittest discover -s tests -v     # 84 tests, no network, no deps
 python -m omada_mcp.cli --help              # after: pip install -e .
 uvx --from . omada-mcp --doctor             # what an external user does
 
@@ -351,9 +354,11 @@ Layout:
 ```
 src/omada_mcp/config.py   dotenv discovery, validation, base-URL normalisation
 src/omada_mcp/client.py   Web API v2 client: auth, pacing, session recovery, errors
-src/omada_mcp/tools.py    8 read-only tools, field whitelists, MCP annotations
+src/omada_mcp/tools.py    10 read-only tools, field whitelists, MCP annotations
 src/omada_mcp/server.py   JSON-RPC stdio server, read-only gate, lazy auth
-src/omada_mcp/doctor.py   ordered self-test with fix hints
+src/omada_mcp/doctor.py   ordered self-test with fix hints and --json output
+schemas/doctor.schema.json JSON Schema for --doctor --json
+docs/compatibility.md     controller family and cookie compatibility matrix
 tests/test_bridge.py      fake controller + protocol tests (stdlib unittest)
 skills/omada-controller/  agent skill: field notes for the Omada API itself
 ```
