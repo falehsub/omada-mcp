@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "omada": {
+      "command": "uvx",
+      "args": ["omada-mcp"],
+      "env": {
+        "OMADA_ENV_FILE": "/home/you/.config/omada-mcp/.env"
+      }
+    }
+  }
+}

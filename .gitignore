@@ -1,0 +1,43 @@
+# --- secrets: never commit a dotenv file -------------------------------
+.env
+.env.*
+!.env.example
+
+# --- build / packaging -------------------------------------------------
+build/
+dist/
+*.egg-info/
+*.egg
+src/*.egg-info/
+.eggs/
+wheelhouse/
+
+# --- python ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.venv/
+venv/
+env/
+
+# --- editors / OS ------------------------------------------------------
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+*.swp
+
+# --- local artefacts ---------------------------------------------------
+*.pem
+!examples/**/*.pem
+*.log
+raw-response*.json
+scratch/

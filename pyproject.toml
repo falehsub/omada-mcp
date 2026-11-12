@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omada-mcp"
+version = "1.0.0"
+description = "Model Context Protocol server for TP-Link Omada SDN controllers (Web API v2, zero dependencies)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Faleh Alsubaie" }]
+keywords = [
+  "mcp",
+  "model-context-protocol",
+  "omada",
+  "tplink",
+  "tp-link",
+  "sdn",
+  "network",
+  "eap",
+  "er605",
+  "oc200",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: System :: Networking",
+  "Topic :: System :: Systems Administration",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.scripts]
+omada-mcp = "omada_mcp.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/falehsub/omada-mcp"
+Repository = "https://github.com/falehsub/omada-mcp"
+Issues = "https://github.com/falehsub/omada-mcp/issues"
+Changelog = "https://github.com/falehsub/omada-mcp/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+omada_mcp = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["omada_mcp"]
+strict = false
+warn_unused_ignores = true
