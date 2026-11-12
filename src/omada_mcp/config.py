@@ -9,7 +9,8 @@ Resolution order, highest priority first:
 1. process environment (``export OMADA_BASE_URL=...``)
 2. ``OMADA_ENV_FILE`` -- an explicit path to a dotenv file
 3. ``./.env`` -- relative to the current working directory
-4. ``$XDG_CONFIG_HOME/omada-mcp/.env`` or ``~/.config/omada-mcp/.env``
+4. ``%APPDATA%\\omada-mcp\\.env`` (Windows only)
+5. ``$XDG_CONFIG_HOME/omada-mcp/.env`` or ``~/.config/omada-mcp/.env``
 
 Values loaded from a file never override a variable that is already set in the
 environment, so a shell override always wins.
@@ -37,6 +38,9 @@ __all__ = [
     "parse_env_file",
     "parse_env_text",
 ]
+
+#: Evaluated once at import; tests patch it to exercise the Windows branch.
+_IS_WINDOWS = os.name == "nt"
 
 DEFAULT_ENV_FILENAME = ".env"
 DEFAULT_HTTPS_PORT = 8043
@@ -80,6 +84,7 @@ class Config:
     verify_ssl: bool = True
     strict_x509: bool = True
     read_only: bool = False
+    use_system_proxy: bool = False
     timeout: float = DEFAULT_TIMEOUT
     min_interval: float = DEFAULT_MIN_INTERVAL
     env_file: Optional[Path] = None
@@ -99,6 +104,7 @@ class Config:
             "verify_ssl": self.verify_ssl,
             "strict_x509": self.strict_x509,
             "read_only": self.read_only,
+            "use_system_proxy": self.use_system_proxy,
             "timeout": self.timeout,
             "min_interval": self.min_interval,
             "env_file": str(self.env_file) if self.env_file else None,
@@ -184,11 +190,30 @@ def _xdg_config_home(environ: Optional[Mapping[str, str]] = None) -> Path:
     return Path.home() / ".config"
 
 
+def _appdata_dir(environ: Optional[Mapping[str, str]] = None) -> Optional[Path]:
+    """``%APPDATA%`` on Windows, else ``None``.
+
+    Kept separate from :func:`candidate_env_files` so the Windows branch is
+    testable on any OS by patching ``_IS_WINDOWS``.
+    """
+    env = os.environ if environ is None else environ
+    raw = (env.get("APPDATA") or "").strip()
+    if not raw:
+        return None
+    return Path(raw)
+
+
 def candidate_env_files(
     cwd: Optional[os.PathLike | str] = None,
     environ: Optional[Mapping[str, str]] = None,
 ) -> List[Tuple[str, Path]]:
-    """Ordered ``(origin, path)`` candidates, highest priority first."""
+    """Ordered ``(origin, path)`` candidates, highest priority first.
+
+    On Windows ``%APPDATA%\\omada-mcp\\.env`` comes before the POSIX-style
+    ``~/.config/omada-mcp/.env``, because ``%APPDATA%`` is where a Windows user
+    expects a per-user config to live; the POSIX path stays as a fallback so a
+    checkout shared with WSL keeps working.
+    """
     env = os.environ if environ is None else environ
     candidates: List[Tuple[str, Path]] = []
     explicit = env.get("OMADA_ENV_FILE")
@@ -196,6 +221,11 @@ def candidate_env_files(
         candidates.append(("OMADA_ENV_FILE", Path(explicit).expanduser()))
     base = Path(cwd) if cwd is not None else Path.cwd()
     candidates.append(("cwd/.env", base / DEFAULT_ENV_FILENAME))
+    if _IS_WINDOWS:
+        appdata = _appdata_dir(env)
+        if appdata is not None:
+            candidates.append(("%APPDATA%/omada-mcp/.env",
+                               appdata / "omada-mcp" / DEFAULT_ENV_FILENAME))
     candidates.append(("~/.config/omada-mcp/.env",
                        _xdg_config_home(env) / "omada-mcp" / DEFAULT_ENV_FILENAME))
     return candidates
@@ -334,6 +364,8 @@ def load_config(
         verify_ssl=parse_bool(values.get("OMADA_VERIFY_SSL"), "OMADA_VERIFY_SSL", True),
         strict_x509=parse_bool(values.get("OMADA_STRICT_X509"), "OMADA_STRICT_X509", True),
         read_only=parse_bool(values.get("OMADA_READ_ONLY"), "OMADA_READ_ONLY", False),
+        use_system_proxy=parse_bool(values.get("OMADA_USE_SYSTEM_PROXY"),
+                                    "OMADA_USE_SYSTEM_PROXY", False),
         timeout=timeout,
         min_interval=min_interval,
         env_file=env_file,

@@ -1,0 +1,21 @@
+# Normalize line endings so a Windows checkout does not rewrite every file.
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.env.example text eol=lf
+*.pem text eol=lf
+LICENSE text eol=lf
+
+# Batch/PowerShell helpers, if ever added, must keep CRLF.
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary
+*.png binary
+*.jpg binary
+*.whl binary
+*.gz binary

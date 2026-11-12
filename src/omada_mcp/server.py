@@ -25,7 +25,8 @@ from .client import OmadaClient, OmadaError, log
 from .config import Config
 from .tools import TOOL_MAP, Tool, get_tool, tool_descriptors
 
-__all__ = ["PROTOCOL_VERSIONS", "DEFAULT_PROTOCOL_VERSION", "Server"]
+__all__ = ["PROTOCOL_VERSIONS", "DEFAULT_PROTOCOL_VERSION", "Server",
+           "configure_streams"]
 
 #: Newest first. The first entry is used when the client asks for something
 #: unsupported (e.g. an HTTP-era or a future draft revision).
@@ -41,6 +42,40 @@ INSTRUCTIONS = (
     "get_client for one object. Timestamps are UTC ISO-8601. Error messages "
     "include the controller's numeric errorCode and a fix hint."
 )
+
+
+def configure_streams(stdin: Optional[TextIO] = None,
+                      stdout: Optional[TextIO] = None,
+                      stderr: Optional[TextIO] = None) -> None:
+    """Force UTF-8 and LF line endings on the stdio streams.
+
+    Two Windows-specific failures this prevents:
+
+    * **Encoding.** The console default code page (cp1252, cp1256, cp437, ...)
+      cannot encode an SSID or device name that is not in that code page, so
+      ``json.dumps(..., ensure_ascii=False)`` raises ``UnicodeEncodeError`` in
+      the middle of a session. UTF-8 with ``errors="replace"`` cannot raise.
+    * **Newlines.** Text mode translates ``"\n"`` to ``"\r\n"`` on Windows.
+      Some strict MCP clients split frames on ``"\n"`` and choke on the ``\r``;
+      ``newline="\n"`` writes exactly one byte per frame.
+
+    ``stdin`` gets ``newline=""`` so universal-newline translation does not
+    rewrite ``\r\n`` in the middle of an incoming frame (the frame reader
+    tolerates both styles anyway).
+    """
+    import sys
+
+    targets = ((stdin if stdin is not None else sys.stdin, ""),
+               (stdout if stdout is not None else sys.stdout, "\n"),
+               (stderr if stderr is not None else sys.stderr, "\n"))
+    for stream, newline in targets:
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # StringIO and other test doubles
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace", newline=newline)
+        except (AttributeError, OSError, ValueError):
+            continue
 
 
 class RpcError(Exception):
@@ -83,6 +118,7 @@ class Server:
 
         stdin = stdin or sys.stdin
         self.out = stdout or sys.stdout
+        configure_streams(stdin, self.out)
         log(f"omada-mcp {__version__} ready on stdio "
             f"(read_only={self.config.read_only}, site={self.config.site_id or self.config.site_name or 'first'})")
         for message in self._read_messages(stdin):

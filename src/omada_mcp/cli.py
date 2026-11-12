@@ -46,7 +46,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _configure_console() -> None:
+    """UTF-8 stdout/stderr so a non-UTF-8 Windows console cannot raise.
+
+    ``--doctor`` prints site names and paths, ``--list-tools`` prints JSON; both
+    can contain characters outside the console code page.
+    """
+    import sys
+
+    from .server import configure_streams
+
+    configure_streams(stdin=None, stdout=sys.stdout, stderr=sys.stderr)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
+    _configure_console()
     args = build_parser().parse_args(argv)
 
     if args.doctor:

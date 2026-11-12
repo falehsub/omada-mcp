@@ -17,7 +17,7 @@ uvx omada-mcp --doctor
 ```
 
 ```
-omada-mcp doctor v1.0.0
+omada-mcp doctor v1.0.1
 ------------------------------------------------------------------
 PASS env      /home/you/.config/omada-mcp/.env | url=https://192.0.2.10:8043 user=omada-readonly password=set (24 chars)
 PASS tls      verified against /home/you/.config/omada-mcp/controller-ca.pem | reachable, omadacId=0123456789abcdef01234567, controllerVer=5.13.30.8
@@ -65,7 +65,7 @@ Three properties make it safe to hand to an LLM:
 # from git (works today)
 uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
 
-# from PyPI (once v1.0.0 is published there -- the name `omada-mcp` is reserved-free)
+# from PyPI (once v1.0.1 is published there -- the name `omada-mcp` is reserved-free)
 uvx omada-mcp --doctor
 
 # or install the command (once published to PyPI)
@@ -107,7 +107,40 @@ environment always overrides a file:
 2. **`$OMADA_ENV_FILE`** — an explicit path (missing file = hard error, so a typo
    cannot silently fall through)
 3. **`./.env`** — relative to the working directory (handy for per-project setups)
-4. **`~/.config/omada-mcp/.env`** (or `$XDG_CONFIG_HOME/omada-mcp/.env`)
+4. **`%APPDATA%\omada-mcp\.env`** — Windows only, where a Windows user expects a per-user config
+5. **`~/.config/omada-mcp/.env`** (or `$XDG_CONFIG_HOME/omada-mcp/.env`)
+
+### Windows
+
+Everything is supported natively — no WSL, no MSYS. The console script installs as
+`omada-mcp.exe`, and `uvx` / `uv tool install` behave exactly as on POSIX.
+
+```powershell
+New-Item -ItemType Directory -Force "$env:APPDATA\omada-mcp" | Out-Null
+Copy-Item .env.example "$env:APPDATA\omada-mcp\.env"
+notepad "$env:APPDATA\omada-mcp\.env"
+```
+
+Windows-specific behaviour, handled for you:
+
+* **Config location.** `%APPDATA%\omada-mcp\.env` is picked up before
+  `~/.config/omada-mcp/.env`, so the usual Windows location just works.
+* **Encoding.** Stdio is forced to UTF-8. The console code page (cp1252, cp1256,
+  cp437 …) cannot encode an Arabic or CJK SSID, and the failure mode is a
+  `UnicodeEncodeError` in the middle of a session — this never reaches you.
+* **Line endings.** Frames are written with a single `\n`; text mode would
+  otherwise emit `\r\n` and strict clients can mis-frame. Incoming `\r\n`
+  frames are accepted too.
+* **Proxies.** System/WinINET proxies are ignored by default
+  (`OMADA_USE_SYSTEM_PROXY=true` to opt in).
+* **File permissions.** API keys live in your user profile; `--doctor` skips the
+  POSIX `chmod` advice on Windows rather than handing you a command that does
+  nothing. To restrict the file to your account:
+  `icacls "%APPDATA%\omada-mcp\.env" /inheritance:r /grant:r "%USERNAME%:F"`.
+
+`get_device`/`get_client` accept a MAC in any format (`AA-BB-CC-DD-EE-FF`,
+`aabbccddeeff`, `aa:bb:cc:dd:ee:ff`) as well as a hostname or IP, so PowerShell
+output pastes straight in.
 
 ### All variables
 
@@ -122,6 +155,7 @@ environment always overrides a file:
 | `OMADA_VERIFY_SSL` | `true` | `false` disables chain + hostname checks. Not for production. |
 | `OMADA_STRICT_X509` | `true` | `false` clears Python 3.13+'s `VERIFY_X509_STRICT` while keeping chain and hostname checks — the fix for "self-signed certificate" errors on 3.13/3.14. |
 | `OMADA_READ_ONLY` | `false` | `true` refuses every non-read-only tool (`-32003`). |
+| `OMADA_USE_SYSTEM_PROXY` | `false` | System/registry proxies are ignored by default. On Windows, `urllib` inherits the WinINET proxy, which makes a one-hop controller look unreachable; set `true` only when a proxy is genuinely required. |
 | `OMADA_TIMEOUT_SECONDS` | `30` | Per-request timeout. |
 | `OMADA_MIN_INTERVAL_SECONDS` | `0.25` | Minimum spacing between controller calls; raise to `0.8` on large sites. |
 
@@ -281,6 +315,8 @@ table below maps the symptoms it cannot see.
 | `CERTIFICATE_VERIFY_FAILED` | Self-signed controller cert, or Python 3.13+ strict X509 | Set `OMADA_CA_BUNDLE` to the controller CA; else `OMADA_STRICT_X509=false`; `OMADA_VERIFY_SSL=false` only as a last resort |
 | `cannot reach …` | Wrong port or unroutable network | Controller web UI is `https://host:8043` (or `http://host:8088`) |
 | Host starts but every call fails | No credentials at server start | Expected: `initialize`/`tools/list` never touch the controller; run `--doctor` |
+| Windows: timeouts although the controller pings | WinINET proxy inherited by `urllib` | Proxies are off by default; if you need one, `OMADA_USE_SYSTEM_PROXY=true` |
+| Windows: `omada-mcp` not found after `pip install --user` | `%APPDATA%\Python\Python3x\Scripts` not on `PATH` | Use `uvx`/`uv tool install`, or add the Scripts directory to `PATH` |
 
 ## Compatibility
 

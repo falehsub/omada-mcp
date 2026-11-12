@@ -155,11 +155,23 @@ class AuthInfo:
 
 
 class UrllibTransport:
-    """HTTP transport over :mod:`urllib` with a shared cookie jar and TLS context."""
+    """HTTP transport over :mod:`urllib` with a shared cookie jar and TLS context.
 
-    def __init__(self, ssl_context: ssl.SSLContext, timeout: float = 30.0):
+    System proxies are **disabled by default**. On Windows, :mod:`urllib` picks
+    up the WinINET/registry proxy configuration; routing a controller call
+    through a corporate proxy produces confusing timeouts for an address that is
+    one hop away. Set ``OMADA_USE_SYSTEM_PROXY=true`` when the proxy is genuinely
+    required (an out-of-band management route, for example).
+    """
+
+    def __init__(self, ssl_context: ssl.SSLContext, timeout: float = 30.0,
+                 use_system_proxy: bool = False):
         self.cookie_jar = http.cookiejar.CookieJar()
+        self.proxy_handler = urllib.request.ProxyHandler() if use_system_proxy \
+            else urllib.request.ProxyHandler({})
+        self.proxy_mode = "system" if use_system_proxy else "disabled"
         self.opener = urllib.request.build_opener(
+            self.proxy_handler,
             urllib.request.HTTPSHandler(context=ssl_context),
             urllib.request.HTTPCookieProcessor(self.cookie_jar),
         )
@@ -280,7 +292,9 @@ class OmadaClient:
     def transport(self) -> UrllibTransport:
         if self._transport is None:
             self._transport = UrllibTransport(
-                build_ssl_context(self.config), timeout=self.config.timeout
+                build_ssl_context(self.config),
+                timeout=self.config.timeout,
+                use_system_proxy=self.config.use_system_proxy,
             )
         return self._transport
 
@@ -322,8 +336,8 @@ class OmadaClient:
             raise OmadaError(
                 f"cannot reach {self.config.base_url}: {reason}",
                 hint=("check OMADA_BASE_URL, the port (8043 by default) and that this host "
-                      "can route to the controller; hardware controllers answer on the "
-                      "management network"),
+                      "can route to the controller; on Windows, disabled system proxies "
+                      "mean a proxy-only route needs OMADA_USE_SYSTEM_PROXY=true"),
             ) from exc
         finally:
             self._last_request_at = self._clock()

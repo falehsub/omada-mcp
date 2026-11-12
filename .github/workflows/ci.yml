@@ -16,12 +16,25 @@ concurrency:
 
 jobs:
   test:
-    name: test (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Git Bash ships on the Windows runners, so one set of steps covers both
+        # platforms (globs, printf, unset) without a pwsh duplicate of every step.
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        exclude:
+          # Windows: keep the matrix at 8 jobs while still covering the oldest,
+          # the CI default and the newest interpreter.
+          - os: windows-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
 
@@ -42,9 +55,32 @@ jobs:
 
       - name: Install the built wheel and smoke-test the CLI
         run: |
-          python -m pip install --force-reinstall dist/*.whl
+          python -m pip install --force-reinstall --no-deps dist/*.whl
           omada-mcp --version
           omada-mcp --list-tools | python -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==8, len(d['tools'])"
+
+      - name: Stdio frames are LF-only and complete
+        env:
+          OMADA_BASE_URL: https://127.0.0.1:9
+          OMADA_USERNAME: smoke
+          OMADA_PASSWORD: smoke
+          OMADA_READ_ONLY: "true"
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | omada-mcp > frames.jsonl
+          python -c "raw=open('frames.jsonl','rb').read(); assert b'\r' not in raw, 'CRLF leaked into frames'; assert raw.endswith(b'\n'), 'frames not newline terminated'"
+          python -c "import json; L=[json.loads(l) for l in open('frames.jsonl',encoding='utf-8') if l.strip()]; assert len(L)==2, len(L); assert L[0]['result']['serverInfo']['name']=='omada-mcp'; assert len(L[1]['result']['tools'])==8"
+
+      - name: Config discovery finds %APPDATA% (Windows only)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p "$APPDATA/omada-mcp"
+          printf 'OMADA_BASE_URL=https://127.0.0.1:8043\nOMADA_USERNAME=win\nOMADA_PASSWORD=pw\n' > "$APPDATA/omada-mcp/.env"
+          unset OMADA_ENV_FILE OMADA_BASE_URL OMADA_USERNAME OMADA_PASSWORD
+          cd "$(mktemp -d)"
+          omada-mcp --show-config | python -c "import json,sys; c=json.load(sys.stdin); assert c['username']=='win', c; assert 'AppData' in (c['env_file'] or ''), c['env_file']"
 
   doctor-contract:
     name: doctor exit codes (no controller)

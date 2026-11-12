@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-11-13
+
+Windows support, without changing the tool surface or the safety model.
+
+### Added
+
+- `%APPDATA%\omada-mcp\.env` is discovered on Windows, ahead of the POSIX
+  `~/.config/omada-mcp/.env`, and documented (including a PowerShell setup block).
+- `OMADA_USE_SYSTEM_PROXY` (default `false`): system/WinINET proxies are ignored
+  for controller calls. On Windows, `urllib` inherits the registry proxy, which
+  turns a one-hop controller into a timeout.
+- `--doctor` prints the host platform and Python version, so a pasted report is
+  triageable without asking.
+
+### Fixed
+
+- **Stdio encoding.** Streams are forced to UTF-8. A Windows console code page
+  (cp1252, cp1256, cp437) raised `UnicodeEncodeError` on the first non-ASCII SSID
+  or device name, killing the session mid-frame.
+- **Frame terminators.** Frames are written with a single `\n`; text mode on
+  Windows emitted `\r\n`, which strict MCP clients can mis-frame. Incoming CRLF
+  frames are also accepted (regression test included).
+- **Permissions advice.** `--doctor` no longer suggests `chmod 600` on Windows,
+  where it silently does nothing; it points at `icacls` in the README instead.
+
+### Changed
+
+- `.gitattributes` normalises text files to LF on checkout, so a Windows clone
+  cannot rewrite the tree.
+- CI runs the suite on `windows-latest` (3.10 / 3.12 / 3.14) alongside Ubuntu, and
+  asserts, from the installed wheel, that frames are LF-only and complete.
+
 ## [1.0.0] - 2026-11-13
 
 First public release. Extracted from a working private bridge and generalised so

@@ -13,11 +13,14 @@ import os
 import sys
 import tempfile
 import unittest
+import urllib.request
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from omada_mcp import __version__  # noqa: E402
+from omada_mcp import config as config_module  # noqa: E402
 from omada_mcp.client import (  # noqa: E402
     BURST_BACKOFF_SECONDS,
     OmadaClient,
@@ -33,7 +36,7 @@ from omada_mcp.config import (  # noqa: E402
     parse_env_text,
 )
 from omada_mcp.doctor import run_doctor  # noqa: E402
-from omada_mcp.server import Server  # noqa: E402
+from omada_mcp.server import Server, configure_streams  # noqa: E402
 from omada_mcp.tools import TOOL_MAP, normalize_mac, project_wlan  # noqa: E402
 
 CONTROLLER_ID = "0123456789abcdef01234567"
@@ -520,6 +523,151 @@ class ProtocolTests(unittest.TestCase):
         lines = [line for line in stdout.getvalue().splitlines() if line.strip()]
         self.assertEqual(len(lines), 1)
         self.assertEqual(json.loads(lines[0])["result"]["serverInfo"]["name"], "omada-mcp")
+
+
+class WindowsTests(unittest.TestCase):
+    """Windows-specific behaviour, exercised on any OS.
+
+    The failures these prevent are invisible on Linux: a code-page encoding
+    error, a ``\r\n`` frame, a config file nobody can find, and a controller
+    call routed through a registry proxy.
+    """
+
+    def _windows_stream(self, encoding="cp1252"):
+        """A TextIOWrapper that mimics the Windows console: legacy code page + CRLF."""
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding=encoding, newline="\r\n",
+                                  write_through=True)
+        return raw, stream
+
+    def test_console_stream_is_forced_to_utf8_and_lf(self):
+        raw, stream = self._windows_stream()
+        configure_streams(None, stream, stream)
+        stream.write(json.dumps({"ssid": "\u0634\u0628\u0643\u0629 \u0627\u0644\u0645\u0646\u0632\u0644"},
+                                ensure_ascii=False))
+        stream.flush()
+        data = raw.getvalue()
+        self.assertNotIn(b"\r", data, "CRLF leaked into a JSON-RPC frame")
+        self.assertEqual(data.decode("utf-8").strip(),
+                         '{"ssid": "\u0634\u0628\u0643\u0629 \u0627\u0644\u0645\u0646\u0632\u0644"}')
+
+    def test_unconfigured_cp1252_stream_would_have_failed(self):
+        """Proves the guard is load-bearing, not decoration."""
+        _raw, stream = self._windows_stream()
+        with self.assertRaises(UnicodeEncodeError):
+            stream.write("\u0634\u0628\u0643\u0629")
+            stream.flush()
+
+    def test_server_emits_lf_only_frames(self):
+        client, _, _ = make_client()
+        server = Server(client.config, client=client)
+        raw, stream = self._windows_stream()
+        configure_streams(None, stream, stream)
+        server.out = stream
+        server.handle({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+        server._write({"jsonrpc": "2.0", "id": 1, "result": {}})
+        stream.flush()
+        self.assertNotIn(b"\r\n", raw.getvalue())
+        self.assertEqual(stream.encoding.lower().replace("-", ""), "utf8")
+
+    def test_crlf_input_frames_are_parsed(self):
+        payload = ('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\r\n'
+                   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}\r\n')
+        messages = list(Server._read_messages(io.StringIO(payload)))
+        self.assertEqual([m["id"] for m in messages], [1, 2])
+
+    def test_appdata_env_file_is_discovered_on_windows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            appdata = Path(tmp) / "Roaming"
+            (appdata / "omada-mcp").mkdir(parents=True)
+            env_file = appdata / "omada-mcp" / ".env"
+            env_file.write_text("OMADA_BASE_URL=https://win:8043\n"
+                                "OMADA_USERNAME=winuser\nOMADA_PASSWORD=pw\n",
+                                encoding="utf-8")
+            empty = Path(tmp) / "work"
+            empty.mkdir()
+            with mock.patch.object(config_module, "_IS_WINDOWS", True):
+                config = config_module.load_config(
+                    environ={"APPDATA": str(appdata)}, cwd=empty)
+            self.assertEqual(config.username, "winuser")
+            self.assertEqual(config.env_file, env_file)
+
+    def test_appdata_precedes_posix_config_dir(self):
+        with mock.patch.object(config_module, "_IS_WINDOWS", True):
+            origins = [origin for origin, _ in config_module.candidate_env_files(
+                cwd="/work", environ={"APPDATA": "/roaming"})]
+        self.assertEqual(origins, ["cwd/.env", "%APPDATA%/omada-mcp/.env",
+                                   "~/.config/omada-mcp/.env"])
+
+    def test_no_appdata_falls_through_without_error(self):
+        with mock.patch.object(config_module, "_IS_WINDOWS", True):
+            origins = [origin for origin, _ in config_module.candidate_env_files(
+                cwd="/work", environ={})]
+        self.assertEqual(origins, ["cwd/.env", "~/.config/omada-mcp/.env"])
+
+    def test_system_proxy_is_disabled_by_default(self):
+        from omada_mcp.client import UrllibTransport
+
+        transport = UrllibTransport(build_ssl_context(make_config()))
+        self.assertEqual(transport.proxy_mode, "disabled")
+        self.assertIsInstance(transport.proxy_handler, urllib.request.ProxyHandler)
+        self.assertEqual(transport.proxy_handler.proxies, {})
+
+    def test_system_proxy_can_be_enabled_explicitly(self):
+        from omada_mcp.client import UrllibTransport
+
+        transport = UrllibTransport(build_ssl_context(make_config()),
+                                    use_system_proxy=True)
+        self.assertEqual(transport.proxy_mode, "system")
+
+    def test_use_system_proxy_is_configurable(self):
+        with self.assertRaises(ConfigError):
+            load_config(environ={"OMADA_BASE_URL": "https://c:8043",
+                                 "OMADA_USERNAME": "u", "OMADA_PASSWORD": "p",
+                                 "OMADA_USE_SYSTEM_PROXY": "sometimes"},
+                        cwd=tempfile.mkdtemp())
+        with tempfile.TemporaryDirectory() as tmp:
+            config = load_config(environ={"OMADA_BASE_URL": "https://c:8043",
+                                          "OMADA_USERNAME": "u", "OMADA_PASSWORD": "p",
+                                          "OMADA_USE_SYSTEM_PROXY": "true"}, cwd=tmp)
+        self.assertTrue(config.use_system_proxy)
+
+    def test_doctor_skips_posix_permissions_on_windows(self):
+        from omada_mcp import doctor as doctor_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text("OMADA_BASE_URL=https://c:8043\nOMADA_USERNAME=u\n"
+                                "OMADA_PASSWORD=p\n", encoding="utf-8")
+            env_file.chmod(0o644)
+            client, _, _ = make_client()
+            stream = io.StringIO()
+            with mock.patch.object(doctor_module, "_IS_WINDOWS", True):
+                rc = doctor_module.run_doctor(
+                    config_factory=lambda: config_module.load_config(
+                        environ={"OMADA_ENV_FILE": str(env_file)}, cwd=tmp),
+                    client_factory=lambda _cfg: client, stream=stream)
+        output = stream.getvalue()
+        self.assertEqual(rc, 0, output)
+        self.assertNotIn("chmod", output)
+        self.assertIn("Python", output)  # platform line in the header
+
+    def test_doctor_warns_about_world_readable_env_on_posix(self):
+        from omada_mcp import doctor as doctor_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text("OMADA_BASE_URL=https://c:8043\nOMADA_USERNAME=u\n"
+                                "OMADA_PASSWORD=p\n", encoding="utf-8")
+            env_file.chmod(0o644)
+            client, _, _ = make_client()
+            stream = io.StringIO()
+            with mock.patch.object(doctor_module, "_IS_WINDOWS", False):
+                doctor_module.run_doctor(
+                    config_factory=lambda: config_module.load_config(
+                        environ={"OMADA_ENV_FILE": str(env_file)}, cwd=tmp),
+                    client_factory=lambda _cfg: client, stream=stream)
+        self.assertIn("chmod 600", stream.getvalue())
 
 
 class ToolTests(unittest.TestCase):

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omada-mcp"
-version = "1.0.0"
+version = "1.0.1"
 description = "Model Context Protocol server for TP-Link Omada SDN controllers (Web API v2, zero dependencies)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,9 @@ classifiers = [
   "Intended Audience :: System Administrators",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",

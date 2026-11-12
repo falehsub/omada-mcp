@@ -20,7 +20,7 @@ from typing import Callable, List, Optional
 
 from . import __version__
 from .client import OmadaClient, OmadaError
-from .config import Config, ConfigError, load_config
+from .config import _IS_WINDOWS, Config, ConfigError, load_config
 from .tools import TOOL_MAP
 
 __all__ = ["run_doctor", "Report", "PhaseResult"]
@@ -28,6 +28,18 @@ __all__ = ["run_doctor", "Report", "PhaseResult"]
 PASS = "PASS"
 WARN = "WARN"
 FAIL = "FAIL"
+
+
+def platform_label() -> str:
+    """One-line host description, so a pasted doctor report is triageable."""
+    import platform
+    import sys
+
+    bits = [platform.system() or "unknown"]
+    release = platform.release()
+    if release:
+        bits.append(release)
+    return f"{'-'.join(bits)} (Python {sys.version.split()[0]})"
 
 
 @dataclass
@@ -96,7 +108,7 @@ def _phase_env(config: Optional[Config], error: Optional[ConfigError], report: R
         f"{origin} | url={config.base_url} user={config.username} "
         f"password={'set (%d chars)' % len(config.password) if config.password else 'missing'}",
     ))
-    if config.env_file:
+    if config.env_file and not _IS_WINDOWS:
         mode = oct(config.env_file.stat().st_mode & 0o777)
         if mode not in ("0o600", "0o400"):
             report.add(PhaseResult(
@@ -204,7 +216,8 @@ def run_doctor(
 ) -> int:
     """Run every phase and return a process exit code (0 = ready)."""
     report = Report(stream)
-    print(f"omada-mcp doctor v{__version__}", file=report.stream, flush=True)
+    print(f"omada-mcp doctor v{__version__} on {platform_label()}", file=report.stream,
+          flush=True)
     print("-" * 66, file=report.stream, flush=True)
 
     config: Optional[Config] = None
