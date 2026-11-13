@@ -52,7 +52,7 @@ DEFAULT_ENV_FILENAME = ".env"
 DEFAULT_HTTPS_PORT = 8043
 DEFAULT_HTTP_PORT = 8088
 DEFAULT_TIMEOUT = 30.0
-DEFAULT_MIN_INTERVAL = 0.25
+DEFAULT_MIN_INTERVAL = 0.05
 DEFAULT_WRITE_MIN_INTERVAL = 1.0
 
 #: Exact allowlistable write tool names (kept in sync with tools.TOOLS).
@@ -92,6 +92,7 @@ WRITE_TOOL_NAMES: Tuple[str, ...] = (
     "update_switch_port",
     "cycle_poe_port",
     "upsert_port_profile",
+    "delete_port_profile",
     "update_ap_radio",
     "start_rf_scan",
     "assign_ap_wlan_group",

@@ -81,6 +81,7 @@ from .write_tools import (
     delete_mdns_rule,
     delete_policy_route,
     delete_port_forward,
+    delete_port_profile,
     delete_ssid,
     delete_static_route,
     reboot_device,
@@ -878,6 +879,7 @@ _TOOL_CATEGORIES: Dict[str, str] = {
     "update_switch_port": "switch",
     "cycle_poe_port": "switch",
     "upsert_port_profile": "switch",
+    "delete_port_profile": "switch",
     # wifi
     "get_ap_radios": "wifi",
     "get_rf_scan": "wifi",
@@ -2413,16 +2415,18 @@ def _get_wan_status(
     includeSpeedtest: bool = True,
     maskWanIp: bool = False,
 ) -> Dict[str, Any]:
-    site = _site(client)
-    return collect_wan_status_data(
-        client, site,
-        include_speedtest=bool(includeSpeedtest),
-        mask_wan_ip=bool(maskWanIp),
-    )
+    with client.scoped_cache():
+        site = _site(client)
+        return collect_wan_status_data(
+            client, site,
+            include_speedtest=bool(includeSpeedtest),
+            mask_wan_ip=bool(maskWanIp),
+        )
 
 
 def _list_vpn_tunnels(client: OmadaClient) -> Dict[str, Any]:
-    return collect_vpn_tunnels_data(client, _site(client))
+    with client.scoped_cache():
+        return collect_vpn_tunnels_data(client, _site(client))
 
 
 def _get_topology(client: OmadaClient, includeClients: bool = False) -> Dict[str, Any]:
@@ -2768,7 +2772,7 @@ def _diagnose_wan_impl(
     wan = collect_wan_status_data(client, site, include_speedtest=bool(includeSpeedtest))
     warnings.extend(wan.get("warnings") or [])
 
-    vpn = collect_vpn_tunnels_data(client, site)
+    vpn = collect_vpn_tunnels_data(client, site, has_gateway=bool(wan.get("hasGateway")))
     vpn_counts = vpn.get("counts") or {}
     vpn_summary = {
         "activeOrStatTunnels": vpn_counts.get("activeOrStatTunnels", 0),
@@ -3731,7 +3735,7 @@ TOOLS: Tuple[Tool, ...] = (
     ),
     Tool(
         name="set_acl_rule_status",
-        title="Enable or disable ACL rule",
+        title="Enable or disable ACL rule (gateway, switch, or EAP)",
         description=(
             "Enable or disable a gateway, switch, or EAP ACL rule status without changing aclDisable."
         ),
@@ -3912,7 +3916,7 @@ TOOLS: Tuple[Tool, ...] = (
     ),
     Tool(
         name="update_gateway_acl",
-        title="Update ACL rule",
+        title="Update ACL rule (gateway, switch, or EAP)",
         description=(
             "Modify name, status, policy, endpoints, protocols, or syslog on an existing gateway, switch, or EAP ACL."
         ),
@@ -3977,7 +3981,7 @@ TOOLS: Tuple[Tool, ...] = (
     ),
     Tool(
         name="delete_gateway_acl",
-        title="Delete ACL rule",
+        title="Delete ACL rule (gateway, switch, or EAP)",
         description=(
             "Delete a gateway, switch, or EAP ACL rule by ID or exact name (DELETE setting/firewall/acls/{id}?type=0|1|2)."
         ),
@@ -4519,6 +4523,27 @@ TOOLS: Tuple[Tool, ...] = (
         handler=upsert_port_profile,
         read_only=False,
         destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="delete_port_profile",
+        title="Delete switch port profile",
+        description=(
+            "Delete a custom wired LAN switch port profile by ID or exact name "
+            "(DELETE setting/lan/profiles/{id}). Refuses built-in protected profiles."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "profile": {"type": "string", "description": "Port profile ID or exact name"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["profile"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=delete_port_profile,
+        read_only=False,
+        destructive=True,
         idempotent=True,
     ),
     Tool(

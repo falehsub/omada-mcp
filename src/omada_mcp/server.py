@@ -445,12 +445,37 @@ class Server:
             elif ptype == "integer":
                 if isinstance(val, bool) or not isinstance(val, int):
                     raise RpcError(-32602, f"{spec.name}: {key} must be an integer")
+                if "minimum" in prop_schema and val < prop_schema["minimum"]:
+                    raise RpcError(
+                        -32602,
+                        f"{spec.name}: {key} must be >= {prop_schema['minimum']}",
+                    )
+                if "maximum" in prop_schema and val > prop_schema["maximum"]:
+                    raise RpcError(
+                        -32602,
+                        f"{spec.name}: {key} must be <= {prop_schema['maximum']}",
+                    )
             elif ptype == "number":
                 if isinstance(val, bool) or not isinstance(val, (int, float)):
                     raise RpcError(-32602, f"{spec.name}: {key} must be a number")
             elif ptype == "string":
                 if not isinstance(val, str):
                     raise RpcError(-32602, f"{spec.name}: {key} must be a string")
+                if "enum" in prop_schema:
+                    allowed_enum = {str(e).lower() for e in prop_schema["enum"]}
+                    # Allow handler-supported aliases alongside schema enum values
+                    if key == "security":
+                        allowed_enum |= {"none", "wpa3"}
+                    elif key == "aclType":
+                        allowed_enum |= {"0", "1", "2"}
+                    elif key == "category":
+                        allowed_enum |= {"alert", "event", "audits"}
+                    if val.strip().lower() not in allowed_enum:
+                        raise RpcError(
+                            -32602,
+                            f"{spec.name}: {key} must be one of {prop_schema['enum']}",
+                            hint=f"Allowed values for {key}: {', '.join(map(str, prop_schema['enum']))}",
+                        )
             elif ptype == "array":
                 if not isinstance(val, list):
                     raise RpcError(-32602, f"{spec.name}: {key} must be an array")

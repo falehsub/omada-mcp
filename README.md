@@ -9,7 +9,7 @@
 Your Omada controller already knows which AP is overloaded, which client is
 sitting on the guest VLAN, and which switch dropped a port. `omada-mcp` hands
 that to Claude, Cursor, Hermes or any other MCP host — as 33 read-only tools
-that return clean JSON (plus 46 optional write tools behind an explicit allowlist,
+that return clean JSON (plus 47 optional write tools behind an explicit allowlist,
 plus `--watch` and `--export-metrics` monitoring modes),
 with a self-test that tells you exactly what to fix when something is wrong.
 
@@ -267,7 +267,7 @@ uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
 ## Tools
 
 Thirty-three read-only tools (~11.3k tokens in `tools/list`) are always registered;
-46 optional write tools stay hidden and disabled until both `OMADA_READ_ONLY=false`
+47 optional write tools stay hidden and disabled until both `OMADA_READ_ONLY=false`
 and `OMADA_WRITE_TOOLS` allowlist them explicitly. `list_clients` windowing is bounded
 by `limit` (default 500, max 5000) and de-duplicated by MAC.
 
@@ -316,7 +316,7 @@ Every write tool defaults `dryRun=true`, captures a pre-mutation JSON snapshot u
 | Category | Tools | Behaviour & Safety |
 |---|---|---|
 | Snapshot rollback | `rollback_from_snapshot` | Loads snapshot strictly inside `OMADA_SNAPSHOT_DIR`, previews drift on `dryRun=true`, and restores pre-mutation config on `dryRun=false` |
-| Switch ports & profiles | `update_switch_port`, `cycle_poe_port`, `upsert_port_profile` | Port enable/PoE mode/profile updates and PoE power cycling; refuses stranding uplink, controller-hosting, or LAG member ports unless `allowUplinkMutation=true` |
+| Switch ports & profiles | `update_switch_port`, `cycle_poe_port`, `upsert_port_profile`, `delete_port_profile` | Port enable/PoE mode/profile updates, custom port profile CRUD, and PoE power cycling; refuses built-in profile deletion or stranding uplink, controller-hosting, or LAG member ports unless `allowUplinkMutation=true` |
 | AP radios, RF scan & WLAN groups | `update_ap_radio`, `start_rf_scan`, `assign_ap_wlan_group` | Preserves sibling band configs during `config/radios` PUT; pre-validates channel & width against `availableChannels` |
 | Live client controls & fixed IP | `set_client_fixed_ip`, `release_client_fixed_ip`, `set_client_blocked`, `reconnect_client`, `update_client`, `set_client_lock_to_ap`, `set_client_rate_limit` | Full-object stripped client PATCH (`netId` preserved, 20 volatile keys stripped), Lock-to-AP (`clientLockToApSetting`), and rate limits |
 | Offline DHCP reservations | `upsert_dhcp_reservation`, `delete_dhcp_reservation` | Create/update/delete reservations in `setting/service/dhcp` with subnet & IP-overlap validation |
@@ -327,7 +327,7 @@ Every write tool defaults `dryRun=true`, captures a pre-mutation JSON snapshot u
 | Device operations | `update_device`, `reboot_device` | Rename / LED / locate / reboot EAPs, switches, and gateways (`destructive=True` on reboot; firmware upgrade remains unshipped) |
 
 `omada-mcp --list-tools` prints active descriptors without touching the network
-(add `--all` to inspect all 79 tools including non-allowlisted writes).
+(add `--all` to inspect all 80 tools including non-allowlisted writes).
 
 Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18`
 `outputSchema`, so hosts can auto-approve reads and validate structured results:
@@ -375,7 +375,7 @@ Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18
   the same JSON object matching `outputSchema`.
 
 `omada-mcp --list-tools` prints active descriptors without touching the network;
-`omada-mcp --list-tools --all` prints all 79 descriptors (add `--compact` for single-line JSON).
+`omada-mcp --list-tools --all` prints all 80 descriptors (add `--compact` for single-line JSON).
 Direct controller connections reuse persistent HTTP/1.1 keep-alive TLS sockets (`UrllibTransport`),
 and composite troubleshooters (`network_audit`, `diagnose_client`, `diagnose_wan`,
 `get_config_snapshot`, `--watch` / `--export-metrics`) deduplicate repeated site-wide GETs within
@@ -489,7 +489,7 @@ Layout:
 src/omada_mcp/config.py         dotenv discovery, validation, base-URL normalisation, write allowlist
 src/omada_mcp/client.py         Web API v2 client: auth, pagination, write gate, snapshots/audit, errors
 src/omada_mcp/_helpers.py       shared v5/v6 diagnostics, secret redaction, topology & capability helpers
-src/omada_mcp/tools.py          33 read-only tools + 46 write descriptors, projections, outputSchema
+src/omada_mcp/tools.py          33 read-only tools + 47 write descriptors, projections, outputSchema
 src/omada_mcp/write_tools.py    read-modify-write handlers, CIDR packer, anti-stranding, rollback, 6-step swap
 src/omada_mcp/monitor.py        single-session --watch JSON diff streamer & --export-metrics Prometheus exporter
 src/omada_mcp/server.py         JSON-RPC stdio server, fail-closed gates, strict arg/bool checks
@@ -534,7 +534,7 @@ eviction. Firmware upgrades remain unshipped pending a maintenance-window policy
 
 Read-only inspection, composite diagnostics (`get_switch_ports`, `get_ap_radios`,
 `get_wan_status`, `get_topology`, `diagnose_client`, `diagnose_wan`), `--doctor --json`,
-`network_audit`, the 79-tool control surface (`rollback_from_snapshot` + anti-stranding
+`network_audit`, the 80-tool control surface (`rollback_from_snapshot` + anti-stranding
 switch/AP/routing/DNS/ACL/client controls), `--watch`/`--export-metrics`, and non-root
 Docker packaging are implemented on `main`. Next items in [ROADMAP.md](ROADMAP.md)
 include MCP Registry `server.json` / PyPI publishing and multi-version live controller captures.

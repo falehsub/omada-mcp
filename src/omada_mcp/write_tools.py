@@ -3714,9 +3714,6 @@ def _parse_ssid_security(security: str, psk: Optional[str]) -> Tuple[int, Option
     mode = str(security or "wpa2-psk").strip().lower()
     if mode in ("open", "none"):
         return 0, None
-    key_text = str(psk or "")
-    if not (8 <= len(key_text) <= 63):
-        raise OmadaError("WPA-PSK passphrase must be between 8 and 63 characters")
     version_map = {
         "wpa-psk": 3,
         "wpa2-psk": 2,
@@ -3728,6 +3725,9 @@ def _parse_ssid_security(security: str, psk: Optional[str]) -> Tuple[int, Option
         raise OmadaError(
             f"unsupported SSID security {security!r}; expected 'open', 'wpa2-psk', 'wpa-wpa2-psk', or 'wpa3-sae'",
         )
+    key_text = str(psk or "")
+    if not (8 <= len(key_text) <= 63):
+        raise OmadaError("WPA-PSK passphrase must be between 8 and 63 characters")
     return 3, {
         "securityKey": key_text,
         "encryptionPsk": 3,
@@ -6092,15 +6092,54 @@ def upsert_port_profile(
         reauth_prepare=_reauth_prepare,
         fields_changed=sorted(diff.keys()),
     )
+    after_prof = write_res["after"]
+    rollback = {
+        "tool": "delete_port_profile",
+        "arguments": {"profile": str((after_prof or {}).get("id") or prof_name), "dryRun": True},
+    } if not is_update and isinstance(after_prof, Mapping) else None
     return _committed_result(
         tool_name="upsert_port_profile",
         target_id=target_id,
         before=write_res["before"],
-        after=write_res["after"],
+        after=after_prof,
         diff=diff,
         snapshot=write_res["snapshot"],
         warnings=[],
+        rollback=rollback,
+    )
+
+
+def delete_port_profile(
+    client: OmadaClient,
+    profile: str,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Delete a custom wired LAN switch port profile (``DELETE setting/lan/profiles/{id}``)."""
+    site = _site(client)
+    profiles = _fetch_lan_profiles(client, site)
+    target = _resolve_by_id_or_name(profiles, profile, label="port profile")
+    if bool(target.get("prohibitModify")):
+        raise OmadaError(
+            f"port profile {target.get('name')!r} is protected (prohibitModify=true) and cannot be deleted",
+            code=-1001,
+            hint="Only custom port profiles can be deleted.",
+        )
+    target_id = str(target["id"])
+    return _delete_entity(
+        client,
+        tool_name="delete_port_profile",
+        target_id=target_id,
+        endpoint=f"sites/{site.site_id}/setting/lan/profiles/{target_id}",
+        before=target,
+        snapshot_payload={"action": "delete", "profile": target},
+        fetch_all=lambda: _fetch_lan_profiles(client, site),
+        match_fn=lambda row: str(row.get("id")) == target_id,
         rollback=None,
+        warnings=[],
+        dry_run=dryRun,
+        confirm=confirm,
+        label="portProfile",
     )
 
 
@@ -7859,7 +7898,7 @@ def rollback_from_snapshot(
             verify_fn=lambda _b, a: (all(str(r.get("groupId") or r.get("id") or "") != gid for r in a), f"IP group {gid} still present"),
         )
 
-    if orig_tool == "upsert_port_profile" and isinstance(snap_data, Mapping):
+    if orig_tool in ("upsert_port_profile", "delete_port_profile") and isinstance(snap_data, Mapping):
         if snap_data.get("action") == "create":
             existing_ids = set(snap_data.get("existingIds") or [])
             rows = _fetch_lan_profiles(client, site)
@@ -7877,16 +7916,18 @@ def rollback_from_snapshot(
                 verify_fn=lambda _b, a: (all(str(r.get("id")) != pid for r in a), f"port profile {pid} still exists"),
             )
         prof = snap_data.get("profile") if isinstance(snap_data.get("profile"), Mapping) else snap_data
-        pid = str(prof["id"])
+        pid = str(prof.get("id") or "")
         wire_body = {k: copy.deepcopy(v) for k, v in prof.items() if k not in ("id", "site", "flag", "prohibitModify", "type", "resource", "networkConflict", "supportESEnable")}
-        live = next((r for r in _fetch_lan_profiles(client, site) if str(r.get("id")) == pid), {})
+        live = next((r for r in _fetch_lan_profiles(client, site) if str(r.get("id")) == pid), None)
+        method = "PATCH" if live is not None and pid else "POST"
+        ep = f"sites/{site.site_id}/setting/lan/profiles/{pid}" if method == "PATCH" else f"sites/{site.site_id}/setting/lan/profiles"
         return _run_restore(
-            method="PATCH",
-            endpoint=f"sites/{site.site_id}/setting/lan/profiles/{pid}",
+            method=method,
+            endpoint=ep,
             payload=wire_body,
             live_before=live,
             restore_preview=prof,
-            read_back_fn=lambda: next((r for r in _fetch_lan_profiles(client, site) if str(r.get("id")) == pid), {}),
+            read_back_fn=lambda: next((r for r in _fetch_lan_profiles(client, site) if str(r.get("name")) == str(prof.get("name"))), {}),
             verify_fn=lambda _b, a: (bool(a) and str(a.get("name")) == str(prof.get("name")), "port profile rollback mismatch"),
         )
 

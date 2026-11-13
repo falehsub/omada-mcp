@@ -992,15 +992,20 @@ def collect_wan_status_data(
     )
     gateways = [d for d in devs if str(d.get("type") or "").lower() == "gateway"]
 
-    wan_cfg_raw, ok_wcfg = try_api_result(
-        client, f"sites/{site.site_id}/setting/wan/networks", warnings, label="WAN settings",
-    )
     wan_ls_raw, ok_wls = try_api_result(
         client, f"sites/{site.site_id}/setting/wanlanstatus", warnings, label="WAN/LAN status",
     )
-    port_state_raw, ok_ps = try_api_result(
-        client, f"sites/{site.site_id}/dashboard/portstatedetails", warnings, label="WAN port state details",
-    )
+    has_gw_flag = bool(gateways) or bool(ok_wls and isinstance(wan_ls_raw, Mapping) and wan_ls_raw.get("hasGateway"))
+    if has_gw_flag:
+        wan_cfg_raw, ok_wcfg = try_api_result(
+            client, f"sites/{site.site_id}/setting/wan/networks", warnings, label="WAN settings",
+        )
+        port_state_raw, ok_ps = try_api_result(
+            client, f"sites/{site.site_id}/dashboard/portstatedetails", warnings, label="WAN port state details",
+        )
+    else:
+        wan_cfg_raw, ok_wcfg = None, False
+        port_state_raw, ok_ps = None, False
 
     gw_detail: Dict[str, Any] = {}
     gw_mac_norm = ""
@@ -1168,39 +1173,53 @@ def collect_wan_status_data(
     }
 
 
-def collect_vpn_tunnels_data(client: OmadaClient, site: SiteInfo) -> Dict[str, Any]:
+def collect_vpn_tunnels_data(
+    client: OmadaClient,
+    site: SiteInfo,
+    *,
+    has_gateway: Optional[bool] = None,
+) -> Dict[str, Any]:
     """Collect VPN tunnel/peer state and secret-redacted VPN definitions."""
     warnings: List[str] = []
     tunnels: List[Dict[str, Any]] = []
     configured: List[Dict[str, Any]] = []
 
-    stat_endpoints = (
-        ("tunnel", f"sites/{site.site_id}/setting/vpn/stats/tunnel?filters.vpnType=0"),
-        ("ipsec", f"sites/{site.site_id}/setting/vpn/stats/ipsec"),
-        ("sslvpn", f"sites/{site.site_id}/setting/vpn/stats/sslvpn"),
-    )
-    for vtype, ep in stat_endpoints:
-        rows, _, ok = try_paginate(client, ep, warnings, label=f"VPN {vtype} stats")
-        if ok:
-            for row in rows:
-                cleaned = deep_redact(row)
-                cleaned.setdefault("vpnCategory", vtype)
-                tunnels.append(cleaned)
+    if has_gateway is None:
+        devs = unwrap_rows(
+            try_api_result(client, f"sites/{site.site_id}/devices", warnings, label="devices")[0]
+        )
+        has_gateway = any(str(d.get("type") or "").lower() == "gateway" for d in devs)
 
-    dash_endpoints = (
-        ("wireguard", f"sites/{site.site_id}/dashboard/wireguardtunnels"),
-        ("ipsec", f"sites/{site.site_id}/dashboard/ipsectunnels"),
-        ("sslvpn", f"sites/{site.site_id}/dashboard/sslvpntunnels"),
-        ("openvpn_server", f"sites/{site.site_id}/dashboard/openvpntunnels?type=0"),
-        ("openvpn_client", f"sites/{site.site_id}/dashboard/openvpntunnels?type=1"),
-    )
-    for vtype, ep in dash_endpoints:
-        res, ok = try_api_result(client, ep, warnings, label=f"VPN dashboard {vtype}")
-        if ok:
-            for row in unwrap_rows(res):
-                cleaned = deep_redact(row)
-                cleaned.setdefault("vpnCategory", vtype)
-                tunnels.append(cleaned)
+    if has_gateway:
+        stat_endpoints = (
+            ("tunnel", f"sites/{site.site_id}/setting/vpn/stats/tunnel?filters.vpnType=0"),
+            ("ipsec", f"sites/{site.site_id}/setting/vpn/stats/ipsec"),
+            ("sslvpn", f"sites/{site.site_id}/setting/vpn/stats/sslvpn"),
+        )
+        for vtype, ep in stat_endpoints:
+            rows, _, ok = try_paginate(client, ep, warnings, label=f"VPN {vtype} stats")
+            if ok:
+                for row in rows:
+                    cleaned = deep_redact(row)
+                    cleaned.setdefault("vpnCategory", vtype)
+                    tunnels.append(cleaned)
+
+        dash_endpoints = (
+            ("wireguard", f"sites/{site.site_id}/dashboard/wireguardtunnels"),
+            ("ipsec", f"sites/{site.site_id}/dashboard/ipsectunnels"),
+            ("sslvpn", f"sites/{site.site_id}/dashboard/sslvpntunnels"),
+            ("openvpn_server", f"sites/{site.site_id}/dashboard/openvpntunnels?type=0"),
+            ("openvpn_client", f"sites/{site.site_id}/dashboard/openvpntunnels?type=1"),
+        )
+        for vtype, ep in dash_endpoints:
+            res, ok = try_api_result(client, ep, warnings, label=f"VPN dashboard {vtype}")
+            if ok:
+                for row in unwrap_rows(res):
+                    cleaned = deep_redact(row)
+                    cleaned.setdefault("vpnCategory", vtype)
+                    tunnels.append(cleaned)
+    else:
+        warnings.append("No adopted gateway present on site; live VPN tunnel telemetry skipped.")
 
     for vtype, ep in (
         ("vpn", f"sites/{site.site_id}/setting/vpns"),

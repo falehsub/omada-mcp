@@ -1159,7 +1159,7 @@ class CliTests(unittest.TestCase):
             finally:
                 sys.stdout = original
             payload_all = json.loads(buffer_all.getvalue())
-            self.assertEqual(len(payload_all["tools"]), 79)
+            self.assertEqual(len(payload_all["tools"]), 80)
 
         with tempfile.TemporaryDirectory() as tmp:
             env_file = Path(tmp) / "custom.env"
@@ -2321,6 +2321,73 @@ class OptimizationTests(unittest.TestCase):
         })["result"]
         self.assertIn("\n", r_pretty["content"][0]["text"])
         self.assertEqual(r_pretty["structuredContent"], r_full["structuredContent"])
+
+    def test_adaptive_pacing_gateway_fastpath_and_schema_bounds(self):
+        from mock_controller import MockController
+        from omada_mcp.config import DEFAULT_MIN_INTERVAL
+        from omada_mcp.write_tools import _parse_ssid_security
+
+        self.assertEqual(DEFAULT_MIN_INTERVAL, 0.05)
+
+        # 1. Adaptive pacing steps up from 0.05s to 0.25s when a GET encounters -1600
+        ctrl = MockController(username="admin", password="pw", role="Administrator")
+        sleeps = []
+        now = [100.0]
+
+        def clock_fn():
+            return now[0]
+
+        def sleep_fn(sec):
+            sleeps.append(round(sec, 3))
+            now[0] += sec
+
+        cfg = make_config(username="admin", read_only=False, min_interval=0.05)
+        object.__setattr__(cfg, "write_tools", ("create_ssid", "create_lan_network"))
+        client = OmadaClient(cfg, transport=ctrl, sleep=sleep_fn, clock=clock_fn, log_fn=lambda _: None)
+        client.authenticate()
+        sleeps.clear()
+        ctrl.burst_once_for.add(("GET", "setting/upnp"))
+        client.api_result(f"sites/{client.site.site_id}/setting/upnp")
+        self.assertEqual(client._adaptive_min_interval, 0.25)
+        client.api_result(f"sites/{client.site.site_id}/setting/upnp")
+        self.assertIn(0.25, sleeps)
+
+        # 2. Gateway-absent fast-path skips live tunnel stat probes
+        ctrl.has_gateway = False
+        ctrl.devices = [d for d in ctrl.devices if d["type"] != "gateway"]
+        ctrl.requests.clear()
+        srv = Server(cfg, client=client)
+        dw = srv.handle({
+            "jsonrpc": "2.0", "id": 20, "method": "tools/call",
+            "params": {"name": "diagnose_wan", "arguments": {}},
+        })["result"]["structuredContent"]
+        self.assertFalse(dw["wan"]["hasGateway"])
+        paths = [r["path"] for r in ctrl.requests]
+        self.assertFalse(any("stats/vpn" in p or "dashboard/vpnTunnelStats" in p for p in paths))
+
+        # 3. Schema bounds (minimum/maximum/enum) enforced with -32602
+        bad_min = srv.handle({
+            "jsonrpc": "2.0", "id": 21, "method": "tools/call",
+            "params": {"name": "create_lan_network", "arguments": {"name": "BadVlan", "vlan": 0}},
+        })
+        self.assertEqual(bad_min["error"]["code"], -32602)
+
+        bad_max = srv.handle({
+            "jsonrpc": "2.0", "id": 22, "method": "tools/call",
+            "params": {"name": "create_lan_network", "arguments": {"name": "BadVlan", "vlan": 5000}},
+        })
+        self.assertEqual(bad_max["error"]["code"], -32602)
+
+        bad_enum = srv.handle({
+            "jsonrpc": "2.0", "id": 23, "method": "tools/call",
+            "params": {"name": "create_ssid", "arguments": {"name": "BadSec", "security": "wep-broken"}},
+        })
+        self.assertEqual(bad_enum["error"]["code"], -32602)
+
+        # 4. _parse_ssid_security checks security mode before psk length
+        with self.assertRaises(OmadaError) as ctx:
+            _parse_ssid_security("wep-broken", None)
+        self.assertIn("unsupported SSID security", str(ctx.exception))
 
 
 if __name__ == "__main__":
