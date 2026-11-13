@@ -1009,6 +1009,36 @@ class ClientSourceTests(unittest.TestCase):
                                      {"vlan": 20, "wireless": False}), [])
 
 
+class WriteSchemaContractTests(unittest.TestCase):
+    """Issue #4: the advertised schema must accept what the readers return."""
+
+    def test_dhcp_pool_schema_accepts_both_key_shapes(self):
+        item = TOOL_MAP["set_vlan_dhcp_pools"].input_schema["properties"]["pools"]["items"]
+        props = item["properties"]
+        for key in ("ipaddrStart", "ipaddrEnd", "start", "end"):
+            self.assertIn(key, props)
+        self.assertIn({"required": ["start", "end"]}, item["anyOf"])
+        self.assertIn({"required": ["ipaddrStart", "ipaddrEnd"]}, item["anyOf"])
+
+    def test_create_lan_network_pool_schema_accepts_both_key_shapes(self):
+        item = TOOL_MAP["create_lan_network"].input_schema["properties"]["pools"]["items"]
+        for key in ("ipaddrStart", "ipaddrEnd", "start", "end"):
+            self.assertIn(key, item["properties"])
+        self.assertIn({"required": ["start", "end"]}, item["anyOf"])
+        self.assertIn({"required": ["ipaddrStart", "ipaddrEnd"]}, item["anyOf"])
+
+    def test_pools_safety_accepts_reader_shorthand(self):
+        """The handler's own validation takes {start,end}; that is why the schema must too."""
+        client, _, _ = make_client()
+        from omada_mcp.write_tools import _check_dhcp_pools_safety
+
+        network = {"id": "n1", "name": "Lab", "vlan": 20,
+                   "gatewaySubnet": "192.168.20.1/24"}
+        got = _check_dhcp_pools_safety(client, network,
+                                       [{"start": "192.168.20.2", "end": "192.168.20.179"}], [])
+        self.assertEqual(got, [{"ipaddrStart": "192.168.20.2", "ipaddrEnd": "192.168.20.179"}])
+
+
 class DoctorTests(unittest.TestCase):
     def _run(self, config=None, factory=None, client_factory=None, stream=None):
         stream = stream or io.StringIO()

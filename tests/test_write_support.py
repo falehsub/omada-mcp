@@ -553,6 +553,48 @@ class FlowAClientFixedIpTests(unittest.TestCase):
             }))
             self.assertFalse(rel["after"]["useFixedAddr"])
 
+    def test_release_client_fixed_ip_deletes_the_static_reservation_row(self):
+        """Issue #5: release must clear the row, not just flip useFixedAddr."""
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, ctrl, _ = make_write_env(tmp)
+            ctrl.dhcp_reservations = [{
+                "id": "dhcp-seed-1", "mac": "AA-BB-CC-11-11-01", "ip": "192.168.20.50",
+                "netId": "net-iot-20", "status": False, "description": "",
+            }]
+
+            preview = unwrap_ok(call_tool(server, "release_client_fixed_ip", {
+                "mac": "AA-BB-CC-11-11-01",
+            }))
+            self.assertTrue(any("reservation row" in w.lower() for w in preview["warnings"]))
+
+            released = unwrap_ok(call_tool(server, "release_client_fixed_ip", {
+                "mac": "AA-BB-CC-11-11-01",
+                "dryRun": False,
+                "confirm": "release_client_fixed_ip:aa:bb:cc:11:11:01",
+            }))
+            self.assertTrue(released["applied"])
+            self.assertFalse(released["after"]["useFixedAddr"])
+            self.assertEqual(ctrl.dhcp_reservations, [])
+            self.assertTrue(any("reservation row removed" in w for w in released["warnings"]))
+            self.assertTrue(any(r["method"] == "DELETE" and "/setting/service/dhcp/" in r["path"]
+                                for r in ctrl.requests))
+
+    def test_release_without_a_static_row_does_not_claim_a_removal(self):
+        """No row to clean up is not a removal: the warning must not lie."""
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, ctrl, _ = make_write_env(tmp)
+            ctrl.dhcp_reservations = []
+
+            released = unwrap_ok(call_tool(server, "release_client_fixed_ip", {
+                "mac": "AA-BB-CC-11-11-01",
+                "dryRun": False,
+                "confirm": "release_client_fixed_ip:aa:bb:cc:11:11:01",
+            }))
+            self.assertTrue(released["applied"])
+            self.assertFalse(any("row removed" in w for w in released["warnings"]),
+                             released["warnings"])
+            self.assertFalse(any(r["method"] == "DELETE" for r in ctrl.requests))
+
     def test_device_mac_unsupported_fixed_ip_and_controller_ip_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, ctrl, _ = make_write_env(tmp)
@@ -1130,11 +1172,13 @@ class DhcpLanAclGroupWriteTests(unittest.TestCase):
     def test_dhcp_reservation_and_lan_lifecycle_and_guards(self):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, ctrl, _ = make_write_env(tmp)
-            # Create LAN interface with schema-matched pools ({ipaddrStart, ipaddrEnd})
+            # Create LAN interface with controller-named pools; the schema also accepts
+            # the {start, end} shorthand that list_lan_networks returns.
             create_schema = next(t["inputSchema"] for t in tool_descriptors(server.config) if t["name"] == "create_lan_network")
+            items = create_schema["properties"]["pools"]["items"]
             self.assertEqual(
-                set(create_schema["properties"]["pools"]["items"]["required"]),
-                {"ipaddrStart", "ipaddrEnd"},
+                {frozenset(opt["required"]) for opt in items["anyOf"]},
+                {frozenset({"ipaddrStart", "ipaddrEnd"}), frozenset({"start", "end"})},
             )
             lan_dry = unwrap_ok(call_tool(server, "create_lan_network", {
                 "name": "Lab50",

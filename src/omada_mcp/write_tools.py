@@ -1194,13 +1194,45 @@ def set_client_fixed_ip(
     )
 
 
+def _release_static_reservation(client: OmadaClient, site: SiteInfo,
+                                norm_mac: str) -> Tuple[str, Optional[str]]:
+    """Delete the static DHCP reservation row that a fixed IP leaves behind.
+
+    ``PATCH clients/{MAC}`` with ``useFixedAddr: false`` disables the address but the
+    controller keeps the row in ``setting/service/dhcp`` with ``status: false``, where it
+    still shows up in every reservation listing (issue #5). Release therefore removes it.
+    """
+    try:
+        rows = _fetch_dhcp_reservations(client, site)
+    except OmadaError as exc:
+        return False, f"could not read DHCP reservations to clean up the static row: {exc}"
+    row = next((r for r in rows if _normalize_mac(r.get("mac", "")) == norm_mac), None)
+    if row is None:
+        # Nothing to clean up: the client had no static row (or the controller never
+        # materialised one). This is NOT a removal, so it must not be reported as one.
+        return "absent", None
+    path = (f"sites/{site.site_id}/setting/service/dhcp/"
+            f"{urllib.parse.quote(str(row.get('mac')), safe='')}")
+    response = client.api(path, method="DELETE")
+    if response.get("errorCode") not in (0, None):
+        return "failed", (f"static reservation row survived release: DELETE returned "
+                          f"{response.get('errorCode')} {response.get('msg') or ''}".strip())
+    try:
+        remaining = _fetch_dhcp_reservations(client, site)
+    except OmadaError:
+        return "removed", None
+    if any(_normalize_mac(r.get("mac", "")) == norm_mac for r in remaining):
+        return "failed", "static reservation row still listed after DELETE"
+    return "removed", None
+
+
 def release_client_fixed_ip(
     client: OmadaClient,
     mac: str,
     dryRun: bool = True,
     confirm: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Release a client's fixed IP reservation (``useFixedAddr: false``)."""
+    """Release a client's fixed IP: clear ``useFixedAddr`` and delete the static row."""
     site = _site(client)
     devices = _fetch_devices(client, site)
     wanted_norm = _normalize_mac(mac)
@@ -1231,7 +1263,8 @@ def release_client_fixed_ip(
     patch_body["ipSetting"] = dict(desired_ip_setting)
 
     diff = {"ipSetting": {"before": before, "after": desired_ip_setting}}
-    warnings = ["effective at next DHCP lease renewal"]
+    warnings = ["effective at next DHCP lease renewal",
+                "also deletes the static DHCP reservation row when one exists"]
     rollback: Optional[Dict[str, Any]] = None
     if before.get("useFixedAddr") and before.get("ip") and before.get("netId"):
         rollback = {
@@ -1289,6 +1322,12 @@ def release_client_fixed_ip(
         fields_changed=["ipSetting"],
     )
     after_setting = copy.deepcopy((write_res["after"] or {}).get("ipSetting") or {})
+    clean_status, clean_warning = _release_static_reservation(client, site, target_id)
+    if clean_status == "removed":
+        warnings.append("static DHCP reservation row removed")
+    elif clean_warning:
+        warnings.append(clean_warning)
+
     return _committed_result(
         tool_name="release_client_fixed_ip",
         target_id=target_id,
