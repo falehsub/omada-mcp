@@ -134,9 +134,20 @@ class Server:
         self.out.write(json.dumps(payload, ensure_ascii=False) + "\n")
         self.out.flush()
 
-    @staticmethod
-    def _read_messages(stream: TextIO) -> Iterable[Any]:
-        """Yield every JSON value, tolerating multiple values per line."""
+    #: Upper bound on one buffered, still-incomplete JSON value. Guards against a
+    #: client that streams an unterminated value forever (memory growth).
+    MAX_FRAME_CHARS = 8 * 1024 * 1024
+
+    @classmethod
+    def _read_messages(cls, stream: TextIO) -> Iterable[Any]:
+        """Yield every JSON value, tolerating multiple values per line.
+
+        A value split across lines is buffered until it completes, but a real
+        syntax error (the decoder fails *before* the end of the buffered text)
+        is reported once as ``None`` (-> ``-32700``) and the rest of that line
+        is discarded. Without this a single garbage line would poison the
+        buffer and every later request would be swallowed silently.
+        """
         decoder = json.JSONDecoder()
         buffer = ""
         while True:
@@ -157,7 +168,18 @@ class Server:
                     break
                 try:
                     value, end = decoder.raw_decode(stripped)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as exc:
+                    content_end = len(stripped.rstrip())
+                    if exc.pos < content_end:
+                        # Genuine syntax error: report it, drop the bad line.
+                        yield None
+                        newline = stripped.find("\n", exc.pos)
+                        buffer = "" if newline < 0 else stripped[newline + 1:]
+                        continue
+                    if len(stripped) > cls.MAX_FRAME_CHARS:
+                        yield None
+                        buffer = ""
+                        break
                     # Incomplete value: wait for more input.
                     buffer = stripped
                     break

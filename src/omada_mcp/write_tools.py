@@ -3526,6 +3526,11 @@ def update_gateway_acl(
     warnings = [_ACL_DISPATCH_NOTES]
     if acl_disable is not None:
         warnings.append(f"observed controller aclDisable={acl_disable!r} (advisory only)")
+    if biDirectional is not None and "biDirectional" not in target_rule:
+        warnings.append(
+            "controller ACL schema does not expose 'biDirectional' on read-back "
+            "(Omada v6.x uses stateful stateMode instead)"
+        )
     expected = {k: patch_body[k] for k in dict.fromkeys(changed_keys)}
 
     if dryRun:
@@ -3549,7 +3554,12 @@ def update_gateway_acl(
     def _verify(_before: Any, after_rule: Any) -> Tuple[bool, Optional[str]]:
         if not isinstance(after_rule, Mapping):
             return False, f"ACL rule {target_id} missing on read-back"
-        ok, reason = _match_fields(after_rule, expected)
+        verifiable = {
+            k: v
+            for k, v in expected.items()
+            if k != "biDirectional" or "biDirectional" in after_rule or "biDirectional" in target_rule
+        }
+        ok, reason = _match_fields(after_rule, verifiable)
         if not ok:
             return False, reason
         ignore = list(expected.keys())

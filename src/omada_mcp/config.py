@@ -414,9 +414,15 @@ def parse_env_text(text: str) -> Dict[str, str]:
 
 
 def parse_env_file(path: os.PathLike | str) -> Dict[str, str]:
-    """Parse a dotenv file; missing or unreadable files yield ``{}``."""
+    """Parse a dotenv file; missing or unreadable files yield ``{}``.
+
+    ``utf-8-sig`` strips a leading BOM: Windows PowerShell 5.1
+    (``Set-Content -Encoding utf8``) and older Notepad write one, which would
+    otherwise turn the first key into ``\\ufeffOMADA_BASE_URL`` and surface as
+    a misleading "missing OMADA_BASE_URL" error.
+    """
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, "r", encoding="utf-8-sig") as handle:
             return parse_env_text(handle.read())
     except (OSError, UnicodeDecodeError):
         return {}

@@ -1357,6 +1357,35 @@ class DhcpLanAclGroupWriteTests(unittest.TestCase):
             }))
             self.assertIs(u_res["after"]["syslog"], True)
 
+            # Omada v6.2 omits 'biDirectional' on ACL rule read-back (uses stateMode instead):
+            # update_gateway_acl must warn and still verify when target_rule lacks biDirectional.
+            live_rule = next(r for r in _ctrl.acls if r["name"] == "acl-del-renamed")
+            live_rule.pop("biDirectional", None)
+            orig_req = _ctrl.request
+
+            def _req_v62(method, url, headers=None, data=None, timeout=None):
+                res = orig_req(method, url, headers=headers, data=data, timeout=timeout)
+                for r in _ctrl.acls:
+                    r.pop("biDirectional", None)
+                return res
+
+            _ctrl.request = _req_v62
+            try:
+                b_dry = unwrap_ok(call_tool(server, "update_gateway_acl", {
+                    "rule": "acl-del-renamed",
+                    "biDirectional": True,
+                }))
+                self.assertTrue(any("biDirectional" in w for w in b_dry["warnings"]))
+                b_res = unwrap_ok(call_tool(server, "update_gateway_acl", {
+                    "rule": "acl-del-renamed",
+                    "biDirectional": True,
+                    "dryRun": False,
+                    "confirm": b_dry["confirmToken"],
+                }))
+                self.assertTrue(b_res["verified"])
+            finally:
+                _ctrl.request = orig_req
+
             # Delete ACL then group succeeds
             d_acl_dry = unwrap_ok(call_tool(server, "delete_gateway_acl", {"rule": "acl-del-renamed"}))
             unwrap_ok(call_tool(server, "delete_gateway_acl", {

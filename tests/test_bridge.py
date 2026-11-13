@@ -679,6 +679,37 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(len(messages), 2)
         self.assertEqual(messages[1]["method"], "tools/list")
 
+    def test_malformed_line_does_not_poison_the_stream(self):
+        """Regression: one garbage line used to swallow every later request."""
+        payload = ('{not json}\n'
+                   '{"jsonrpc":"2.0","id":2,"method":"ping"}\n'
+                   'garbage {"x": 1}\n'
+                   '{"jsonrpc":"2.0","id":3,"method":"ping"}\n')
+        messages = list(Server._read_messages(io.StringIO(payload)))
+        self.assertEqual(messages[0], None)
+        self.assertEqual(messages[1]["id"], 2)
+        self.assertEqual(messages[2], None)
+        self.assertEqual(messages[-1]["id"], 3)
+
+    def test_serve_answers_parse_error_then_keeps_serving(self):
+        server, _, _ = self._server()
+        stdin = io.StringIO('{not json}\n{"jsonrpc":"2.0","id":7,"method":"ping"}\n')
+        stdout = io.StringIO()
+        server.serve(stdin=stdin, stdout=stdout)
+        frames = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+        self.assertEqual(frames[0]["error"]["code"], -32700)
+        self.assertEqual(frames[1]["id"], 7)
+
+    def test_oversized_incomplete_frame_is_dropped(self):
+        original = Server.MAX_FRAME_CHARS
+        Server.MAX_FRAME_CHARS = 64
+        try:
+            payload = '{"a": [' + "1,\n" * 100 + '{"jsonrpc":"2.0","id":5,"method":"ping"}\n'
+            messages = list(Server._read_messages(io.StringIO(payload)))
+        finally:
+            Server.MAX_FRAME_CHARS = original
+        self.assertIn(None, messages)
+
     def test_serve_loop_writes_one_line_per_response(self):
         server, _, _ = self._server()
         stdin = io.StringIO('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n'
@@ -740,6 +771,16 @@ class WindowsTests(unittest.TestCase):
                    '{"jsonrpc":"2.0","id":2,"method":"tools/list"}\r\n')
         messages = list(Server._read_messages(io.StringIO(payload)))
         self.assertEqual([m["id"] for m in messages], [1, 2])
+
+    def test_env_file_with_utf8_bom_is_parsed(self):
+        """PowerShell 5.1 `Set-Content -Encoding utf8` and old Notepad add a BOM."""
+        from omada_mcp.config import parse_env_file
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_bytes(b"\xef\xbb\xbfOMADA_BASE_URL=https://win:8043\r\nOMADA_USERNAME=u\r\n")
+            values = parse_env_file(env_file)
+        self.assertEqual(values.get("OMADA_BASE_URL"), "https://win:8043")
+        self.assertEqual(values.get("OMADA_USERNAME"), "u")
 
     def test_appdata_env_file_is_discovered_on_windows(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1119,6 +1160,18 @@ class CliTests(unittest.TestCase):
                 sys.stdout = original
             payload_all = json.loads(buffer_all.getvalue())
             self.assertEqual(len(payload_all["tools"]), 79)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / "custom.env"
+            env_file.write_text(
+                "OMADA_READ_ONLY=false\nOMADA_WRITE_TOOLS=set_vlan_isolation,create_ip_group\n",
+                encoding="utf-8",
+            )
+            buf_env = io.StringIO()
+            with mock.patch("sys.stdout", buf_env), \
+                 mock.patch.dict(os.environ, {"OMADA_ENV_FILE": str(env_file)}, clear=True):
+                self.assertEqual(main(["--list-tools"]), 0)
+            self.assertEqual(len(json.loads(buf_env.getvalue())["tools"]), 35)
 
     def test_missing_config_exits_non_zero(self):
         from omada_mcp.cli import main
@@ -1846,7 +1899,9 @@ class Milestone3MonitorAndPackagingTests(unittest.TestCase):
             cfg, host="127.0.0.1", port=0, min_scrape_interval=60.0,
             client_factory=factory,
         )
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread = threading.Thread(
+            target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         thread.start()
         try:
             base = f"http://127.0.0.1:{httpd.server_port}"
@@ -1935,7 +1990,9 @@ class OptimizationTests(unittest.TestCase):
 
         CountingServer.accepted_connections = 0
         httpd = CountingServer(("127.0.0.1", 0), KeepAliveHandler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread = threading.Thread(
+            target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         thread.start()
         transport = UrllibTransport(build_ssl_context(make_config()), timeout=5.0)
         try:
