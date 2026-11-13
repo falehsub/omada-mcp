@@ -47,7 +47,12 @@ from omada_mcp.monitor import (  # noqa: E402
     serve_metrics_http,
 )
 from omada_mcp.server import Server, configure_streams  # noqa: E402
-from omada_mcp.tools import TOOL_MAP, normalize_mac, project_wlan  # noqa: E402
+from omada_mcp.tools import (  # noqa: E402
+    TOOL_MAP,
+    _findings_healthy,
+    normalize_mac,
+    project_wlan,
+)
 
 CONTROLLER_ID = "0123456789abcdef01234567"
 SITE_ID = "89abcdef0123456789abcdef"
@@ -1680,6 +1685,13 @@ class Milestone1DiagnosticsTests(unittest.TestCase):
         self.assertIn("SWITCH_POE_BUDGET_HIGH", a_codes)
         self.assertIn("AP_HIGH_RETRY_RATE", a_codes)
         self.assertIn("WAN_PACKET_LOSS", a_codes)
+        # issue #3: the enrichment wrapper must not re-derive health from criticals
+        # alone — warnings appended by enrichment keep the audit unhealthy.
+        self.assertGreater(audit["counts"]["warnings"], 0)
+        self.assertFalse(audit["healthy"])
+        self.assertFalse(_findings_healthy([{"severity": "warning"}]))
+        self.assertTrue(_findings_healthy([]))
+        self.assertTrue(_findings_healthy([{"severity": "info"}]))
 
     def test_list_acls_backward_compatible_and_ro_token_budget(self):
         server, ctrl = self._mock_server()

@@ -457,6 +457,17 @@ _ISOLATED_VLAN_KEYWORDS = ("iot", "guest", "kids", "camera", "security", "untrus
 _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 
 
+def _findings_healthy(findings: List[Dict[str, Any]]) -> bool:
+    """The one definition of audit health: no critical and no warning findings.
+
+    Both ``_network_audit`` and ``_network_audit_enriched`` must use this. The
+    wrapper previously recomputed health as ``critical == 0``, so the same tool
+    reported a different meaning depending on whether enrichment appended
+    findings (issue #3).
+    """
+    return not any(f.get("severity") in ("critical", "warning") for f in findings)
+
+
 def _dhcp_pool_capacity(dhcp: Dict[str, Any]) -> int:
     """Total IPv4 addresses across ``dhcpSettings.ipRangePool`` (or start/end fallback)."""
     return dhcp_pool_capacity(dhcp)
@@ -590,7 +601,7 @@ def _network_audit(client: OmadaClient) -> Dict[str, Any]:
     dhcp_pools.sort(key=lambda p: (p["vlan"], p["network"]))
 
     return {
-        "healthy": not any(f["severity"] in ("critical", "warning") for f in findings),
+        "healthy": _findings_healthy(findings),
         "controller": {
             "id": client.controller_id,
             "version": getattr(client.auth_info, "controller_version", None),
@@ -2321,7 +2332,7 @@ def _network_audit_enriched(client: OmadaClient) -> Dict[str, Any]:
         "info": info,
     })
     return {
-        "healthy": critical == 0,
+        "healthy": _findings_healthy(findings),
         "controller": audit.get("controller"),
         "site": audit.get("site"),
         "counts": counts,
