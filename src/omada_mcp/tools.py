@@ -3540,10 +3540,19 @@ TOOLS: Tuple[Tool, ...] = (
                         "properties": {
                             "ipaddrStart": {"type": "string"},
                             "ipaddrEnd": {"type": "string"},
+                            "start": {"type": "string"},
+                            "end": {"type": "string"},
                         },
-                        "required": ["ipaddrStart", "ipaddrEnd"],
+                        "anyOf": [
+                            {"required": ["ipaddrStart", "ipaddrEnd"]},
+                            {"required": ["start", "end"]},
+                        ],
                     },
-                    "description": "Non-empty list of {ipaddrStart, ipaddrEnd} DHCP pools",
+                    "description": (
+                        "Non-empty list of DHCP pools. Either the controller field names "
+                        "{ipaddrStart, ipaddrEnd} or the shorthand {start, end} that "
+                        "list_lan_networks returns is accepted (issue #4)."
+                    ),
                 },
                 "vlan": {"type": "integer", "description": "Target VLAN ID (or provide netId)"},
                 "netId": {"type": "string", "description": "Target LAN network ID (or provide vlan)"},
@@ -3817,10 +3826,23 @@ TOOLS: Tuple[Tool, ...] = (
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {"ipaddrStart": {"type": "string"}, "ipaddrEnd": {"type": "string"}},
-                        "required": ["ipaddrStart", "ipaddrEnd"],
+                        "properties": {
+                            "ipaddrStart": {"type": "string"},
+                            "ipaddrEnd": {"type": "string"},
+                            "start": {"type": "string"},
+                            "end": {"type": "string"},
+                        },
+                        "anyOf": [
+                            {"required": ["ipaddrStart", "ipaddrEnd"]},
+                            {"required": ["start", "end"]},
+                        ],
                     },
-                    "description": "Optional DHCP pools [{'ipaddrStart': '...', 'ipaddrEnd': '...'}]",
+                    "description": (
+                        "Optional DHCP pools. Either the controller field names "
+                        "{ipaddrStart, ipaddrEnd} or the shorthand {start, end} that "
+                        "list_lan_networks returns is accepted, so a reader's output can be "
+                        "fed straight into a create."
+                    ),
                 },
                 "leaseTime": {"type": "integer", "minimum": 1, "default": 120, "description": "DHCP lease time in minutes (default 120)"},
                 "domain": {"type": "string", "description": "Optional local DNS domain suffix"},

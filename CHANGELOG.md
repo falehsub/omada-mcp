@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-11-13
+
+Patch release from a live write-mode session: two reporting/schema defects found by using the
+server, plus a self-test for the DHCP pool contract.
+
+### Fixed
+
+- **`release_client_fixed_ip` claimed a removal it had not performed.** When no static
+  reservation row existed, the cleanup step returned success and the tool appended
+  "static DHCP reservation row removed" to `warnings` anyway. The cleanup is now tri-state
+  (`removed` / `absent` / `failed`): the warning is emitted only for a real removal, a failure
+  names the DELETE result, and an absent row says nothing.
+- **`create_lan_network` pool schema rejected the reader's shape.** It advertised only
+  `{ipaddrStart, ipaddrEnd}` while `list_lan_networks` returns `[{start, end}]`, so feeding a
+  reader's output into a create failed client-side schema validation. Both shapes are now
+  declared (same `anyOf` contract as `set_vlan_dhcp_pools`); the handler already normalised
+  them through the same safety check.
+
+### Added
+
+- `scripts/write_selftest.py`: a new `lan-pool-shape` scenario that dry-runs
+  `create_lan_network` with the reader's pool shape, so the two schemas cannot drift apart
+  again without failing loudly. Dry run only — it never creates a network.
+
+### Notes
+
+- No tool surface change, no new dependencies, no behaviour change for callers that already
+  used the controller field names.
+
 ## [1.2.1] - 2026-11-13
 
 Live-controller client & audit fixes verified on Omada `v6.2.10.17` and
