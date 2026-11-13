@@ -157,7 +157,10 @@ def _phase_env(config: Optional[Config], error: Optional[ConfigError], report: R
         report.add(PhaseResult("env", FAIL, error.message, error.hint))
         return
     assert config is not None
-    origin = str(config.env_file) if config.env_file else "process environment only"
+    if report.json_output:
+        origin = config.env_origin or ("OMADA_ENV_FILE" if config.env_file else "environment")
+    else:
+        origin = str(config.env_file) if config.env_file else "process environment only"
     report.add(PhaseResult(
         "env", PASS,
         f"{origin} | url={config.base_url} user={config.username} "
@@ -166,9 +169,14 @@ def _phase_env(config: Optional[Config], error: Optional[ConfigError], report: R
     if config.env_file and not _IS_WINDOWS:
         mode = oct(config.env_file.stat().st_mode & 0o777)
         if mode not in ("0o600", "0o400"):
-            report.add(PhaseResult(
-                "env", WARN, f"{config.env_file} has mode {mode}",
-                f"chmod 600 {config.env_file} (it holds the controller password)"))
+            if report.json_output:
+                report.add(PhaseResult(
+                    "env", WARN, f"{config.env_origin} has mode {mode} (group/other-readable)",
+                    f"Restrict permissions: chmod 600 <{config.env_origin}>"))
+            else:
+                report.add(PhaseResult(
+                    "env", WARN, f"{config.env_file} has mode {mode}",
+                    f"chmod 600 {config.env_file} (it holds the controller password)"))
 
 
 def _phase_tls(client: OmadaClient, config: Config, report: Report) -> bool:
@@ -189,7 +197,8 @@ def _phase_tls(client: OmadaClient, config: Config, report: Report) -> bool:
     detail = (f"reachable, omadacId={info['omadacId']}, "
               f"controllerVer={info['controllerVer'] or 'unknown'}, family={family}")
     if config.verify_ssl:
-        via = str(config.ca_bundle) if config.ca_bundle else "the system trust store"
+        ca_label = "OMADA_CA_BUNDLE" if report.json_output else str(config.ca_bundle)
+        via = ca_label if config.ca_bundle else "the system trust store"
         if config.tls_server_name:
             via += f" (serverName={config.tls_server_name})"
         detail = f"verified against {via} | {detail}"

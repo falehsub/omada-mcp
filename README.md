@@ -17,10 +17,10 @@ uvx omada-mcp --doctor
 ```
 
 ```
-omada-mcp doctor v1.1.0 on Linux-6.8 (Python 3.12.7)
+omada-mcp doctor v1.1.1 on Linux-6.8 (Python 3.12.7)
 ------------------------------------------------------------------
 PASS env      /home/you/.config/omada-mcp/.env | url=https://192.0.2.10:8043 user=omada-readonly password=set (24 chars)
-PASS tls      verified against /home/you/.config/omada-mcp/controller-ca.pem (serverName=Omada) | reachable, omadacId=0123456789abcdef01234567, controllerVer=5.13.30.8, family=software-5.x
+PASS tls      verified against /home/you/.config/omada-mcp/controller-ca.pem (serverName=Omada) | reachable, omadacId=0123456789abcdef01234567, controllerVer=6.2.10.17, family=software-6.x
 PASS login    token accepted for omada-readonly (role=Viewer, scope=all sites, cookie=TPOMADA_SESSIONID), Csrf-Token round-trip OK
 PASS site     Home (89abcdef0123456789abcdef) site 1 of 1; matched OMADA_SITE_NAME=Home
 PASS tools    list_devices -> 7 device(s); 10 read-only tools registered, 23 client(s)
@@ -29,7 +29,7 @@ PASS tools    list_devices -> 7 device(s); 10 read-only tools registered, 23 cli
 Ready: `omada-mcp` will serve 10 read-only tools on stdio.
 ```
 
-Add `--json` (`omada-mcp --doctor --json`) for machine-readable output validated against [`schemas/doctor.schema.json`](schemas/doctor.schema.json).
+Add `--json` (`omada-mcp --doctor --json`) for machine-readable output validated against [`schemas/doctor.schema.json`](schemas/doctor.schema.json). JSON output redacts local `.env` and `OMADA_CA_BUNDLE` filesystem paths to origin labels (`OMADA_ENV_FILE`, `cwd`, `appdata`, `xdg`, `environment`) so reports are safe to paste into issues.
 
 ---
 
@@ -273,13 +273,21 @@ windowing is bounded by `limit` (default 500, max 5000) and de-duplicated by MAC
 | `network_audit` | — | Composite one-call health audit: pending firmware, offline devices, 0-client APs, guest/unexpected VLAN clients, unisolated VLANs, DHCP pool utilization, and stable finding codes |
 | `explain_error` | `code`, `endpoint?` | Structured decoder for Omada `errorCode` values (`-1600`, `-33726`, `-1505`, `-1001`, `-30109`, `-41011`, `-44116`, …) with ambiguity notes and fixes |
 
-Each entry in `tools/list` carries MCP annotations, so hosts can auto-approve
-reads instead of prompting on every call:
+Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18`
+`outputSchema`, so hosts can auto-approve reads and validate structured results:
 
 ```json
 {
   "name": "list_devices",
   "title": "List Omada devices",
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "items": { "type": "array" },
+      "count": { "type": "integer", "minimum": 0 }
+    },
+    "required": ["items", "count"]
+  },
   "annotations": {
     "title": "List Omada devices",
     "readOnlyHint": true,
@@ -289,6 +297,19 @@ reads instead of prompting on every call:
   }
 }
 ```
+
+### Output shape (`content` vs `structuredContent`)
+
+* **List tools** (`list_devices`, `list_clients`, `list_wifi_clients`,
+  `list_wired_clients`, `list_wlans`): `content[0].text` is serialized as a
+  **bare JSON array** (`[{...}, ...]`), while `structuredContent` is an object
+  matching `outputSchema`: `{"items": [...], "count": <int>}`. Callers parsing
+  `content[0].text` (for example migrating from wrapper objects like
+  `{"devices": [...]}`) receive a JSON list directly, whereas MCP `2025-06-18`
+  hosts read `structuredContent.items` and `structuredContent.count`.
+* **Object tools** (`get_device`, `get_client`, `get_site_info`,
+  `network_audit`, `explain_error`): both `content[0].text` and
+  `structuredContent` contain the same JSON object matching `outputSchema`.
 
 `omada-mcp --list-tools` prints every descriptor without touching the network.
 
@@ -329,18 +350,19 @@ See [`docs/compatibility.md`](docs/compatibility.md) for the full compatibility 
 
 * **Software controller v6.x** — verified live: `--doctor --json` and all ten read
   tools return data on v6.2.10.17 (`TPOMADA_SESSIONID`).
-* **Software controller v5.x** — verified live on v5.13.30.8; `--doctor` reports
-  `software-5.x`.
-* **OC200 / OC300 hardware & `TPEAP_SESSIONID` builds** — `--doctor` detects
-  both `TPOMADA_SESSIONID` and `TPEAP_SESSIONID`, handles legacy `result.omadacId`
-  login shapes, and reports the detected controller family (`hardware-5.x`, etc.).
-  Run `omada-mcp --doctor --json` to report new `controllerVer` strings.
+* **Software controller v5.x** — expected (v5.13.30.8 core auth/list shapes
+  supported; awaiting a `--doctor --json` capture via the issue template).
+* **OC200 / OC300 hardware & `TPEAP_SESSIONID` builds** — expected (`--doctor`
+  detects both `TPOMADA_SESSIONID` and `TPEAP_SESSIONID`, handles legacy
+  `result.omadacId` login shapes, and reports `hardware-5.x` / `hardware-6.x`).
+  Run `omada-mcp --doctor --json` and submit a
+  [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml).
 
 ## Development
 
 ```bash
 git clone https://github.com/falehsub/omada-mcp && cd omada-mcp
-python -m unittest discover -s tests -v     # 84 tests, no network, no deps
+python -m unittest discover -s tests -v     # 87 tests, no network, no deps
 python -m omada_mcp.cli --help              # after: pip install -e .
 uvx --from . omada-mcp --doctor             # what an external user does
 

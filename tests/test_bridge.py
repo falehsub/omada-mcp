@@ -486,6 +486,10 @@ class ProtocolTests(unittest.TestCase):
             expected_open = tool["name"] != "explain_error"
             self.assertIs(annotations["openWorldHint"], expected_open, tool["name"])
             self.assertEqual(tool["inputSchema"]["type"], "object")
+            self.assertIn("outputSchema", tool, tool["name"])
+            self.assertEqual(tool["outputSchema"]["type"], "object", tool["name"])
+            self.assertTrue(tool["outputSchema"]["properties"], tool["name"])
+            self.assertTrue(tool["outputSchema"]["required"], tool["name"])
 
     def test_read_only_mode_refuses_non_read_only_names(self):
         server, _, _ = self._server(read_only=True)
@@ -1158,6 +1162,139 @@ class V11FeatureTests(unittest.TestCase):
         self.assertEqual(doc["exitCode"], 1)
         self.assertIsNone(doc["site"])
         self.assertEqual(doc["phases"][0]["status"], "FAIL")
+
+    def test_tools_output_schema_matches_structured_content(self):
+        client, _, _ = make_client()
+        server = Server(client.config, client=client)
+        descriptors = {
+            t["name"]: t
+            for t in server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]
+        }
+        calls = [
+            ("list_devices", {}),
+            ("list_clients", {}),
+            ("list_wifi_clients", {}),
+            ("list_wired_clients", {}),
+            ("get_device", {"mac": "AA-BB-CC-00-00-01"}),
+            ("get_client", {"mac": "AA-BB-CC-11-11-01"}),
+            ("list_wlans", {}),
+            ("get_site_info", {}),
+            ("network_audit", {}),
+            ("explain_error", {"code": -33726}),
+        ]
+        self.assertEqual({name for name, _ in calls}, set(descriptors))
+        for name, args in calls:
+            schema = descriptors[name]["outputSchema"]
+            result = server.handle({
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": name, "arguments": args},
+            })["result"]
+            self.assertFalse(result["isError"], name)
+            sc = result["structuredContent"]
+            self.assertIsInstance(sc, dict, name)
+            for req_key in schema["required"]:
+                self.assertIn(req_key, sc, f"{name} missing required key {req_key}")
+            if name.startswith("list_"):
+                text_payload = json.loads(result["content"][0]["text"])
+                self.assertIsInstance(text_payload, list, name)
+                self.assertEqual(sc["count"], len(sc["items"]), name)
+                item_schema = schema["properties"]["items"]["items"]
+                for item in sc["items"]:
+                    for item_req in item_schema["required"]:
+                        self.assertIn(item_req, item, f"{name} item missing {item_req}")
+
+    def test_doctor_json_redacts_filesystem_paths(self):
+        from omada_mcp import doctor as doctor_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            env_file = tmp_path / "secret-profile.env"
+            env_file.write_text(
+                "OMADA_BASE_URL=https://controller.test:8043\n"
+                "OMADA_USERNAME=admin\n"
+                "OMADA_PASSWORD=pw\n",
+                encoding="utf-8",
+            )
+            env_file.chmod(0o644)
+            ca_file = tmp_path / "controller-ca.pem"
+            ca_file.write_text("-----BEGIN CERTIFICATE-----\nMII=\n-----END CERTIFICATE-----\n",
+                               encoding="utf-8")
+
+            cfg = load_config(
+                environ={"OMADA_ENV_FILE": str(env_file), "OMADA_CA_BUNDLE": str(ca_file)},
+                cwd=tmp_path,
+            )
+            self.assertEqual(cfg.env_origin, "OMADA_ENV_FILE")
+            self.assertEqual(cfg.masked()["env_origin"], "OMADA_ENV_FILE")
+
+            fake = FakeController(controller_ver="6.2.10.17", cookie_name="TPOMADA_SESSIONID")
+            client = OmadaClient(cfg, transport=fake, sleep=lambda _s: None,
+                                 clock=lambda: 0.0, log_fn=lambda _m: None)
+            stream = io.StringIO()
+            with mock.patch.object(doctor_module, "_IS_WINDOWS", False):
+                rc = doctor_module.run_doctor(
+                    config_factory=lambda: cfg,
+                    client_factory=lambda _c: client,
+                    stream=stream,
+                    json_output=True,
+                )
+            self.assertEqual(rc, 0)
+            raw_json = stream.getvalue()
+            self.assertNotIn(str(tmp_path), raw_json)
+            self.assertNotIn("secret-profile.env", raw_json)
+            self.assertNotIn("controller-ca.pem", raw_json)
+            doc = json.loads(raw_json)
+            self.assertTrue(doc["phases"][0]["detail"].startswith("OMADA_ENV_FILE | "))
+            self.assertIn("OMADA_CA_BUNDLE", doc["phases"][2]["detail"])
+
+    def test_config_env_origin_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cwd_dir = tmp_path / "work"
+            cwd_dir.mkdir()
+            (cwd_dir / ".env").write_text(
+                "OMADA_BASE_URL=https://cwd:8043\nOMADA_USERNAME=u\nOMADA_PASSWORD=p\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(load_config(environ={}, cwd=cwd_dir).env_origin, "cwd")
+
+            appdata_dir = tmp_path / "roaming"
+            (appdata_dir / "omada-mcp").mkdir(parents=True)
+            (appdata_dir / "omada-mcp" / ".env").write_text(
+                "OMADA_BASE_URL=https://win:8043\nOMADA_USERNAME=u\nOMADA_PASSWORD=p\n",
+                encoding="utf-8",
+            )
+            empty_dir = tmp_path / "empty"
+            empty_dir.mkdir()
+            with mock.patch.object(config_module, "_IS_WINDOWS", True):
+                self.assertEqual(
+                    load_config(environ={"APPDATA": str(appdata_dir)}, cwd=empty_dir).env_origin,
+                    "appdata",
+                )
+
+            xdg_dir = tmp_path / "xdg"
+            (xdg_dir / "omada-mcp").mkdir(parents=True)
+            (xdg_dir / "omada-mcp" / ".env").write_text(
+                "OMADA_BASE_URL=https://xdg:8043\nOMADA_USERNAME=u\nOMADA_PASSWORD=p\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(config_module, "_IS_WINDOWS", False):
+                self.assertEqual(
+                    load_config(environ={"XDG_CONFIG_HOME": str(xdg_dir)}, cwd=empty_dir).env_origin,
+                    "xdg",
+                )
+
+            self.assertEqual(
+                load_config(
+                    environ={
+                        "OMADA_BASE_URL": "https://env:8043",
+                        "OMADA_USERNAME": "u",
+                        "OMADA_PASSWORD": "p",
+                    },
+                    cwd=empty_dir,
+                ).env_origin,
+                "environment",
+            )
 
 
 if __name__ == "__main__":

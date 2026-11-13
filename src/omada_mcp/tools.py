@@ -509,14 +509,215 @@ def _network_audit(client: OmadaClient) -> Dict[str, Any]:
 
 # -- registry ----------------------------------------------------------------
 
+def _list_output_schema(item_schema: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "items": {"type": "array", "items": item_schema},
+            "count": {"type": "integer", "minimum": 0},
+        },
+        "required": ["items", "count"],
+    }
+
+
+_DEVICE_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "mac": {"type": "string"},
+        "name": {"type": "string"},
+        "type": {"type": "string"},
+        "model": {"type": "string"},
+        "ip": {"type": "string"},
+        "firmware": {"type": "string"},
+        "uptime": {"type": ["string", "integer"]},
+        "clientCount": {"type": "integer"},
+        "status": {"type": "integer"},
+        "needUpgrade": {"type": "boolean"},
+    },
+    "required": [
+        "mac", "name", "type", "model", "ip",
+        "firmware", "uptime", "clientCount", "status", "needUpgrade",
+    ],
+}
+
+_CLIENT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "mac": {"type": "string"},
+        "name": {"type": "string"},
+        "hostName": {"type": "string"},
+        "ip": {"type": "string"},
+        "wireless": {"type": "boolean"},
+        "guest": {"type": "boolean"},
+        "active": {"type": "boolean"},
+        "ssid": {"type": "string"},
+        "apName": {"type": "string"},
+        "networkName": {"type": "string"},
+        "vlan": {"type": "integer"},
+        "download": {"type": "integer"},
+        "upload": {"type": "integer"},
+        "duration": {"type": "integer"},
+        "lastSeen": {"type": "string"},
+        "signal": {"type": ["integer", "number", "null"]},
+    },
+    "required": [
+        "mac", "name", "hostName", "ip", "wireless", "guest", "active",
+        "ssid", "apName", "networkName", "vlan", "download", "upload",
+        "duration", "lastSeen", "signal",
+    ],
+}
+
+_WLAN_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "ssid": {"type": "string"},
+        "band": {"type": ["integer", "string"]},
+        "enabled": {"type": "boolean"},
+        "guest": {"type": "boolean"},
+        "security": {"type": ["integer", "string"]},
+        "vlanId": {"type": ["integer", "null"]},
+        "networkName": {"type": "string"},
+        "hideSsid": {"type": "boolean"},
+        "macFilterEnable": {"type": "boolean"},
+        "rateLimitEnable": {"type": "boolean"},
+        "wlanGroup": {"type": "string"},
+        "hasPresharedKey": {"type": "boolean"},
+    },
+    "required": ["hasPresharedKey"],
+}
+
+_SITE_INFO_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "id": {"type": "string"},
+        "sitesVisible": {"type": "integer"},
+        "wanConnected": {"type": "boolean"},
+        "lanConnected": {"type": "boolean"},
+        "wlanConnected": {"type": "boolean"},
+        "deviceCount": {"type": "integer"},
+        "clientCount": {"type": "integer"},
+        "wifiClientCount": {"type": "integer"},
+        "wiredClientCount": {"type": "integer"},
+        "controllerVersion": {"type": ["string", "null"]},
+        "siteUrl": {"type": "string"},
+    },
+    "required": [
+        "name", "id", "sitesVisible", "wanConnected", "lanConnected",
+        "wlanConnected", "deviceCount", "clientCount", "wifiClientCount",
+        "wiredClientCount", "controllerVersion", "siteUrl",
+    ],
+}
+
+_NETWORK_AUDIT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "healthy": {"type": "boolean"},
+        "controller": {
+            "type": "object",
+            "properties": {
+                "id": {"type": ["string", "null"]},
+                "version": {"type": ["string", "null"]},
+                "family": {"type": ["string", "null"]},
+            },
+            "required": ["id", "version", "family"],
+        },
+        "site": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "name": {"type": "string"},
+                "wanConnected": {"type": "boolean"},
+                "lanConnected": {"type": "boolean"},
+                "wlanConnected": {"type": "boolean"},
+            },
+            "required": ["id", "name", "wanConnected", "lanConnected", "wlanConnected"],
+        },
+        "counts": {
+            "type": "object",
+            "properties": {
+                "devices": {"type": "integer"},
+                "offlineDevices": {"type": "integer"},
+                "upgradePendingDevices": {"type": "integer"},
+                "clients": {"type": "integer"},
+                "wifiClients": {"type": "integer"},
+                "wiredClients": {"type": "integer"},
+                "wlans": {"type": "integer"},
+                "lanNetworks": {"type": "integer"},
+                "findings": {"type": "integer"},
+            },
+            "required": [
+                "devices", "offlineDevices", "upgradePendingDevices",
+                "clients", "wifiClients", "wiredClients",
+                "wlans", "lanNetworks", "findings",
+            ],
+        },
+        "dhcpPools": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "network": {"type": "string"},
+                    "vlan": {"type": "integer"},
+                    "subnet": {"type": "string"},
+                    "poolSize": {"type": "integer"},
+                    "observedClients": {"type": "integer"},
+                    "utilizationPct": {"type": "number"},
+                },
+                "required": [
+                    "network", "vlan", "subnet", "poolSize",
+                    "observedClients", "utilizationPct",
+                ],
+            },
+        },
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string"},
+                    "severity": {"type": "string"},
+                    "target": {"type": "string"},
+                    "detail": {"type": "string"},
+                },
+                "required": ["code", "severity", "target", "detail"],
+            },
+        },
+    },
+    "required": ["healthy", "controller", "site", "counts", "dhcpPools", "findings"],
+}
+
+_EXPLAIN_ERROR_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "code": {"type": "integer"},
+        "known": {"type": "boolean"},
+        "title": {"type": "string"},
+        "meaning": {"type": "string"},
+        "fix": {"type": "string"},
+        "ambiguous": {"type": "boolean"},
+        "causes": {"type": "array", "items": {"type": "string"}},
+        "endpointContext": {"type": ["string", "null"]},
+        "summary": {"type": "string"},
+    },
+    "required": [
+        "code", "known", "title", "meaning", "fix",
+        "ambiguous", "causes", "endpointContext", "summary",
+    ],
+}
+
+
 @dataclass(frozen=True)
 class Tool:
-    """A tool plus the MCP annotations that describe its side effects."""
+    """A tool plus the MCP annotations and outputSchema describing it."""
 
     name: str
     title: str
     description: str
     input_schema: Dict[str, Any]
+    output_schema: Dict[str, Any]
     handler: Callable[..., Any]
     read_only: bool = True
     destructive: bool = False
@@ -530,6 +731,7 @@ class Tool:
             "title": self.title,
             "description": self.description,
             "inputSchema": self.input_schema,
+            "outputSchema": self.output_schema,
             "annotations": {
                 "title": self.title,
                 "readOnlyHint": self.read_only,
@@ -556,6 +758,7 @@ TOOLS: Tuple[Tool, ...] = (
         description=("List all managed network devices (APs, switches, gateways) on the site "
                     "with MAC, model, firmware, IP, uptime and client count."),
         input_schema=_EMPTY,
+        output_schema=_list_output_schema(_DEVICE_SCHEMA),
         handler=_list_devices,
     ),
     Tool(
@@ -564,6 +767,7 @@ TOOLS: Tuple[Tool, ...] = (
         description=("List connected clients (WiFi and wired) with MAC, IP, SSID, AP, VLAN, "
                     "traffic counters, session duration and last-seen time."),
         input_schema={"type": "object", "properties": {"limit": _LIMIT_PROP}},
+        output_schema=_list_output_schema(_CLIENT_SCHEMA),
         handler=_list_clients,
     ),
     Tool(
@@ -571,6 +775,7 @@ TOOLS: Tuple[Tool, ...] = (
         title="List WiFi clients",
         description="List only wireless clients, same fields as list_clients.",
         input_schema={"type": "object", "properties": {"limit": _LIMIT_PROP}},
+        output_schema=_list_output_schema(_CLIENT_SCHEMA),
         handler=_list_wifi_clients,
     ),
     Tool(
@@ -578,6 +783,7 @@ TOOLS: Tuple[Tool, ...] = (
         title="List wired clients",
         description="List only wired clients, same fields as list_clients.",
         input_schema={"type": "object", "properties": {"limit": _LIMIT_PROP}},
+        output_schema=_list_output_schema(_CLIENT_SCHEMA),
         handler=_list_wired_clients,
     ),
     Tool(
@@ -592,6 +798,7 @@ TOOLS: Tuple[Tool, ...] = (
             },
             "required": ["mac"],
         },
+        output_schema=_DEVICE_SCHEMA,
         handler=_get_device,
     ),
     Tool(
@@ -606,6 +813,7 @@ TOOLS: Tuple[Tool, ...] = (
             },
             "required": ["mac"],
         },
+        output_schema=_CLIENT_SCHEMA,
         handler=_get_client,
     ),
     Tool(
@@ -615,6 +823,7 @@ TOOLS: Tuple[Tool, ...] = (
                     "flag. Pre-shared keys are never returned; a boolean "
                     "hasPresharedKey reports whether one is set."),
         input_schema=_EMPTY,
+        output_schema=_list_output_schema(_WLAN_SCHEMA),
         handler=_list_wlans,
     ),
     Tool(
@@ -623,6 +832,7 @@ TOOLS: Tuple[Tool, ...] = (
         description=("Site summary: name, id, WAN/LAN/WLAN state, device and client counts, "
                     "controller version."),
         input_schema=_EMPTY,
+        output_schema=_SITE_INFO_SCHEMA,
         handler=_get_site_info,
     ),
     Tool(
@@ -632,6 +842,7 @@ TOOLS: Tuple[Tool, ...] = (
                     "pending firmware upgrades, 0-client APs, guest/unexpected VLAN clients, "
                     "unisolated VLANs, and DHCP pool utilization with stable finding codes."),
         input_schema=_EMPTY,
+        output_schema=_NETWORK_AUDIT_SCHEMA,
         handler=_network_audit,
     ),
     Tool(
@@ -649,6 +860,7 @@ TOOLS: Tuple[Tool, ...] = (
             },
             "required": ["code"],
         },
+        output_schema=_EXPLAIN_ERROR_SCHEMA,
         handler=_explain_error,
         open_world=False,
         requires_auth=False,

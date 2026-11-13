@@ -1,0 +1,52 @@
+name: Controller Compatibility Report
+description: Submit an `omada-mcp --doctor --json` report to verify a new Omada controller model or firmware version.
+title: "[Controller Report]: <model> (<firmware>)"
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping grow the [`docs/compatibility.md`](https://github.com/falehsub/omada-mcp/blob/main/docs/compatibility.md) matrix!
+        `omada-mcp --doctor --json` redacts your password, session token, and local `.env` filesystem paths, while keeping the `controller` and `phases` metadata needed for triage.
+
+  - type: dropdown
+    id: controller_type
+    attributes:
+      label: Controller model / deployment type
+      options:
+        - OC200 (hardware)
+        - OC300 (hardware)
+        - OC400 (hardware)
+        - Software Controller (Linux / Docker)
+        - Software Controller (Windows)
+        - Omada Cloud / Cloud-Based Controller
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: controller_version
+    attributes:
+      label: Firmware & controller version
+      description: Look for controllerVer in `--doctor --json` (or Controller Settings -> Maintenance).
+      placeholder: "e.g. 5.14.32.2 (OC200 v1)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor_json
+    attributes:
+      label: "`omada-mcp --doctor --json` output"
+      description: Paste the full JSON output below. Double-check that you have not added any credentials.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: tool_checks
+    attributes:
+      label: Tool results & notes
+      description: Optional notes on `list_devices`, `list_clients`, `list_wlans`, `network_audit`, or any unexpected field shapes / error codes.
+      placeholder: "All 10 tools worked / list_wlans returned ..."
+    validations:
+      required: false

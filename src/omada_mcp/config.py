@@ -89,6 +89,7 @@ class Config:
     timeout: float = DEFAULT_TIMEOUT
     min_interval: float = DEFAULT_MIN_INTERVAL
     env_file: Optional[Path] = None
+    env_origin: str = "environment"
     sources: Dict[str, str] = field(default_factory=dict)
 
     # -- presentation helpers -------------------------------------------------
@@ -110,6 +111,7 @@ class Config:
             "timeout": self.timeout,
             "min_interval": self.min_interval,
             "env_file": str(self.env_file) if self.env_file else None,
+            "env_origin": self.env_origin,
         }
 
 
@@ -280,18 +282,34 @@ def normalize_base_url(raw: str) -> str:
     return f"{scheme}://{netloc}{path}"
 
 
+_ORIGIN_LABELS: Dict[str, str] = {
+    "OMADA_ENV_FILE": "OMADA_ENV_FILE",
+    "cwd/.env": "cwd",
+    "%APPDATA%/omada-mcp/.env": "appdata",
+    "~/.config/omada-mcp/.env": "xdg",
+}
+
+
+def _origin_label(origin: Optional[str]) -> str:
+    if not origin:
+        return "environment"
+    return _ORIGIN_LABELS.get(origin, "environment")
+
+
 def _merged_environment(
     environ: Mapping[str, str],
     cwd: Optional[os.PathLike | str] = None,
-) -> Tuple[Dict[str, str], Dict[str, str], Optional[Path]]:
+) -> Tuple[Dict[str, str], Dict[str, str], Optional[Path], str]:
     """Merge dotenv values with the process environment.
 
-    Returns ``(values, sources, env_file)`` where ``sources`` maps each key to a
-    human-readable origin used by ``--doctor``.
+    Returns ``(values, sources, env_file, env_origin)`` where ``sources`` maps each
+    key to a human-readable origin and ``env_origin`` is a path-free label
+    (``OMADA_ENV_FILE``, ``cwd``, ``appdata``, ``xdg``, or ``environment``).
     """
     values: Dict[str, str] = {}
     sources: Dict[str, str] = {}
     env_file: Optional[Path] = None
+    env_origin = "environment"
 
     for origin, path in candidate_env_files(cwd, environ):
         if not path.is_file():
@@ -305,6 +323,7 @@ def _merged_environment(
         file_values = parse_env_file(path)
         if file_values:
             env_file = path
+            env_origin = _origin_label(origin)
             for key, value in file_values.items():
                 if key not in values:
                     values[key] = value
@@ -316,7 +335,7 @@ def _merged_environment(
         if key.startswith("OMADA_"):
             values[key] = value
             sources[key] = "environment"
-    return values, sources, env_file
+    return values, sources, env_file, env_origin
 
 
 def load_config(
@@ -325,7 +344,7 @@ def load_config(
 ) -> Config:
     """Build a validated :class:`Config` from the environment and dotenv files."""
     environ = dict(os.environ if environ is None else environ)
-    values, sources, env_file = _merged_environment(environ, cwd)
+    values, sources, env_file, env_origin = _merged_environment(environ, cwd)
 
     missing = [key for key in ("OMADA_BASE_URL", "OMADA_USERNAME", "OMADA_PASSWORD")
                if not (values.get(key) or "").strip()]
@@ -380,5 +399,6 @@ def load_config(
         timeout=timeout,
         min_interval=min_interval,
         env_file=env_file,
+        env_origin=env_origin,
         sources=sources,
     )

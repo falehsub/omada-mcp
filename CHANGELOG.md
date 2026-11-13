@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-11-13
+
+MCP `outputSchema` declarations, documented tool output shapes, path redaction
+in `--doctor --json`, and a GitHub compatibility report template.
+
+### Added
+
+- **MCP `outputSchema` on all 10 tools (`tools/list` / `--list-tools`)**: Every
+  tool descriptor now declares an MCP `2025-06-18` `outputSchema` (`type: "object"`)
+  derived from its projection and matching `structuredContent`
+  (`{"items": [...], "count": N}` for `list_*` tools; projected object schemas
+  for `get_*`, `get_site_info`, `network_audit`, and `explain_error`).
+- **Controller compatibility issue template**: Added
+  `.github/ISSUE_TEMPLATE/controller-report.yml` so users can paste
+  `omada-mcp --doctor --json` output to help verify new hardware/firmware builds.
+- **Output shape documentation (`README.md`)**: Documented the exact `content[0].text`
+  and `structuredContent` formats for list vs. single-object tools.
+
+### Changed
+
+- **Output shape note (`list_*` tools vs legacy wrapper objects)**: `list_devices`,
+  `list_clients`, `list_wifi_clients`, `list_wired_clients`, and `list_wlans`
+  emit a **bare JSON array** (`[...]`) in `content[0].text` and
+  `{"items": [...], "count": <int>}` in `structuredContent` (unlike earlier
+  private bridge wrappers such as `{"devices": [...]}`), while `get_device`,
+  `get_client`, `get_site_info`, `network_audit`, and `explain_error` emit a
+  JSON object in both `content[0].text` and `structuredContent`.
+- **Demoted `software-5.x` (`5.13.30.8`) in `docs/compatibility.md` and `README.md`**:
+  Moved `software-5.x` (`5.13.30.8`) from "Verified Controllers" to
+  "Expected / Community-Reportable Builds" until a reproducible `--doctor --json`
+  capture is attached.
+
+### Fixed
+
+- **Filesystem path redaction in `--doctor --json`**: Config origin (`OMADA_ENV_FILE`,
+  `cwd`, `appdata`, `xdg`, `environment`) and `OMADA_CA_BUNDLE` are emitted as
+  canonical labels instead of local filesystem paths when `--json` is passed,
+  keeping pasted issue diagnostics free of user home/profile directories.
+
 ## [1.1.0] - 2026-11-13
 
 Hardware/v5.x session compatibility, error-code decoder, composite network audit,
