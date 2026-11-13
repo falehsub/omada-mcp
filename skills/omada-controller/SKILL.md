@@ -19,8 +19,9 @@ Use this skill when:
 - an endpoint answers HTTP 200 with HTML instead of JSON;
 - you need to decide between the Web API and the Open API.
 
-The companion MCP server in this repository (`omada-mcp`) implements the read
-half of this document. When it is installed, prefer its tools over hand-rolled
+The companion MCP server in this repository (`omada-mcp`) implements 33 read-only
+diagnostics and inspection tools (plus 46 opt-in guarded write tools when
+explicitly enabled). When it is installed, prefer its tools over hand-rolled
 HTTP; when it is not, the snippets below are the reference implementation.
 
 ## Two APIs, one controller
@@ -341,4 +342,14 @@ not just the label.
   afterwards to catch silent controller no-ops.
 * Reads are idempotent; nothing in this document should be scheduled faster than
   the 0.8 s pacing. A health check that spawns a fresh login every minute will
-  evict a session held by an agent.
+  evict a session held by an agent — use `omada-mcp --watch` or
+  `omada-mcp --export-metrics` (which reuse a single persistent session).
+* Additional v6.2 field quirks handled in `omada-mcp`:
+  * Switch `topology-v2` `upperPort`/`wiredUpInfo`: `.port` is the switch's own
+    uplink port while `.upLinkPort` can report the upstream device's port.
+  * AP `radioSetting*.channel` often stores a region-table index wire value whose
+    physical channel number lives in `eaps/{mac}/channelInfo` (`value` ->
+    `channelValue`) and `wp*.actualChannel`.
+  * Local DNS (`setting/dns/local`), policy routes (`setting/routing/policy`),
+    and WIDS/IPS security endpoints vary across v5/v6 hardware and firmware; wrap
+    with `-1007` / `-1600` / missing-feature handling before failing.

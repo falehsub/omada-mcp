@@ -21,9 +21,31 @@ from __future__ import annotations
 
 import datetime
 import ipaddress
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from ._helpers import (
+    ACL_TYPE_LABELS,
+    ACL_TYPE_MAP,
+    PROFILE_TYPE_LABELS,
+    as_float as _as_float,
+    collect_ap_radios_data,
+    collect_rf_scan_data,
+    collect_security_status_data,
+    collect_switch_ports_data,
+    collect_topology_data,
+    collect_vpn_tunnels_data,
+    collect_wan_status_data,
+    deep_redact,
+    dhcp_pool_capacity,
+    extra_network_audit_findings,
+    omada_mac,
+    resolve_raw_device,
+    try_api_result,
+    try_paginate,
+    unwrap_rows,
+)
 from .client import OmadaClient, OmadaError, SiteInfo, explain_error_code, redact_secrets
 from .config import Config
 from .write_tools import (
@@ -43,15 +65,21 @@ from .write_tools import (
     _fetch_ssids,
     _fetch_static_routes,
     _fetch_wan_networks,
+    assign_ap_wlan_group,
+    create_eap_acl,
     create_gateway_acl,
     create_ip_group,
     create_lan_network,
     create_ssid,
+    create_switch_acl,
+    cycle_poe_port,
     delete_dhcp_reservation,
     delete_gateway_acl,
     delete_ip_group,
+    delete_lan_dns_rule,
     delete_lan_network,
     delete_mdns_rule,
+    delete_policy_route,
     delete_port_forward,
     delete_ssid,
     delete_static_route,
@@ -59,20 +87,29 @@ from .write_tools import (
     reconnect_client,
     release_client_fixed_ip,
     replace_ip_group,
+    rollback_from_snapshot,
     set_acl_rule_status,
     set_client_blocked,
     set_client_fixed_ip,
+    set_client_lock_to_ap,
+    set_client_rate_limit,
     set_upnp,
     set_vlan_dhcp_pools,
     set_vlan_isolation,
+    start_rf_scan,
+    update_ap_radio,
     update_client,
     update_device,
     update_gateway_acl,
     update_lan_network,
     update_ssid,
+    update_switch_port,
     upsert_dhcp_reservation,
+    upsert_lan_dns_rule,
     upsert_mdns_rule,
+    upsert_policy_route,
     upsert_port_forward,
+    upsert_port_profile,
     upsert_static_route,
 )
 
@@ -367,23 +404,7 @@ _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 
 def _dhcp_pool_capacity(dhcp: Dict[str, Any]) -> int:
     """Total IPv4 addresses across ``dhcpSettings.ipRangePool`` (or start/end fallback)."""
-    pools = dhcp.get("ipRangePool") or []
-    if not pools and dhcp.get("ipaddrStart") and dhcp.get("ipaddrEnd"):
-        pools = [{"ipaddrStart": dhcp.get("ipaddrStart"), "ipaddrEnd": dhcp.get("ipaddrEnd")}]
-    total = 0
-    for pool in pools:
-        start_raw = (pool or {}).get("ipaddrStart")
-        end_raw = (pool or {}).get("ipaddrEnd")
-        if not start_raw or not end_raw:
-            continue
-        try:
-            start = int(ipaddress.IPv4Address(str(start_raw)))
-            end = int(ipaddress.IPv4Address(str(end_raw)))
-        except ipaddress.AddressValueError:
-            continue
-        if end >= start:
-            total += end - start + 1
-    return total
+    return dhcp_pool_capacity(dhcp)
 
 
 def _network_audit(client: OmadaClient) -> Dict[str, Any]:
@@ -745,6 +766,268 @@ _EXPLAIN_ERROR_SCHEMA: Dict[str, Any] = {
 }
 
 
+from copy import deepcopy as _deepcopy
+from .config import ConfigError
+
+_TOOL_CATEGORIES: Dict[str, str] = {
+    # core
+    "list_devices": "core",
+    "list_clients": "core",
+    "list_wifi_clients": "core",
+    "list_wired_clients": "core",
+    "get_device": "core",
+    "get_client": "core",
+    "list_wlans": "core",
+    "get_site_info": "core",
+    "explain_error": "core",
+    "get_config_snapshot": "core",
+    "search_clients": "core",
+    "list_lan_networks": "core",
+    "list_dhcp_reservations": "core",
+    "set_client_fixed_ip": "core",
+    "release_client_fixed_ip": "core",
+    "upsert_dhcp_reservation": "core",
+    "delete_dhcp_reservation": "core",
+    "create_lan_network": "core",
+    "update_lan_network": "core",
+    "delete_lan_network": "core",
+    "set_vlan_dhcp_pools": "core",
+    "set_vlan_isolation": "core",
+    "set_client_blocked": "core",
+    "reconnect_client": "core",
+    "update_client": "core",
+    "update_device": "core",
+    "reboot_device": "core",
+    "set_client_rate_limit": "core",
+    # diagnostics
+    "network_audit": "diagnostics",
+    "list_logs": "diagnostics",
+    "get_topology": "diagnostics",
+    "get_wan_status": "diagnostics",
+    "diagnose_client": "diagnostics",
+    "diagnose_wan": "diagnostics",
+    # switch
+    "get_switch_ports": "switch",
+    "list_port_profiles": "switch",
+    "update_switch_port": "switch",
+    "cycle_poe_port": "switch",
+    "upsert_port_profile": "switch",
+    # wifi
+    "get_ap_radios": "wifi",
+    "get_rf_scan": "wifi",
+    "list_wlan_groups": "wifi",
+    "create_ssid": "wifi",
+    "update_ssid": "wifi",
+    "delete_ssid": "wifi",
+    "update_ap_radio": "wifi",
+    "start_rf_scan": "wifi",
+    "assign_ap_wlan_group": "wifi",
+    "set_client_lock_to_ap": "wifi",
+    # routing
+    "list_port_forwards": "routing",
+    "list_static_routes": "routing",
+    "get_network_services": "routing",
+    "list_vpn_tunnels": "routing",
+    "list_policy_routes": "routing",
+    "list_lan_dns_rules": "routing",
+    "upsert_port_forward": "routing",
+    "delete_port_forward": "routing",
+    "upsert_static_route": "routing",
+    "delete_static_route": "routing",
+    "upsert_mdns_rule": "routing",
+    "delete_mdns_rule": "routing",
+    "set_upnp": "routing",
+    "upsert_policy_route": "routing",
+    "delete_policy_route": "routing",
+    "upsert_lan_dns_rule": "routing",
+    "delete_lan_dns_rule": "routing",
+    # security
+    "list_acls": "security",
+    "list_ip_groups": "security",
+    "get_security_status": "security",
+    "create_ip_group": "security",
+    "replace_ip_group": "security",
+    "delete_ip_group": "security",
+    "create_gateway_acl": "security",
+    "update_gateway_acl": "security",
+    "delete_gateway_acl": "security",
+    "set_acl_rule_status": "security",
+    "create_switch_acl": "security",
+    "create_eap_acl": "security",
+    # rollback
+    "rollback_from_snapshot": "rollback",
+}
+
+_SLIM_WRITE_OUTPUT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "applied": {"type": "boolean"},
+        "dryRun": {"type": "boolean"},
+        "verified": {"type": "boolean"},
+        "target": {"type": "string"},
+    },
+    "required": ["applied", "dryRun", "verified", "target"],
+}
+
+
+def _slim_prop_type(prop_schema: Any) -> Dict[str, Any]:
+    if not isinstance(prop_schema, dict):
+        return {}
+    t = prop_schema.get("type")
+    if t is not None:
+        return {"type": t}
+    return {}
+
+
+def _slim_output_schema(schema: Dict[str, Any], *, read_only: bool) -> Dict[str, Any]:
+    """Collapse deep nested trees while preserving MCP 2025-06-18 required invariants."""
+    if not read_only:
+        return _deepcopy(_SLIM_WRITE_OUTPUT_SCHEMA)
+    req = list(schema.get("required") or [])
+    props = schema.get("properties") or {}
+    if set(req) == {"items", "count"} and "items" in props:
+        return {
+            "type": "object",
+            "properties": {
+                "items": {"type": "array", "items": {"type": "object"}},
+                "count": {"type": "integer"},
+            },
+            "required": ["items", "count"],
+        }
+    slim_props = {k: _slim_prop_type(props[k]) for k in req if k in props}
+    if not slim_props:
+        for k, v in list(props.items())[:1]:
+            slim_props[k] = _slim_prop_type(v)
+    return {"type": "object", "properties": slim_props, "required": req}
+
+
+_ABBREV_DOT_RE = re.compile(r"(?:^|\W)(?:e\.g|i\.e|etc|vs)$", re.IGNORECASE)
+_CODE_HINT_QUOTED_RE = re.compile(r"'[^']+'")
+_CODE_HINT_DIGIT_MAP_RE = re.compile(r"\b\d+=")
+_CODE_HINT_TOKEN_RE = re.compile(r"\b(?:code|codes|hex|bitmask)\b", re.IGNORECASE)
+_SLIM_CODE_HINT_REWRITES: Dict[str, str] = {
+    "Maximum number of clients to return (default 500, max 5000)": "Max clients (1-5000, default 500)",
+    "Maximum log entries to return (default 100, max 1000)": "Max log entries (1-1000, default 100)",
+    "Lookback window in hours (default 24; 0 for all available history)": "Lookback hours (0 = all history)",
+    "Numeric Omada errorCode to explain (e.g. -1600, -33726)": "Omada errorCode (e.g. -1600, -33726)",
+    "Optional VLAN ID, netId, or network name filter": "VLAN ID, netId, or network name",
+    "Optional filter: 'ip' (0), 'port' (1), 'mac' (2), or 'all'": "'ip'(0), 'port'(1), 'mac'(2), or 'all'",
+    "Bands: ['2g', '5g'] (or '6g'), comma string, or Omada bitmask (default ['2g', '5g'])": "['2g','5g','6g'], CSV, or bitmask",
+    "'disable' (3), 'capable' (2), or 'mandatory' (1)": "'disable'(3), 'capable'(2), 'mandatory'(1)",
+    "'all', 'tcp', 'udp', or Omada protocol integer": "'all', 'tcp', 'udp', or protocol int",
+    "LED setting: 'off' (0), 'on' (1), or 'site' (2)": "'off' (0), 'on' (1), or 'site' (2)",
+    "'auto', '10m', '100m', '1000m', '2500m', '10g' or code": "auto/10m/100m/1000m/2500m/10g or code",
+    "Width: 'auto', '20', '40', '80', '160', '320' (or 20MHz..320MHz)": "'auto'|'20'|'40'|'80'|'160'|'320' (or MHz)",
+    "'low' (0), 'medium' (1), 'high' (2), 'custom' (3), 'auto' (4)": "0=low, 1=med, 2=high, 3=custom, 4=auto",
+    "Custom dBm TX power when txPowerLevel='custom'": "Custom dBm when txPowerLevel='custom'",
+    "'all_ports' (0), 'custom_ports' (1), 'all_switches' (2), 'vlan' (3)": "0=all_ports,1=custom,2=switches,3=vlan",
+}
+
+
+def _needs_code_hint(prop: Dict[str, Any]) -> bool:
+    """Return True when an input property relies on numeric/string codes without an enum."""
+    items = prop.get("items")
+    if "enum" in prop or (isinstance(items, dict) and "enum" in items):
+        return False
+    ptype = prop.get("type")
+    if ptype == "integer" or (isinstance(ptype, list) and "integer" in ptype):
+        return True
+    if isinstance(items, dict) and items.get("type") == "integer":
+        return True
+    if ptype == "string" or (isinstance(ptype, list) and "string" in ptype):
+        desc = str(prop.get("description") or "")
+        return bool(
+            _CODE_HINT_DIGIT_MAP_RE.search(desc)
+            or "|" in desc
+            or len(_CODE_HINT_QUOTED_RE.findall(desc)) >= 3
+            or _CODE_HINT_TOKEN_RE.search(desc)
+        )
+    return False
+
+
+def _snap_words(text: str, limit: int) -> str:
+    """Snap text strictly within ``limit`` characters at full word/token boundaries."""
+    clean = " ".join(text.strip().split())
+    if len(clean) <= limit:
+        return clean
+    max_body = max(1, limit - 1)
+    if len(clean) > max_body and clean[max_body] == " ":
+        prefix = clean[:max_body]
+    else:
+        window = clean[:max_body]
+        space = window.rfind(" ")
+        prefix = window[:space] if space > 0 else window
+    prefix = prefix.rstrip(" ,;:-([{")
+    if prefix.count("(") > prefix.count(")"):
+        last_open = prefix.rfind("(")
+        if last_open >= 24:
+            prefix = prefix[:last_open].rstrip(" ,;:-")
+    return prefix + "…"
+
+
+def _slim_code_hint(desc: str, limit: int = 45) -> str:
+    clean = " ".join(str(desc or "").strip().split())
+    clean = _SLIM_CODE_HINT_REWRITES.get(clean, clean)
+    if len(clean) <= limit:
+        return clean
+    return _snap_words(clean, limit)
+
+
+def _slim_schema_node(node: Any, *, key: Optional[str] = None) -> None:
+    if not isinstance(node, dict):
+        return
+    if key not in ("dryRun", "confirm"):
+        desc = node.get("description")
+        if _needs_code_hint(node) and desc:
+            node["description"] = _slim_code_hint(desc, 45)
+        else:
+            node.pop("description", None)
+    props = node.get("properties")
+    if isinstance(props, dict):
+        for child_key, child in props.items():
+            _slim_schema_node(child, key=child_key)
+    items = node.get("items")
+    if isinstance(items, dict):
+        items.pop("description", None)
+        _slim_schema_node(items)
+
+
+def _slim_input_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Preserve exact parameter constraints, enums, and <=45-char code hints."""
+    out = _deepcopy(schema)
+    props = out.get("properties")
+    if isinstance(props, dict):
+        for key, prop in props.items():
+            _slim_schema_node(prop, key=key)
+    return out
+
+
+def _slim_description(text: str, limit: int = 110) -> str:
+    """Shorten a tool description cleanly at complete sentence or full-word boundaries."""
+    clean = " ".join(text.strip().split())
+    if len(clean) <= limit:
+        return clean
+    ends: List[int] = []
+    depth = 0
+    n = len(clean)
+    for idx, ch in enumerate(clean):
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth = max(0, depth - 1)
+        elif depth == 0 and ch == "." and idx + 1 < n and clean[idx + 1] == " ":
+            if _ABBREV_DOT_RE.search(clean[:idx]):
+                continue
+            ends.append(idx + 1)
+    fitting = [end for end in ends if end <= limit]
+    if fitting:
+        return clean[: fitting[-1]].rstrip()
+    first_sentence = clean[: ends[0]].rstrip() if ends else clean
+    if len(first_sentence) <= limit:
+        return first_sentence
+    return _snap_words(first_sentence, limit)
+
+
 @dataclass(frozen=True)
 class Tool:
     """A tool plus the MCP annotations and outputSchema describing it."""
@@ -761,13 +1044,25 @@ class Tool:
     open_world: bool = True
     requires_auth: bool = True
 
-    def descriptor(self) -> Dict[str, Any]:
+    @property
+    def category(self) -> str:
+        return _TOOL_CATEGORIES.get(self.name, "core")
+
+    def descriptor(self, schema_mode: str = "slim") -> Dict[str, Any]:
+        slim = str(schema_mode or "slim").strip().lower() != "full"
+        desc = _slim_description(self.description) if slim else self.description
+        in_schema = _slim_input_schema(self.input_schema) if slim else self.input_schema
+        out_schema = (
+            _slim_output_schema(self.output_schema, read_only=self.read_only)
+            if slim
+            else self.output_schema
+        )
         return {
             "name": self.name,
             "title": self.title,
-            "description": self.description,
-            "inputSchema": self.input_schema,
-            "outputSchema": self.output_schema,
+            "description": desc,
+            "inputSchema": in_schema,
+            "outputSchema": out_schema,
             "annotations": {
                 "title": self.title,
                 "readOnlyHint": self.read_only,
@@ -859,6 +1154,7 @@ _ACL_SCHEMA: Dict[str, Any] = {
         "id": {"type": "string"},
         "index": {"type": ["integer", "null"]},
         "name": {"type": "string"},
+        "aclType": {"type": "string"},
         "status": {"type": "boolean"},
         "policy": {"type": ["integer", "string"]},
         "policyLabel": {"type": "string"},
@@ -867,11 +1163,248 @@ _ACL_SCHEMA: Dict[str, Any] = {
         "destinationType": {"type": ["integer", "string", "null"]},
         "destinationIds": {"type": "array", "items": {"type": "string"}},
         "direction": {"type": ["object", "null"]},
+        "bindingType": {"type": ["integer", "string", "null"]},
+        "customAclPorts": {"type": "array", "items": {"type": "object"}},
+        "networkId": {"type": ["string", "null"]},
         "protocols": {"type": "array", "items": {"type": ["integer", "string"]}},
         "biDirectional": {"type": "boolean"},
         "syslog": {"type": "boolean"},
     },
     "required": ["id", "name", "status", "policy", "sourceIds", "destinationIds"],
+}
+
+_SWITCH_PORTS_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "mac": {"type": "string"},
+        "name": {"type": "string"},
+        "model": {"type": "string"},
+        "online": {"type": "boolean"},
+        "poe": {"type": "object"},
+        "uplinkPorts": {"type": "array", "items": {"type": "integer"}},
+        "lagGroups": {"type": "array", "items": {"type": "object"}},
+        "cableTestSupported": {"type": ["boolean", "null"]},
+        "cableTestStatus": {"type": ["integer", "null"]},
+        "ports": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "port": {"type": "integer"},
+                    "standardPort": {"type": "string"},
+                    "name": {"type": "string"},
+                    "disabled": {"type": "boolean"},
+                    "operation": {"type": "string"},
+                    "profileId": {"type": "string"},
+                    "profileName": {"type": "string"},
+                    "linkUp": {"type": "boolean"},
+                    "speed": {"type": "string"},
+                    "speedMbps": {"type": "integer"},
+                    "maxSpeed": {"type": "string"},
+                    "maxSpeedMbps": {"type": "integer"},
+                    "duplex": {"type": "string"},
+                    "isUplink": {"type": "boolean"},
+                    "isLagMember": {"type": "boolean"},
+                    "carriesController": {"type": "boolean"},
+                    "poeSupported": {"type": "boolean"},
+                    "poeDelivering": {"type": "boolean"},
+                    "poePowerW": {"type": "number"},
+                },
+                "required": ["port", "name", "linkUp", "isUplink", "isLagMember"],
+            },
+        },
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["mac", "name", "poe", "uplinkPorts", "ports", "warnings"],
+}
+
+_AP_RADIOS_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "mac": {"type": "string"},
+        "name": {"type": "string"},
+        "model": {"type": "string"},
+        "online": {"type": "boolean"},
+        "wlanGroupId": {"type": "string"},
+        "supportRfScan": {"type": "boolean"},
+        "radios": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "band": {"type": "string"},
+                    "enabled": {"type": "boolean"},
+                    "channel": {"type": ["integer", "string", "null"]},
+                    "channelWidth": {"type": "string"},
+                    "txPower": {"type": ["integer", "number", "null"]},
+                    "txPowerMode": {"type": "string"},
+                    "txUtilPct": {"type": ["number", "null"]},
+                    "rxUtilPct": {"type": ["number", "null"]},
+                    "interferencePct": {"type": ["number", "null"]},
+                    "txRetryRatePct": {"type": ["number", "null"]},
+                    "rxRetryRatePct": {"type": ["number", "null"]},
+                    "availableChannels": {"type": "array", "items": {"type": "object"}},
+                },
+                "required": ["band", "enabled", "channel", "channelWidth"],
+            },
+        },
+        "rfScan": {"type": ["object", "null"]},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["mac", "name", "radios", "warnings"],
+}
+
+_RF_SCAN_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "mac": {"type": "string"},
+        "name": {"type": "string"},
+        "model": {"type": "string"},
+        "supportRfScan": {"type": "boolean"},
+        "scanTime": {"type": ["integer", "string", "null"]},
+        "status": {"type": ["integer", "string", "null"]},
+        "bandStatuses": {"type": "object"},
+        "radioUtilization": {"type": "array", "items": {"type": "object"}},
+        "channels": {"type": "array", "items": {"type": "object"}},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["mac", "name", "supportRfScan", "radioUtilization", "channels", "warnings"],
+}
+
+_WAN_STATUS_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "hasGateway": {"type": "boolean"},
+        "gatewayMac": {"type": "string"},
+        "gatewayName": {"type": "string"},
+        "gatewayModel": {"type": "string"},
+        "wanMode": {"type": "string"},
+        "loadBalanceEnabled": {"type": "boolean"},
+        "failoverConfigured": {"type": "boolean"},
+        "totalWanPorts": {"type": "integer"},
+        "linkUpCount": {"type": "integer"},
+        "internetUpCount": {"type": "integer"},
+        "ports": {"type": "array", "items": {"type": "object"}},
+        "speedTest": {"type": ["object", "null"]},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["hasGateway", "wanMode", "totalWanPorts", "linkUpCount", "internetUpCount", "ports", "warnings"],
+}
+
+_VPN_TUNNELS_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "tunnels": {"type": "array", "items": {"type": "object"}},
+        "configuredVpns": {"type": "array", "items": {"type": "object"}},
+        "counts": {"type": "object"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["tunnels", "configuredVpns", "counts", "warnings"],
+}
+
+_TOPOLOGY_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "roots": {"type": "array", "items": {"type": "object"}},
+        "unattachedDevices": {"type": "array", "items": {"type": "object"}},
+        "counts": {"type": "object"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["roots", "unattachedDevices", "counts", "warnings"],
+}
+
+_SECURITY_STATUS_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "ips": {"type": ["object", "null"]},
+        "attackDefense": {"type": ["object", "null"]},
+        "wids": {"type": ["object", "null"]},
+        "threatAlerts": {"type": "array", "items": {"type": "object"}},
+        "rogueAps": {"type": "array", "items": {"type": "object"}},
+        "counts": {"type": "object"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["ips", "threatAlerts", "rogueAps", "counts", "warnings"],
+}
+
+_DIAGNOSTIC_FINDING_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "code": {"type": "string"},
+        "severity": {"type": "string", "enum": ["critical", "warning", "info"]},
+        "detail": {"type": "string"},
+    },
+    "required": ["code", "severity", "detail"],
+}
+
+_DIAGNOSE_CLIENT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "client": {"type": "object"},
+        "parentRadio": {"type": ["object", "null"]},
+        "parentSwitchPort": {"type": ["object", "null"]},
+        "pastConnections": {"type": "array", "items": {"type": "object"}},
+        "recentLogs": {"type": "array", "items": {"type": "object"}},
+        "findings": {"type": "array", "items": _DIAGNOSTIC_FINDING_SCHEMA},
+        "nextSteps": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["client", "pastConnections", "recentLogs", "findings", "nextSteps", "warnings"],
+}
+
+_DIAGNOSE_WAN_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "wan": _WAN_STATUS_SCHEMA,
+        "vpnSummary": {"type": "object"},
+        "recentLogs": {"type": "array", "items": {"type": "object"}},
+        "findings": {"type": "array", "items": _DIAGNOSTIC_FINDING_SCHEMA},
+        "nextSteps": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["wan", "vpnSummary", "recentLogs", "findings", "nextSteps", "warnings"],
+}
+
+_PORT_PROFILE_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "type": {"type": ["integer", "null"]},
+        "typeLabel": {"type": "string"},
+        "prohibitModify": {"type": "boolean"},
+        "poe": {"type": ["integer", "null"]},
+        "vlanConfigEnable": {"type": "boolean"},
+        "nativeNetworkId": {"type": "string"},
+        "tagNetworkIds": {"type": "array", "items": {"type": "string"}},
+        "untagNetworkIds": {"type": "array", "items": {"type": "string"}},
+        "portIsolationEnable": {"type": "boolean"},
+    },
+    "required": ["id", "name", "type", "prohibitModify"],
+}
+
+_WLAN_GROUP_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "primary": {"type": "boolean"},
+        "clone": {"type": "boolean"},
+        "ssidCount": {"type": "integer"},
+        "ssids": {"type": "array", "items": {"type": "object"}},
+    },
+    "required": ["id", "name", "primary", "ssidCount", "ssids"],
+}
+
+_SUPPORTED_ITEMS_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "items": {"type": "array", "items": {"type": "object"}},
+        "count": {"type": "integer", "minimum": 0},
+        "supported": {"type": "boolean"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["items", "count", "supported", "warnings"],
 }
 
 _IP_GROUP_SCHEMA: Dict[str, Any] = {
@@ -1019,17 +1552,11 @@ _WRITE_CONTROL_PROPS: Dict[str, Any] = {
     "dryRun": {
         "type": "boolean",
         "default": True,
-        "description": (
-            "Preview the exact before/after diff and obtain confirmToken without changing the "
-            "controller (default true; pass dryRun=false with confirm='<tool>:<target>' to apply)"
-        ),
+        "description": "Preview without applying (default true)",
     },
     "confirm": {
         "type": "string",
-        "description": (
-            "Confirmation token formatted '<tool>:<target-id>', required when dryRun is false; "
-            "run with dryRun=true first to inspect the diff and obtain confirmToken"
-        ),
+        "description": "Required '<tool>:<target>' when dryRun=false",
     },
 }
 
@@ -1182,7 +1709,11 @@ def _project_dhcp_reservation(
     }
 
 
-def _project_acl_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
+def _project_acl_rule(
+    rule: Dict[str, Any],
+    *,
+    acl_type: Optional[str] = None,
+) -> Dict[str, Any]:
     raw_policy = rule.get("policy")
     policy_label = {0: "deny", 1: "permit"}.get(raw_policy, str(raw_policy))
     src_ids = rule.get("sourceIds") if rule.get("sourceIds") is not None else rule.get("sourceFilter")
@@ -1194,7 +1725,7 @@ def _project_acl_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
         proto_list = list(protocols)
     else:
         proto_list = []
-    return {
+    projected: Dict[str, Any] = {
         "id": str(rule.get("id") or ""),
         "index": _as_int(rule.get("index"), 0) if rule.get("index") is not None else None,
         "name": str(rule.get("name") or ""),
@@ -1210,6 +1741,16 @@ def _project_acl_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
         "biDirectional": bool(rule.get("biDirectional", False)),
         "syslog": bool(rule.get("syslog", False)),
     }
+    if acl_type is not None:
+        projected["aclType"] = acl_type
+    if acl_type in ("switch", "eap") or "bindingType" in rule:
+        if rule.get("bindingType") is not None:
+            projected["bindingType"] = rule.get("bindingType")
+        if rule.get("customAclPorts") is not None:
+            projected["customAclPorts"] = [dict(p) for p in (rule.get("customAclPorts") or []) if isinstance(p, dict)]
+        if rule.get("networkId") is not None:
+            projected["networkId"] = str(rule.get("networkId") or "")
+    return projected
 
 
 def _project_port_forward(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -1279,10 +1820,45 @@ def _list_dhcp_reservations(
     return projected
 
 
-def _list_acls(client: OmadaClient) -> List[Dict[str, Any]]:
+def _list_acls(client: OmadaClient, aclType: str = "gateway") -> List[Dict[str, Any]]:
     site = _site(client)
-    _, rules = _fetch_acls(client, site)
-    return [_project_acl_rule(rule) for rule in rules]
+    kind = str(aclType or "gateway").strip().lower()
+    if kind == "gateway":
+        _, rules = _fetch_acls(client, site)
+        return [_project_acl_rule(rule) for rule in rules]
+    if kind in ("switch", "eap"):
+        code = ACL_TYPE_MAP[kind]
+        rows, _ = client.paginate(f"sites/{site.site_id}/setting/firewall/acls?type={code}")
+        return [_project_acl_rule(rule, acl_type=kind) for rule in rows]
+    if kind == "all":
+        combined: List[Dict[str, Any]] = []
+        tmp_warnings: List[str] = []
+        for tname in ("gateway", "switch", "eap"):
+            code = ACL_TYPE_MAP[tname]
+            if tname == "gateway":
+                try:
+                    _, g_rules = _fetch_acls(client, site)
+                    combined.extend(_project_acl_rule(r, acl_type="gateway") for r in g_rules)
+                    continue
+                except OmadaError:
+                    rows, _, ok = try_paginate(
+                        client, f"sites/{site.site_id}/setting/firewall/acls?type={code}",
+                        tmp_warnings, label=f"ACL {tname}",
+                    )
+                    if ok:
+                        combined.extend(_project_acl_rule(r, acl_type=tname) for r in rows)
+            else:
+                rows, _, ok = try_paginate(
+                    client, f"sites/{site.site_id}/setting/firewall/acls?type={code}",
+                    tmp_warnings, label=f"ACL {tname}",
+                )
+                if ok:
+                    combined.extend(_project_acl_rule(r, acl_type=tname) for r in rows)
+        return combined
+    raise OmadaError(
+        f"invalid aclType {aclType!r}",
+        hint="valid values: 'gateway' (0), 'switch' (1), 'eap' (2), or 'all'",
+    )
 
 
 _GROUP_TYPE_ALIASES = {"ip": 0, "port": 1, "mac": 2, "ipv6": 3}
@@ -1552,6 +2128,14 @@ def _get_config_snapshot(
     objects: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Read-only snapshot merging two-endpoint LAN data, ACLs, groups, WLANs, devices, and optional sections."""
+    with client.scoped_cache():
+        return _get_config_snapshot_impl(client, objects=objects)
+
+
+def _get_config_snapshot_impl(
+    client: OmadaClient,
+    objects: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     if objects is None:
         selected = list(_SNAPSHOT_DEFAULT_OBJECTS)
     else:
@@ -1637,6 +2221,672 @@ def _get_config_snapshot(
         snapshot["services"] = _get_network_services(client)
 
     return snapshot
+
+
+# -- Milestone 1 diagnostics & Milestone 2 read helpers ----------------------
+
+
+def _network_audit_enriched(client: OmadaClient) -> Dict[str, Any]:
+    """Run core network_audit plus non-fatal switch/AP/WAN telemetry findings."""
+    with client.scoped_cache():
+        audit = _network_audit(client)
+        site = _site(client)
+        try:
+            raw_devices = _fetch_devices(client, site)
+        except OmadaError:
+            raw_devices = []
+        extra = extra_network_audit_findings(client, site, raw_devices)
+    if not extra:
+        return audit
+
+    findings = list(audit.get("findings") or [])
+    findings.extend(extra)
+    findings.sort(key=lambda item: _SEVERITY_ORDER.get(item["severity"], 99))
+
+    critical = sum(1 for f in findings if f["severity"] == "critical")
+    warning = sum(1 for f in findings if f["severity"] == "warning")
+    info = sum(1 for f in findings if f["severity"] == "info")
+    counts = dict(audit.get("counts") or {})
+    counts.update({
+        "findings": len(findings),
+        "critical": critical,
+        "warnings": warning,
+        "info": info,
+    })
+    return {
+        "healthy": critical == 0,
+        "controller": audit.get("controller"),
+        "site": audit.get("site"),
+        "counts": counts,
+        "dhcpPools": audit.get("dhcpPools") or [],
+        "findings": findings,
+    }
+
+
+def _get_network_services_enriched(client: OmadaClient) -> Dict[str, Any]:
+    """Preserve get_network_services schema while enriching ``wan`` with live state."""
+    with client.scoped_cache():
+        res = _get_network_services(client)
+        site = _site(client)
+        try:
+            wan_live = collect_wan_status_data(client, site, include_speedtest=False)
+        except OmadaError:
+            return res
+    if wan_live.get("ports") or wan_live.get("hasGateway"):
+        wan_block = dict(res.get("wan") or {})
+        wan_block["live"] = {
+            "hasGateway": wan_live.get("hasGateway"),
+            "gatewayMac": wan_live.get("gatewayMac"),
+            "wanMode": wan_live.get("wanMode"),
+            "loadBalanceEnabled": wan_live.get("loadBalanceEnabled"),
+            "failoverConfigured": wan_live.get("failoverConfigured"),
+            "totalWanPorts": wan_live.get("totalWanPorts"),
+            "linkUpCount": wan_live.get("linkUpCount"),
+            "internetUpCount": wan_live.get("internetUpCount"),
+            "ports": wan_live.get("ports") or [],
+        }
+        res["wan"] = wan_block
+    return res
+
+
+def _get_switch_ports(
+    client: OmadaClient,
+    mac: str,
+    includeCounters: bool = True,
+    includeCableTest: bool = True,
+    includeDownPorts: bool = True,
+    compact: bool = False,
+) -> Dict[str, Any]:
+    with client.scoped_cache():
+        site = _site(client)
+        sw = resolve_raw_device(client, site, mac, expected_type="switch")
+        return collect_switch_ports_data(
+            client, site, sw,
+            include_counters=bool(includeCounters),
+            include_cable_test=bool(includeCableTest),
+            include_down_ports=bool(includeDownPorts),
+            compact=bool(compact),
+        )
+
+
+def _get_ap_radios(
+    client: OmadaClient,
+    mac: str,
+    includeRfScan: bool = True,
+    includeAvailableChannels: bool = True,
+) -> Dict[str, Any]:
+    site = _site(client)
+    ap = resolve_raw_device(client, site, mac, expected_type="ap")
+    return collect_ap_radios_data(
+        client, site, ap,
+        include_rf_scan=bool(includeRfScan),
+        include_available_channels=bool(includeAvailableChannels),
+    )
+
+
+def _get_rf_scan(client: OmadaClient, mac: str) -> Dict[str, Any]:
+    site = _site(client)
+    ap = resolve_raw_device(client, site, mac, expected_type="ap")
+    return collect_rf_scan_data(client, site, ap)
+
+
+def _get_wan_status(
+    client: OmadaClient,
+    includeSpeedtest: bool = True,
+    maskWanIp: bool = False,
+) -> Dict[str, Any]:
+    site = _site(client)
+    return collect_wan_status_data(
+        client, site,
+        include_speedtest=bool(includeSpeedtest),
+        mask_wan_ip=bool(maskWanIp),
+    )
+
+
+def _list_vpn_tunnels(client: OmadaClient) -> Dict[str, Any]:
+    return collect_vpn_tunnels_data(client, _site(client))
+
+
+def _get_topology(client: OmadaClient, includeClients: bool = False) -> Dict[str, Any]:
+    return collect_topology_data(client, _site(client), include_clients=bool(includeClients))
+
+
+def _get_security_status(
+    client: OmadaClient,
+    hours: int = 24,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    if isinstance(hours, bool) or not isinstance(hours, int) or hours < 0:
+        raise OmadaError("hours must be a non-negative integer")
+    site = _site(client)
+    data = collect_security_status_data(client, site, limit=limit)
+    if hours > 0 and isinstance(data.get("warnings"), list):
+        data["windowHours"] = hours
+    return data
+
+
+def _safe_recent_logs(
+    client: OmadaClient,
+    hours: int,
+    warnings: List[str],
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    events: List[Dict[str, Any]] = []
+    for cat in ("alerts", "events"):
+        try:
+            events.extend(_list_logs(client, category=cat, hours=hours, limit=limit))
+        except OmadaError as exc:
+            warnings.append(f"logs/{cat}: unavailable ({exc.code}: {exc})")
+    return events
+
+
+def _diagnose_client(
+    client: OmadaClient,
+    mac: str,
+    hours: int = 24,
+) -> Dict[str, Any]:
+    with client.scoped_cache():
+        return _diagnose_client_impl(client, mac, hours=hours)
+
+
+def _diagnose_client_impl(
+    client: OmadaClient,
+    mac: str,
+    hours: int = 24,
+) -> Dict[str, Any]:
+    if isinstance(hours, bool) or not isinstance(hours, int) or hours < 0:
+        raise OmadaError("hours must be a non-negative integer")
+    site = _site(client)
+    warnings: List[str] = []
+    wanted_mac = normalize_mac(mac)
+    needle = str(mac or "").strip().lower()
+
+    matched_live: Optional[Dict[str, Any]] = None
+    for entry in _fetch_clients(client, limit=0):
+        if normalize_mac(entry.get("mac", "")) == wanted_mac:
+            matched_live = entry
+            break
+        if needle and needle in (
+            str(entry.get("name", "")).lower(),
+            str(entry.get("hostName", "")).lower(),
+            str(entry.get("ip", "")).lower(),
+        ):
+            matched_live = entry
+            break
+
+    target_mac = normalize_mac(matched_live["mac"]) if matched_live else wanted_mac
+    detail_raw: Dict[str, Any] = {}
+    if len(target_mac) == 17 and ":" in target_mac:
+        raw_d, ok_d = try_api_result(
+            client, f"sites/{site.site_id}/clients/{omada_mac(target_mac)}",
+            warnings, label="client detail",
+        )
+        if ok_d and isinstance(raw_d, dict):
+            detail_raw = raw_d
+
+    search_key = omada_mac(target_mac) if ":" in target_mac else str(mac).strip()
+    past_rows, _, ok_past = try_paginate(
+        client, f"sites/{site.site_id}/insight/pastConnection?searchKey={search_key}",
+        warnings, label="client connection history", page_size=20, max_pages=1,
+    )
+    past_connections = [deep_redact(r) for r in past_rows[:20]] if ok_past else []
+
+    if matched_live is None and not detail_raw and not past_connections:
+        raise OmadaError(
+            f"no client matches {mac!r}",
+            hint="check list_clients; accepts MAC, hostname, or IP",
+        )
+
+    base = matched_live or {}
+    c_mac = normalize_mac(str(detail_raw.get("mac") or base.get("mac") or target_mac))
+    c_name = str(detail_raw.get("name") or base.get("name") or detail_raw.get("hostName") or c_mac)
+    c_host = str(detail_raw.get("hostName") or base.get("hostName") or "")
+    c_ip = str(detail_raw.get("ip") or base.get("ip") or "")
+    is_wireless = bool(detail_raw.get("wireless") if "wireless" in detail_raw else base.get("wireless", False))
+    if not matched_live and not detail_raw and past_connections:
+        latest = past_connections[0]
+        is_wireless = bool(latest.get("ssid"))
+        c_name = str(latest.get("name") or latest.get("hostName") or c_name)
+        c_ip = str(latest.get("ip") or c_ip)
+
+    rssi = detail_raw.get("rssi") if detail_raw.get("rssi") is not None else detail_raw.get("signalLevel")
+    if rssi is None:
+        rssi = base.get("signal")
+    snr = detail_raw.get("snr")
+    radio_id = detail_raw.get("radioId")
+    channel = detail_raw.get("channel")
+    ap_mac = normalize_mac(str(detail_raw.get("apMac") or ""))
+    ap_name = str(detail_raw.get("apName") or (base.get("apName") if is_wireless else "") or "")
+    switch_mac = normalize_mac(str(detail_raw.get("switchMac") or ""))
+    switch_name = str(detail_raw.get("switchName") or (base.get("apName") if not is_wireless else "") or "")
+    switch_port = detail_raw.get("port")
+    rate_limit = detail_raw.get("rateLimit") if isinstance(detail_raw.get("rateLimit"), dict) else {}
+
+    client_summary: Dict[str, Any] = {
+        "mac": c_mac,
+        "name": c_name,
+        "hostName": c_host,
+        "ip": c_ip,
+        "active": bool(detail_raw.get("active", bool(matched_live or detail_raw))),
+        "wireless": is_wireless,
+        "ssid": str(detail_raw.get("ssid") or base.get("ssid") or ""),
+        "apMac": ap_mac,
+        "apName": ap_name,
+        "switchMac": switch_mac,
+        "switchName": switch_name,
+        "port": switch_port,
+        "vlan": _as_int(_pick(detail_raw, "vid", "vlan", default=base.get("vlan") or 0), 0),
+        "radioId": radio_id,
+        "channel": channel,
+        "rssi": rssi,
+        "signalLevel": detail_raw.get("signalLevel") if detail_raw.get("signalLevel") is not None else base.get("signal"),
+        "snr": snr,
+        "rxRateKbps": detail_raw.get("rxRate"),
+        "txRateKbps": detail_raw.get("txRate"),
+        "uptimeSec": detail_raw.get("uptime") if detail_raw.get("uptime") is not None else base.get("duration"),
+        "rateLimitEnabled": bool(rate_limit.get("enable", False)),
+        "rateLimit": deep_redact(rate_limit) if rate_limit else None,
+        "lockToApMac": normalize_mac(str(detail_raw.get("lockToApMac") or "")) if detail_raw.get("lockToApMac") else "",
+    }
+
+    try:
+        raw_devices = _fetch_devices(client, site)
+    except OmadaError:
+        raw_devices = []
+
+    parent_radio: Optional[Dict[str, Any]] = None
+    parent_switch_port: Optional[Dict[str, Any]] = None
+
+    if is_wireless and (ap_mac or ap_name):
+        ap_dev = next(
+            (d for d in raw_devices
+             if str(d.get("type") or "").lower() == "ap"
+             and ((ap_mac and normalize_mac(str(d.get("mac") or "")) == ap_mac)
+                  or (ap_name and str(d.get("name") or "").lower() == ap_name.lower()))),
+            None,
+        )
+        if ap_dev is not None:
+            ap_data = collect_ap_radios_data(
+                client, site, ap_dev, include_rf_scan=False, include_available_channels=False,
+            )
+            warnings.extend(ap_data.get("warnings") or [])
+            band_hint = {0: "2g", 1: "5g", 2: "5g2", 3: "6g"}.get(as_int_or_none(radio_id))
+            for r in ap_data.get("radios") or []:
+                if (band_hint and r["band"] == band_hint) or (channel is not None and r.get("channel") == channel):
+                    parent_radio = r
+                    break
+            if parent_radio is None and ap_data.get("radios"):
+                parent_radio = ap_data["radios"][0]
+
+    elif not is_wireless and (switch_mac or switch_name):
+        sw_dev = next(
+            (d for d in raw_devices
+             if str(d.get("type") or "").lower() == "switch"
+             and ((switch_mac and normalize_mac(str(d.get("mac") or "")) == switch_mac)
+                  or (switch_name and str(d.get("name") or "").lower() == switch_name.lower()))),
+            None,
+        )
+        if sw_dev is not None:
+            sw_data = collect_switch_ports_data(
+                client, site, sw_dev, include_counters=True, include_cable_test=True, include_topology=False,
+            )
+            warnings.extend(sw_data.get("warnings") or [])
+            if switch_port is not None:
+                pnum = _as_int(switch_port, -1)
+                parent_switch_port = next(
+                    (p for p in (sw_data.get("ports") or []) if p.get("port") == pnum), None,
+                )
+
+    match_tokens = {
+        tok.lower()
+        for tok in (
+            c_mac, omada_mac(c_mac), c_name, c_host, c_ip,
+            ap_mac, omada_mac(ap_mac), ap_name, switch_mac, switch_name,
+        )
+        if tok
+    }
+    all_logs = _safe_recent_logs(client, hours, warnings)
+    recent_logs = [
+        entry for entry in all_logs
+        if any(
+            tok in f"{entry.get('target', '')} {entry.get('content', '')}".lower()
+            for tok in match_tokens
+        )
+    ][:25]
+
+    findings: List[Dict[str, str]] = []
+    next_steps: List[str] = []
+
+    if not client_summary["active"]:
+        findings.append({
+            "code": "CLIENT_OFFLINE",
+            "severity": "warning",
+            "detail": f"Client {c_name} ({c_mac}) is not currently active on the live client table.",
+        })
+        next_steps.append("Check physical link/Wi-Fi radio availability or review recent pastConnection entries.")
+
+    if is_wireless:
+        rssi_val = _as_float(rssi)
+        if rssi_val is not None and rssi_val < 0:
+            if rssi_val <= -82:
+                findings.append({
+                    "code": "CLIENT_CRITICAL_RSSI",
+                    "severity": "critical",
+                    "detail": f"Client RSSI is critically weak ({rssi_val} dBm on {ap_name or ap_mac}).",
+                })
+                next_steps.append("Move client closer to an AP, check AP TX power, or bind client to a closer AP with set_client_lock_to_ap.")
+            elif rssi_val <= -75:
+                findings.append({
+                    "code": "CLIENT_WEAK_RSSI",
+                    "severity": "warning",
+                    "detail": f"Client RSSI is marginal ({rssi_val} dBm on {ap_name or ap_mac}).",
+                })
+                next_steps.append("Evaluate 2.4GHz fallback vs closer AP placement to improve RSSI above -72 dBm.")
+        snr_val = _as_float(snr)
+        if snr_val is not None and snr_val < 15:
+            findings.append({
+                "code": "CLIENT_LOW_SNR",
+                "severity": "warning",
+                "detail": f"Client SNR is low ({snr_val} dB), indicating noise or weak signal.",
+            })
+
+    if parent_radio:
+        inter = _as_float(parent_radio.get("interferencePct"))
+        tx_ret = _as_float(parent_radio.get("txRetryRatePct"))
+        rx_ret = _as_float(parent_radio.get("rxRetryRatePct"))
+        if inter is not None and inter >= 30.0:
+            findings.append({
+                "code": "AP_RADIO_HIGH_INTERFERENCE",
+                "severity": "warning",
+                "detail": f"Parent AP {parent_radio['band']} radio channel {parent_radio['channel']} reports {inter}% interference.",
+            })
+            next_steps.append(f"Run start_rf_scan on AP {ap_name or ap_mac} and move to a cleaner channel with update_ap_radio.")
+        if (tx_ret is not None and tx_ret >= 15.0) or (rx_ret is not None and rx_ret >= 20.0):
+            findings.append({
+                "code": "AP_RADIO_HIGH_RETRIES",
+                "severity": "warning",
+                "detail": f"Parent AP {parent_radio['band']} retry rate is high (tx={tx_ret}%, rx={rx_ret}%).",
+            })
+
+    if parent_switch_port:
+        if not parent_switch_port.get("linkUp"):
+            findings.append({
+                "code": "SWITCH_PORT_LINK_DOWN",
+                "severity": "critical",
+                "detail": f"Parent switch port {parent_switch_port['port']} link is down.",
+            })
+        elif parent_switch_port.get("maxSpeedMbps", 0) >= 1000 and 0 < parent_switch_port.get("speedMbps", 0) <= 100:
+            findings.append({
+                "code": "SWITCH_PORT_SPEED_DOWNGRADED",
+                "severity": "warning",
+                "detail": f"Switch port {parent_switch_port['port']} negotiated {parent_switch_port['speed']} on a {parent_switch_port['maxSpeed']} port.",
+            })
+            next_steps.append("Inspect Ethernet cable/termination or check switch port speed/duplex configuration.")
+        if parent_switch_port.get("stpDiscarding"):
+            findings.append({
+                "code": "SWITCH_PORT_STP_DISCARDING",
+                "severity": "critical",
+                "detail": f"Switch port {parent_switch_port['port']} is in STP discarding state (loop protection active).",
+            })
+        cnt = parent_switch_port.get("counters") or {}
+        errs = _as_int(cnt.get("rxErrors"), 0) + _as_int(cnt.get("txErrors"), 0)
+        drops = _as_int(cnt.get("rxDrops"), 0) + _as_int(cnt.get("txDrops"), 0)
+        if errs > 0 or drops > 0:
+            findings.append({
+                "code": "SWITCH_PORT_PACKET_ERRORS",
+                "severity": "warning",
+                "detail": f"Switch port {parent_switch_port['port']} counters show errors={errs}, drops={drops}.",
+            })
+
+    if client_summary["rateLimitEnabled"]:
+        findings.append({
+            "code": "CLIENT_RATE_LIMITED",
+            "severity": "info",
+            "detail": "A client bandwidth rate limit is active on this client.",
+        })
+
+    if not next_steps:
+        next_steps.append("No critical link faults detected; monitor recentLogs and pastConnections for intermittent drops.")
+
+    return {
+        "client": client_summary,
+        "parentRadio": parent_radio,
+        "parentSwitchPort": parent_switch_port,
+        "pastConnections": past_connections,
+        "recentLogs": recent_logs,
+        "findings": findings,
+        "nextSteps": next_steps,
+        "warnings": warnings,
+    }
+
+
+def as_int_or_none(val: Any) -> Optional[int]:
+    if val is None or isinstance(val, bool):
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _diagnose_wan(
+    client: OmadaClient,
+    includeSpeedtest: bool = True,
+    hours: int = 24,
+) -> Dict[str, Any]:
+    with client.scoped_cache():
+        return _diagnose_wan_impl(client, includeSpeedtest=includeSpeedtest, hours=hours)
+
+
+def _diagnose_wan_impl(
+    client: OmadaClient,
+    includeSpeedtest: bool = True,
+    hours: int = 24,
+) -> Dict[str, Any]:
+    if isinstance(hours, bool) or not isinstance(hours, int) or hours < 0:
+        raise OmadaError("hours must be a non-negative integer")
+    site = _site(client)
+    warnings: List[str] = []
+    wan = collect_wan_status_data(client, site, include_speedtest=bool(includeSpeedtest))
+    warnings.extend(wan.get("warnings") or [])
+
+    vpn = collect_vpn_tunnels_data(client, site)
+    vpn_counts = vpn.get("counts") or {}
+    vpn_summary = {
+        "activeOrStatTunnels": vpn_counts.get("activeOrStatTunnels", 0),
+        "upTunnels": vpn_counts.get("upTunnels", 0),
+        "configuredEntries": vpn_counts.get("configuredEntries", 0),
+    }
+
+    gw_tokens = {
+        tok.lower()
+        for tok in ("wan", "gateway", "internet", "pppoe", "failover", "vpn", "speedtest",
+                    wan.get("gatewayName", ""), wan.get("gatewayMac", ""))
+        if tok
+    }
+    all_logs = _safe_recent_logs(client, hours, warnings)
+    recent_logs = [
+        entry for entry in all_logs
+        if any(
+            tok in f"{entry.get('target', '')} {entry.get('module', '')} {entry.get('content', '')}".lower()
+            for tok in gw_tokens
+        )
+    ][:25]
+
+    findings: List[Dict[str, str]] = []
+    next_steps: List[str] = []
+    ports = wan.get("ports") or []
+
+    if not wan.get("hasGateway"):
+        findings.append({
+            "code": "WAN_NO_GATEWAY",
+            "severity": "info",
+            "detail": "No Omada gateway is adopted on this site; WAN diagnostics are limited.",
+        })
+    else:
+        if ports and wan.get("internetUpCount", 0) == 0:
+            findings.append({
+                "code": "WAN_ALL_LINKS_DOWN",
+                "severity": "critical",
+                "detail": "All gateway WAN ports report internet offline.",
+            })
+            next_steps.append("Check ISP modem/fiber link, physical WAN cable, and gateway PPPoE/DHCP authentication.")
+        for p in ports:
+            if p.get("enabled", True) and not p.get("linkUp"):
+                findings.append({
+                    "code": "WAN_PORT_LINK_DOWN",
+                    "severity": "warning",
+                    "detail": f"WAN port {p['port']} ({p['name']}) physical link is down.",
+                })
+            elif p.get("linkUp") and not p.get("internetUp"):
+                findings.append({
+                    "code": "WAN_PORT_INTERNET_OFFLINE",
+                    "severity": "warning",
+                    "detail": f"WAN port {p['port']} ({p['name']}) is linked up ({p['speed']}) but online detection reports internet offline.",
+                })
+                next_steps.append(f"Check gateway online detection target and upstream ISP routing on {p['name']}.")
+            lat = _as_float(p.get("latencyMs"))
+            if lat is not None and lat >= 100.0:
+                findings.append({
+                    "code": "WAN_HIGH_LATENCY",
+                    "severity": "warning",
+                    "detail": f"WAN port {p['name']} reports elevated latency ({lat} ms).",
+                })
+            loss = _as_float(p.get("lossPct"))
+            if loss is not None and loss > 0.5:
+                findings.append({
+                    "code": "WAN_PACKET_LOSS",
+                    "severity": "warning" if loss < 5.0 else "critical",
+                    "detail": f"WAN port {p['name']} reports {loss}% packet loss.",
+                })
+            errs = _as_int(p.get("rxErrorPkts"), 0) + _as_int(p.get("txErrorPkts"), 0)
+            if errs > 0:
+                findings.append({
+                    "code": "WAN_INTERFACE_ERRORS",
+                    "severity": "warning",
+                    "detail": f"WAN port {p['name']} reports {errs} packet errors.",
+                })
+
+    if not next_steps:
+        next_steps.append("WAN links look operational; inspect latency, packet loss, and recent gateway logs if users report intermittent drops.")
+
+    return {
+        "wan": wan,
+        "vpnSummary": vpn_summary,
+        "recentLogs": recent_logs,
+        "findings": findings,
+        "nextSteps": next_steps,
+        "warnings": warnings,
+    }
+
+
+def _list_port_profiles(client: OmadaClient) -> List[Dict[str, Any]]:
+    site = _site(client)
+    rows, _ = client.paginate(f"sites/{site.site_id}/setting/lan/profiles")
+    projected: List[Dict[str, Any]] = []
+    for row in rows:
+        ptype = row.get("type")
+        projected.append({
+            "id": str(row.get("id") or ""),
+            "name": str(row.get("name") or ""),
+            "type": ptype,
+            "typeLabel": PROFILE_TYPE_LABELS.get(as_int_or_none(ptype) if ptype is not None else -1, str(ptype)),
+            "prohibitModify": bool(row.get("prohibitModify", False)),
+            "poe": row.get("poe"),
+            "vlanConfigEnable": bool(row.get("vlanConfigEnable", False)),
+            "nativeNetworkId": str(row.get("nativeNetworkId") or ""),
+            "tagNetworkIds": [str(x) for x in (row.get("tagNetworkIds") or [])],
+            "untagNetworkIds": [str(x) for x in (row.get("untagNetworkIds") or [])],
+            "portIsolationEnable": bool(row.get("portIsolationEnable", False)),
+            "lldpMedEnable": bool(row.get("lldpMedEnable", False)),
+            "spanningTreeEnable": bool(row.get("spanningTreeEnable", False)),
+            "dot1x": row.get("dot1x"),
+        })
+    return projected
+
+
+def _list_wlan_groups(client: OmadaClient) -> List[Dict[str, Any]]:
+    site = _site(client)
+    groups, _ = client.paginate(f"sites/{site.site_id}/setting/wlans")
+    warnings: List[str] = []
+    ssid_groups, _, ok_ws = try_paginate(
+        client, f"sites/{site.site_id}/wlanSsid", warnings, label="wlanSsid",
+    )
+    ssids_by_gid: Dict[str, List[Dict[str, Any]]] = {}
+    if ok_ws:
+        for entry in ssid_groups:
+            gid = str(entry.get("wlanId") or "")
+            raw_ssids = entry.get("ssids") or []
+            if gid and isinstance(raw_ssids, list):
+                ssids_by_gid[gid] = [
+                    {
+                        "id": str(s.get("id") or ""),
+                        "name": str(s.get("name") or s.get("ssid") or ""),
+                        "band": s.get("band"),
+                        "enabled": bool(s.get("broadcast", s.get("enabled", True))),
+                    }
+                    for s in raw_ssids if isinstance(s, dict)
+                ]
+    out: List[Dict[str, Any]] = []
+    for grp in groups:
+        gid = str(grp.get("id") or "")
+        slist = ssids_by_gid.get(gid, [])
+        if not slist:
+            try:
+                raw_s = _fetch_ssids(client, site, gid)
+                slist = [
+                    {
+                        "id": str(s.get("id") or ""),
+                        "name": str(s.get("name") or s.get("ssid") or ""),
+                        "band": s.get("band"),
+                        "enabled": bool(s.get("broadcast", s.get("enabled", True))),
+                    }
+                    for s in raw_s
+                ]
+            except OmadaError:
+                slist = []
+        out.append({
+            "id": gid,
+            "name": str(grp.get("name") or ""),
+            "primary": bool(grp.get("primary", False)),
+            "clone": bool(grp.get("clone", False)),
+            "ssidCount": len(slist),
+            "ssids": slist,
+        })
+    return out
+
+
+def _list_policy_routes(client: OmadaClient) -> Dict[str, Any]:
+    site = _site(client)
+    warnings: List[str] = []
+    rows, _, ok = try_paginate(
+        client, f"sites/{site.site_id}/setting/transmission/policyRoutings",
+        warnings, label="policy routes",
+    )
+    cleaned = [deep_redact(r) for r in rows] if ok else []
+    return {
+        "items": cleaned,
+        "count": len(cleaned),
+        "supported": ok,
+        "warnings": warnings,
+    }
+
+
+def _list_lan_dns_rules(client: OmadaClient) -> Dict[str, Any]:
+    site = _site(client)
+    warnings: List[str] = []
+    rows, _, ok = try_paginate(
+        client, f"sites/{site.site_id}/setting/lan/dns",
+        warnings, label="LAN DNS rules",
+    )
+    cleaned = [deep_redact(r) for r in rows] if ok else []
+    return {
+        "items": cleaned,
+        "count": len(cleaned),
+        "supported": ok,
+        "warnings": warnings,
+    }
+
 
 TOOLS: Tuple[Tool, ...] = (
     Tool(
@@ -1725,12 +2975,13 @@ TOOLS: Tuple[Tool, ...] = (
     Tool(
         name="network_audit",
         title="Audit site network health",
-        description=("One-call read-only health audit checking WAN state, offline devices, "
-                    "pending firmware upgrades, 0-client APs, guest/unexpected VLAN clients, "
-                    "unisolated VLANs, and DHCP pool utilization with stable finding codes."),
+        description=("One-call read-only health audit checking WAN state/packet loss, offline "
+                    "devices, pending firmware upgrades, switch PoE budget and downgraded "
+                    "uplinks, AP retry/interference spikes, 0-client APs, guest/unexpected "
+                    "VLAN clients, unisolated VLANs, and DHCP pool utilization."),
         input_schema=_EMPTY,
         output_schema=_NETWORK_AUDIT_SCHEMA,
-        handler=_network_audit,
+        handler=_network_audit_enriched,
     ),
     Tool(
         name="explain_error",
@@ -1839,13 +3090,24 @@ TOOLS: Tuple[Tool, ...] = (
     ),
     Tool(
         name="list_acls",
-        title="List gateway ACL rules",
+        title="List firewall ACL rules",
         description=(
-            "List gateway firewall ACL rules (setting/firewall/acls?type=0) with policy, "
-            "source/destination IDs, direction, protocols, and per-rule status. "
+            "List gateway, switch, or EAP ACL rules (setting/firewall/acls?type=0|1|2) with "
+            "policy, source/destination IDs, direction, protocols, and per-rule status. "
+            "Defaults to gateway ACLs for backward compatibility; pass aclType='all' for all scopes. "
             "Note: use get_config_snapshot(objects=['acls']) to inspect the advisory aclDisable flag."
         ),
-        input_schema=_EMPTY,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "aclType": {
+                    "type": "string",
+                    "enum": ["gateway", "switch", "eap", "all"],
+                    "default": "gateway",
+                    "description": "ACL scope: 'gateway' (default), 'switch', 'eap', or 'all'",
+                },
+            },
+        },
         output_schema=_list_output_schema(_ACL_SCHEMA),
         handler=_list_acls,
     ),
@@ -1889,11 +3151,11 @@ TOOLS: Tuple[Tool, ...] = (
         title="Get network services",
         description=(
             "Summarize UPnP, DNS proxy, mDNS reflector rules and profiles, secret-redacted DDNS "
-            "configuration, and sanitized WAN port status."
+            "configuration, and sanitized WAN port status (enriched with live WAN link/latency metrics)."
         ),
         input_schema=_EMPTY,
         output_schema=_SERVICES_SCHEMA,
-        handler=_get_network_services,
+        handler=_get_network_services_enriched,
     ),
     Tool(
         name="list_logs",
@@ -1934,12 +3196,208 @@ TOOLS: Tuple[Tool, ...] = (
         handler=_list_logs,
     ),
     Tool(
+        name="get_switch_ports",
+        title="Get switch ports, PoE & diagnostics",
+        description=(
+            "Inspect per-port link status, speed/duplex, PoE delivery & switch budget, active "
+            "port profile/VLANs, error/drop counters, cable test results, LAGs, uplinks, and controller port."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Managed switch MAC address or exact name"},
+                "includeCounters": {
+                    "type": "boolean", "default": True,
+                    "description": "Fetch RX/TX byte, frame, and error counters (default true)",
+                },
+                "includeCableTest": {
+                    "type": "boolean", "default": True,
+                    "description": "Include cached cable-test results if supported by the switch (default true)",
+                },
+                "includeDownPorts": {
+                    "type": "boolean", "default": True,
+                    "description": "Include down/unlinked ports in output (default true)",
+                },
+                "compact": {
+                    "type": "boolean", "default": False,
+                    "description": "Trim zero counters and empty cableTest/VLAN fields (default false)",
+                },
+            },
+            "required": ["mac"],
+        },
+        output_schema=_SWITCH_PORTS_SCHEMA,
+        handler=_get_switch_ports,
+    ),
+    Tool(
+        name="get_ap_radios",
+        title="Get AP radio & channel state",
+        description=(
+            "Inspect an AP's 2.4G/5G/5G2/6G radios: channel, width, TX power, channel utilization, "
+            "interference, retry/drop counters, supported channels, and latest RF scan."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Managed access point MAC address or exact name"},
+                "includeRfScan": {"type": "boolean", "default": True},
+                "includeAvailableChannels": {"type": "boolean", "default": True},
+            },
+            "required": ["mac"],
+        },
+        output_schema=_AP_RADIOS_SCHEMA,
+        handler=_get_ap_radios,
+    ),
+    Tool(
+        name="get_rf_scan",
+        title="Get AP RF scan results",
+        description="Read the latest RF scan status/results and per-radio interference metrics for an AP.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Managed access point MAC address or exact name"},
+            },
+            "required": ["mac"],
+        },
+        output_schema=_RF_SCAN_SCHEMA,
+        handler=_get_rf_scan,
+    ),
+    Tool(
+        name="get_wan_status",
+        title="Get live WAN link & health status",
+        description=(
+            "Inspect gateway WAN link state, gateway/DNS/WAN IP, failover/load-balance mode, "
+            "latency/packet loss health metrics, and latest speedtest results."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "includeSpeedtest": {"type": "boolean", "default": True},
+                "maskWanIp": {
+                    "type": "boolean", "default": False,
+                    "description": "Mask public WAN host octets when sharing diagnostics (default false)",
+                },
+            },
+        },
+        output_schema=_WAN_STATUS_SCHEMA,
+        handler=_get_wan_status,
+    ),
+    Tool(
+        name="list_vpn_tunnels",
+        title="List VPN tunnels & secret-redacted configs",
+        description=(
+            "List WireGuard, OpenVPN, IPsec, and SSL/L2TP VPN tunnel state and configured profiles "
+            "(all private keys, PSKs, and passwords redacted)."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_VPN_TUNNELS_SCHEMA,
+        handler=_list_vpn_tunnels,
+    ),
+    Tool(
+        name="get_topology",
+        title="Get site uplink topology tree",
+        description="Build the site's Gateway -> Switch(port) -> AP/Switch uplink tree with device counts.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "includeClients": {
+                    "type": "boolean", "default": False,
+                    "description": "Include leaf client nodes in the tree (default false)",
+                },
+            },
+        },
+        output_schema=_TOPOLOGY_SCHEMA,
+        handler=_get_topology,
+    ),
+    Tool(
+        name="get_security_status",
+        title="Get IPS/IDS, WIDS & rogue AP status",
+        description=(
+            "Summarize IPS/IDS enablement, recent threat events, attack defense limits, WIDS/WIPS, "
+            "and rogue AP detections (gracefully warns when hardware/feature is unavailable)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "hours": {"type": "integer", "minimum": 0, "default": 24},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20},
+            },
+        },
+        output_schema=_SECURITY_STATUS_SCHEMA,
+        handler=_get_security_status,
+    ),
+    Tool(
+        name="diagnose_client",
+        title="Diagnose a WiFi or wired client",
+        description=(
+            "Correlate client signal/link state, connection history, parent AP radio or switch port "
+            "telemetry, and recent logs into actionable diagnostic findings."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Client MAC (any format), hostname, or IP"},
+                "hours": {"type": "integer", "minimum": 0, "default": 24},
+            },
+            "required": ["mac"],
+        },
+        output_schema=_DIAGNOSE_CLIENT_SCHEMA,
+        handler=_diagnose_client,
+    ),
+    Tool(
+        name="diagnose_wan",
+        title="Diagnose gateway WAN & VPN health",
+        description=(
+            "Correlate live WAN link state, latency/packet loss, speedtest, VPN tunnel health, "
+            "and gateway alerts/events into deterministic findings."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "includeSpeedtest": {"type": "boolean", "default": True},
+                "hours": {"type": "integer", "minimum": 0, "default": 24},
+            },
+        },
+        output_schema=_DIAGNOSE_WAN_SCHEMA,
+        handler=_diagnose_wan,
+    ),
+    Tool(
+        name="list_port_profiles",
+        title="List switch LAN port profiles",
+        description="List switch port profiles (All, Disable, custom VLAN/PoE profiles).",
+        input_schema=_EMPTY,
+        output_schema=_list_output_schema(_PORT_PROFILE_SCHEMA),
+        handler=_list_port_profiles,
+    ),
+    Tool(
+        name="list_wlan_groups",
+        title="List WLAN groups & SSID bindings",
+        description="List configured WLAN groups and their SSIDs for assigning APs cleanly.",
+        input_schema=_EMPTY,
+        output_schema=_list_output_schema(_WLAN_GROUP_SCHEMA),
+        handler=_list_wlan_groups,
+    ),
+    Tool(
+        name="list_policy_routes",
+        title="List gateway policy routing rules",
+        description="List policy routing rules (gracefully reports unavailability if no gateway exists).",
+        input_schema=_EMPTY,
+        output_schema=_SUPPORTED_ITEMS_SCHEMA,
+        handler=_list_policy_routes,
+    ),
+    Tool(
+        name="list_lan_dns_rules",
+        title="List local LAN DNS rules",
+        description="List local LAN DNS records (gracefully warns on controller versions without LAN DNS).",
+        input_schema=_EMPTY,
+        output_schema=_SUPPORTED_ITEMS_SCHEMA,
+        handler=_list_lan_dns_rules,
+    ),
+    Tool(
         name="set_client_fixed_ip",
         title="Set client DHCP reservation",
         description=(
             "Assign a DHCP fixed IPv4 reservation on a client (PATCH clients/{MAC}). "
             "Lease-delayed; strips volatile keys and refuses managed device MACs (-41011). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -1963,7 +3421,6 @@ TOOLS: Tuple[Tool, ...] = (
         title="Release client DHCP reservation",
         description=(
             "Clear useFixedAddr on a client (PATCH clients/{MAC}). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -1985,7 +3442,6 @@ TOOLS: Tuple[Tool, ...] = (
         description=(
             "Update dhcpSettings.ipRangePool on a LAN/VLAN via full /interface PATCH with "
             "two-endpoint verification and controller/device overlap guards. "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2020,7 +3476,6 @@ TOOLS: Tuple[Tool, ...] = (
         description=(
             "Toggle client/network isolation on a LAN/VLAN via the /interface endpoint and "
             "verify across both setting/lan/networks and setting/lan/networks/interface. "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2046,7 +3501,7 @@ TOOLS: Tuple[Tool, ...] = (
         title="Create IPv4 IP group",
         description=(
             "Create an IPv4 IP profile group (type=0), packing ranges into <=16 aligned CIDRs "
-            "(-33726). Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+            "(-33726)."
         ),
         input_schema={
             "type": "object",
@@ -2076,7 +3531,6 @@ TOOLS: Tuple[Tool, ...] = (
         description=(
             "Replace an IPv4 IP group via delete+recreate, automatically running the 6-step "
             "temporary-group swap when ACL rules reference the group (-33717). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2105,7 +3559,7 @@ TOOLS: Tuple[Tool, ...] = (
         title="Create gateway ACL rule",
         description=(
             "Create a gateway ACL rule (POST setting/firewall/acls?type=0) with anti-stranding "
-            "checks for management hosts. Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS."
+            "checks for management hosts."
         ),
         input_schema={
             "type": "object",
@@ -2118,7 +3572,10 @@ TOOLS: Tuple[Tool, ...] = (
                 "source": {
                     "type": "object",
                     "properties": {
-                        "type": {"type": ["string", "integer"]},
+                        "type": {
+                            "type": ["string", "integer"],
+                            "description": "0=network, 1=ip_group, 2=port_group",
+                        },
                         "ids": {"type": "array", "items": {"type": "string"}},
                     },
                     "required": ["type", "ids"],
@@ -2127,7 +3584,10 @@ TOOLS: Tuple[Tool, ...] = (
                 "destination": {
                     "type": "object",
                     "properties": {
-                        "type": {"type": ["string", "integer"]},
+                        "type": {
+                            "type": ["string", "integer"],
+                            "description": "0=network, 1=ip_group, 2=port_group",
+                        },
                         "ids": {"type": "array", "items": {"type": "string"}},
                     },
                     "required": ["type", "ids"],
@@ -2175,16 +3635,20 @@ TOOLS: Tuple[Tool, ...] = (
     ),
     Tool(
         name="set_acl_rule_status",
-        title="Enable or disable gateway ACL rule",
+        title="Enable or disable ACL rule",
         description=(
-            "Toggle a single gateway ACL rule status (PUT setting/firewall/acls/{id}?type=0); "
-            "never relies on or flips aclDisable. Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS."
+            "Enable or disable a gateway, switch, or EAP ACL rule status without changing aclDisable."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "rule": {"type": "string", "description": "Gateway ACL rule ID or exact name"},
+                "rule": {"type": "string", "description": "ACL rule ID or exact name"},
                 "status": {"type": "boolean", "description": "True to enable, false to disable"},
+                "aclType": {
+                    "type": "string",
+                    "enum": ["gateway", "switch", "eap"],
+                    "description": "ACL scope (auto-detected if omitted)",
+                },
                 **_WRITE_CONTROL_PROPS,
             },
             "required": ["rule", "status"],
@@ -2201,7 +3665,6 @@ TOOLS: Tuple[Tool, ...] = (
         description=(
             "Create or update a static DHCP reservation in setting/service/dhcp "
             "(works for offline MACs too; verifies pool/subnet bounds and checks silent no-op). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2228,7 +3691,6 @@ TOOLS: Tuple[Tool, ...] = (
         title="Delete static DHCP reservation",
         description=(
             "Delete a static DHCP reservation by MAC (DELETE setting/service/dhcp/{MAC}). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2250,7 +3712,6 @@ TOOLS: Tuple[Tool, ...] = (
         description=(
             "Create a routed LAN interface (purpose='interface', requires gatewaySubnet) or pure "
             "switch/AP VLAN (purpose='vlan') via POST setting/lan/networks. "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2269,10 +3730,10 @@ TOOLS: Tuple[Tool, ...] = (
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {"start": {"type": "string"}, "end": {"type": "string"}},
-                        "required": ["start", "end"],
+                        "properties": {"ipaddrStart": {"type": "string"}, "ipaddrEnd": {"type": "string"}},
+                        "required": ["ipaddrStart", "ipaddrEnd"],
                     },
-                    "description": "Optional DHCP pools [{'start': '...', 'end': '...'}]",
+                    "description": "Optional DHCP pools [{'ipaddrStart': '...', 'ipaddrEnd': '...'}]",
                 },
                 "leaseTime": {"type": "integer", "minimum": 1, "default": 120, "description": "DHCP lease time in minutes (default 120)"},
                 "domain": {"type": "string", "description": "Optional local DNS domain suffix"},
@@ -2296,7 +3757,6 @@ TOOLS: Tuple[Tool, ...] = (
         description=(
             "Update LAN/VLAN name, DHCP server, lease time, DNS servers, domain, IGMP snooping, "
             "or ICMP ping on /interface using full-object read-modify-write. "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2325,7 +3785,7 @@ TOOLS: Tuple[Tool, ...] = (
         title="Delete LAN/VLAN network",
         description=(
             "Delete a non-primary LAN/VLAN network (refuses Default VLAN and the network holding "
-            "the MCP host/management IP). Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS."
+            "the MCP host/management IP)."
         ),
         input_schema={
             "type": "object",
@@ -2343,28 +3803,43 @@ TOOLS: Tuple[Tool, ...] = (
     ),
     Tool(
         name="update_gateway_acl",
-        title="Update gateway ACL rule",
+        title="Update ACL rule",
         description=(
-            "Modify name, status, policy, source, destination, direction, protocols, biDirectional, "
-            "or syslog on an existing gateway ACL (with anti-lockout checks). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+            "Modify name, status, policy, endpoints, protocols, or syslog on an existing gateway, switch, or EAP ACL."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "rule": {"type": "string", "description": "Gateway ACL rule ID or exact name"},
+                "rule": {"type": "string", "description": "ACL rule ID or exact name"},
+                "aclType": {
+                    "type": "string",
+                    "enum": ["gateway", "switch", "eap"],
+                    "description": "ACL scope (auto-detected if omitted)",
+                },
                 "name": {"type": "string", "description": "New ACL rule name"},
                 "status": {"type": "boolean", "description": "Enable or disable rule"},
                 "policy": {"type": ["string", "integer"], "description": "'deny' (0) or 'permit' (1)"},
                 "source": {
                     "type": "object",
-                    "properties": {"type": {"type": ["string", "integer"]}, "ids": {"type": "array", "items": {"type": "string"}}},
+                    "properties": {
+                        "type": {
+                            "type": ["string", "integer"],
+                            "description": "0=net,1=ip_grp,2=port_grp,3=mac_grp,4=ssid",
+                        },
+                        "ids": {"type": "array", "items": {"type": "string"}},
+                    },
                     "required": ["type", "ids"],
                     "description": "Updated source selector",
                 },
                 "destination": {
                     "type": "object",
-                    "properties": {"type": {"type": ["string", "integer"]}, "ids": {"type": "array", "items": {"type": "string"}}},
+                    "properties": {
+                        "type": {
+                            "type": ["string", "integer"],
+                            "description": "0=net,1=ip_grp,2=port_grp,3=mac_grp,4=ssid",
+                        },
+                        "ids": {"type": "array", "items": {"type": "string"}},
+                    },
                     "required": ["type", "ids"],
                     "description": "Updated destination selector",
                 },
@@ -2393,15 +3868,19 @@ TOOLS: Tuple[Tool, ...] = (
     ),
     Tool(
         name="delete_gateway_acl",
-        title="Delete gateway ACL rule",
+        title="Delete ACL rule",
         description=(
-            "Delete a gateway ACL rule by ID or exact name (DELETE setting/firewall/acls/{id}?type=0). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+            "Delete a gateway, switch, or EAP ACL rule by ID or exact name (DELETE setting/firewall/acls/{id}?type=0|1|2)."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "rule": {"type": "string", "description": "Gateway ACL rule ID or exact name"},
+                "rule": {"type": "string", "description": "ACL rule ID or exact name"},
+                "aclType": {
+                    "type": "string",
+                    "enum": ["gateway", "switch", "eap"],
+                    "description": "ACL scope (auto-detected if omitted)",
+                },
                 **_WRITE_CONTROL_PROPS,
             },
             "required": ["rule"],
@@ -2418,7 +3897,6 @@ TOOLS: Tuple[Tool, ...] = (
         description=(
             "Delete an unreferenced IPv4 IP group (DELETE setting/profiles/groups/0/{id}); "
             "pre-checks gateway ACL references before deletion. "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2440,7 +3918,7 @@ TOOLS: Tuple[Tool, ...] = (
         description=(
             "Create a Wi-Fi SSID in a WLAN group with band selection, security mode (open or "
             "WPA2/WPA3 PSK), optional VLAN binding, PMF, and 802.11r. PSKs are never returned "
-            "in diffs, snapshots, or outputs. Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS."
+            "in diffs, snapshots, or outputs."
         ),
         input_schema={
             "type": "object",
@@ -2453,8 +3931,9 @@ TOOLS: Tuple[Tool, ...] = (
                 },
                 "security": {
                     "type": "string",
+                    "enum": ["open", "wpa-psk", "wpa2-psk", "wpa-wpa2-psk", "wpa3-sae"],
                     "default": "wpa2-psk",
-                    "description": "Security mode: 'open', 'wpa2-psk', 'wpa-wpa2-psk', 'wpa3-sae', or 'wpa2-wpa3-psk'",
+                    "description": "Security mode: 'open', 'wpa-psk', 'wpa2-psk', 'wpa-wpa2-psk', or 'wpa3-sae'",
                 },
                 "psk": {"type": "string", "description": "Passphrase (8-63 chars, required unless security='open'; never echoed)"},
                 "vlanId": {"type": "integer", "minimum": 1, "maximum": 4094, "description": "Optional custom VLAN tag for this SSID"},
@@ -2477,7 +3956,7 @@ TOOLS: Tuple[Tool, ...] = (
         title="Update Wi-Fi SSID",
         description=(
             "Update an SSID via full-object PATCH (setting/wlans/{wlanId}/ssids/{ssidId}) with "
-            "PSK redaction in snapshots/outputs. Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS."
+            "PSK redaction in snapshots/outputs."
         ),
         input_schema={
             "type": "object",
@@ -2508,7 +3987,6 @@ TOOLS: Tuple[Tool, ...] = (
         title="Delete Wi-Fi SSID",
         description=(
             "Delete a Wi-Fi SSID from its WLAN group (redacts PSKs in snapshots). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2530,7 +4008,6 @@ TOOLS: Tuple[Tool, ...] = (
         title="Create or update port forwarding rule",
         description=(
             "Create or update a NAT port forwarding rule (setting/transmission/portForwardings). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2560,7 +4037,6 @@ TOOLS: Tuple[Tool, ...] = (
         title="Delete port forwarding rule",
         description=(
             "Delete a port forwarding rule by ID or exact name. "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2581,7 +4057,6 @@ TOOLS: Tuple[Tool, ...] = (
         title="Create or update static route",
         description=(
             "Create or update a gateway static route (setting/transmission/staticRoutings). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2609,7 +4084,6 @@ TOOLS: Tuple[Tool, ...] = (
         title="Delete static route",
         description=(
             "Delete a gateway static route by ID or exact name. "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2630,7 +4104,6 @@ TOOLS: Tuple[Tool, ...] = (
         title="Create or update mDNS reflector rule",
         description=(
             "Create or update an mDNS reflector rule across VLANs (AirPlay, Chromecast, printers, etc.). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2669,7 +4142,6 @@ TOOLS: Tuple[Tool, ...] = (
         title="Delete mDNS reflector rule",
         description=(
             "Delete an mDNS reflector rule by ID or exact name. "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2689,13 +4161,22 @@ TOOLS: Tuple[Tool, ...] = (
         name="set_upnp",
         title="Enable or disable UPnP",
         description=(
-            "Enable or disable UPnP on the site gateway (PUT setting/upnp). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+            "Enable or disable UPnP on the site gateway (PUT setting/upnp; auto-selects WAN port and LANs when enabled)."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "enable": {"type": "boolean", "description": "True to enable UPnP, false to disable"},
+                "wanPortIds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional WAN port UUIDs when enabling UPnP",
+                },
+                "networkIds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional LAN IDs, VLANs, or names when enabling UPnP",
+                },
                 **_WRITE_CONTROL_PROPS,
             },
             "required": ["enable"],
@@ -2711,7 +4192,7 @@ TOOLS: Tuple[Tool, ...] = (
         title="Block or unblock client",
         description=(
             "Block or unblock a client MAC on the site (refuses the MCP management host and "
-            "managed devices). Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+            "managed devices)."
         ),
         input_schema={
             "type": "object",
@@ -2733,7 +4214,7 @@ TOOLS: Tuple[Tool, ...] = (
         title="Reconnect wireless client",
         description=(
             "Force an active wireless client to reassociate/reconnect to an AP "
-            "(POST cmd/clients/{MAC}/reconnect). Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS."
+            "(POST cmd/clients/{MAC}/reconnect)."
         ),
         input_schema={
             "type": "object",
@@ -2754,7 +4235,6 @@ TOOLS: Tuple[Tool, ...] = (
         title="Rename client",
         description=(
             "Rename a client alias using volatile-key-stripped PATCH clients/{MAC}. "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2777,7 +4257,6 @@ TOOLS: Tuple[Tool, ...] = (
         description=(
             "Rename an adopted AP/switch/gateway, set LED mode ('on'/'off'/'site'), or toggle "
             "device locator blink (POST cmd/devices/{MAC}/locate). "
-            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
         ),
         input_schema={
             "type": "object",
@@ -2801,7 +4280,7 @@ TOOLS: Tuple[Tool, ...] = (
         title="Reboot Omada device",
         description=(
             "Reboot an adopted Omada AP, switch, or gateway (POST cmd/devices/{MAC}/reboot). "
-            "Disruptive action; requires OMADA_READ_ONLY=false, OMADA_WRITE_TOOLS allowlist, and confirmation."
+            "Disruptive action; requires confirmation."
         ),
         input_schema={
             "type": "object",
@@ -2817,6 +4296,445 @@ TOOLS: Tuple[Tool, ...] = (
         destructive=True,
         idempotent=False,
     ),
+    Tool(
+        name="rollback_from_snapshot",
+        title="Rollback change from pre-mutation snapshot",
+        description=(
+            "Replay or revert a prior write operation from a snapshot JSON inside OMADA_SNAPSHOT_DIR. "
+            "dryRun=true diffs stored pre-mutation state against current live controller state; "
+            "dryRun=false applies the restore/delete and verifies read-back."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "snapshotId": {"type": "string", "description": "Snapshot filename (.json) inside OMADA_SNAPSHOT_DIR"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["snapshotId"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=rollback_from_snapshot,
+        read_only=False,
+        destructive=True,
+        idempotent=False,
+    ),
+    Tool(
+        name="update_switch_port",
+        title="Update switch port configuration",
+        description=(
+            "Configure switch port status, name, port profile, PoE, speed/duplex, VLAN overrides, or isolation. "
+            "Refuses mutating uplink, LAG member, or controller-hosting ports unless allowUplinkMutation=true. "
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "deviceMac": {"type": "string", "description": "Managed switch MAC address or exact name"},
+                "port": {"type": "integer", "minimum": 1, "description": "1-based switch port number"},
+                "enabled": {"type": "boolean", "description": "Enable/disable port link (disabling switches to Disable profile)"},
+                "name": {"type": "string", "description": "Port label/description"},
+                "profileId": {"type": "string", "description": "Port profile UUID to assign"},
+                "profileName": {"type": "string", "description": "Port profile name to assign"},
+                "profileOverrideEnable": {"type": "boolean", "description": "Enable per-port profile override"},
+                "poeEnabled": {"type": "boolean", "description": "Enable/disable PoE on this port (sets override mode)"},
+                "linkSpeed": {"type": ["string", "integer"], "description": "'auto', '10m', '100m', '1000m', '2500m', '10g' or code"},
+                "duplex": {"type": ["string", "integer"], "description": "'auto', 'half', 'full' or code"},
+                "nativeNetworkId": {"type": "string", "description": "Override native/untagged network ID"},
+                "taggedNetworkIds": {"type": "array", "items": {"type": "string"}, "description": "Override tagged network IDs"},
+                "untaggedNetworkIds": {"type": "array", "items": {"type": "string"}, "description": "Override additional untagged network IDs"},
+                "portIsolationEnable": {"type": "boolean", "description": "Enable/disable L2 port isolation"},
+                "lldpMedEnable": {"type": "boolean", "description": "Enable/disable LLDP-MED"},
+                "spanningTreeEnable": {"type": "boolean", "description": "Enable/disable STP on port"},
+                "allowUplinkMutation": {"type": "boolean", "default": False, "description": "Explicitly allow mutating detected uplink/LAG/controller port"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["deviceMac", "port"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=update_switch_port,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="cycle_poe_port",
+        title="Power-cycle PoE switch port",
+        description=(
+            "Momentarily power-cycle PoE output on a switch port (POST cmd/switches/{MAC}/ports/{port}/restart). "
+            "Warns when downstream adopted AP/switch is powered, and guards uplink/controller-host ports unless allowUplinkMutation=true."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "deviceMac": {"type": "string", "description": "Managed switch MAC address or exact name"},
+                "port": {"type": "integer", "minimum": 1, "description": "1-based switch port number"},
+                "allowUplinkMutation": {"type": "boolean", "default": False, "description": "Override uplink/LAG/controller-port guard"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["deviceMac", "port"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=cycle_poe_port,
+        read_only=False,
+        destructive=True,
+        idempotent=False,
+    ),
+    Tool(
+        name="upsert_port_profile",
+        title="Create or update switch port profile",
+        description=(
+            "Create or update a wired LAN switch port profile (setting/lan/profiles). "
+            "Refuses modifying protected built-in profiles (prohibitModify=true). "
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Port profile name"},
+                "profileId": {"type": "string", "description": "Existing profile UUID when updating/renaming"},
+                "poeMode": {"type": ["string", "integer"], "description": "'off' (0), 'on'/'poe' (1), 'poe+'/'keep' (2)"},
+                "nativeNetworkId": {"type": "string", "description": "Native LAN/VLAN network ID"},
+                "nativeNetworkName": {"type": "string", "description": "Native LAN/VLAN network name"},
+                "taggedNetworkIds": {"type": "array", "items": {"type": "string"}, "description": "Tagged VLAN network IDs"},
+                "untaggedNetworkIds": {"type": "array", "items": {"type": "string"}, "description": "Untagged VLAN network IDs"},
+                "portIsolationEnable": {"type": "boolean"},
+                "lldpMedEnable": {"type": "boolean"},
+                "spanningTreeEnable": {"type": "boolean"},
+                "loopbackDetectEnable": {"type": "boolean"},
+                "flowControlEnable": {"type": "boolean"},
+                "eeeEnable": {"type": "boolean"},
+                "dot1x": {"type": "integer"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=upsert_port_profile,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="update_ap_radio",
+        title="Update AP radio channel, width, or TX power",
+        description=(
+            "Update one band ('2g', '5g', '5g2', '6g') of an adopted AP while preserving sibling band blocks "
+            "(PUT eaps/{MAC}/config/radios). Validates channel/channelWidth against AP channelInfo first."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "deviceMac": {"type": "string", "description": "Adopted AP MAC address or exact name"},
+                "band": {"type": "string", "enum": ["2g", "5g", "5g1", "5g2", "6g"], "description": "Target radio band"},
+                "enabled": {"type": "boolean", "description": "Enable/disable this radio band"},
+                "channel": {"type": ["string", "integer"], "description": "Channel number or 'auto'"},
+                "channelWidth": {"type": "string", "description": "Width: 'auto', '20', '40', '80', '160', '320' (or 20MHz..320MHz)"},
+                "txPowerLevel": {"type": ["string", "integer"], "description": "'low' (0), 'medium' (1), 'high' (2), 'custom' (3), 'auto' (4)"},
+                "txPower": {"type": "integer", "description": "Custom dBm TX power when txPowerLevel='custom'"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["deviceMac", "band"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=update_ap_radio,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="start_rf_scan",
+        title="Start AP RF environment scan",
+        description=(
+            "Trigger an RF spectrum scan on an adopted AP (POST cmd/eaps/{MAC}/tools/rfScan). "
+            "Briefly interrupts client service while scanning."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "deviceMac": {"type": "string", "description": "Adopted AP MAC address or exact name"},
+                "bands": {"type": "array", "items": {"type": "string"}, "description": "Optional list of bands e.g. ['2g','5g']"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["deviceMac"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=start_rf_scan,
+        read_only=False,
+        destructive=True,
+        idempotent=False,
+    ),
+    Tool(
+        name="assign_ap_wlan_group",
+        title="Assign WLAN group to AP",
+        description=(
+            "Assign a WLAN group by ID or exact name to an adopted AP (PUT eaps/{MAC}/config/wlans) "
+            "while preserving existing ssidOverrides."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "deviceMac": {"type": "string", "description": "Adopted AP MAC address or exact name"},
+                "wlanGroup": {"type": "string", "description": "Target WLAN group ID or exact name"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["deviceMac", "wlanGroup"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=assign_ap_wlan_group,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="upsert_policy_route",
+        title="Create or update gateway policy route",
+        description=(
+            "Create or update a gateway PBR / policy routing rule (setting/transmission/policyRoutings). "
+            "Requires an adopted gateway."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Policy route name"},
+                "routeId": {"type": "string", "description": "Existing policy route ID when updating"},
+                "status": {"type": "boolean", "default": True},
+                "protocols": {"type": "array", "items": {"type": "integer"}, "description": "IP protocol numbers e.g. [6, 17]"},
+                "sourceType": {"type": "integer", "default": 0, "description": "0=Network, 1=IP Group"},
+                "sourceIds": {"type": "array", "items": {"type": "string"}},
+                "destinationType": {"type": "integer", "default": 1, "description": "0=Network, 1=IP Group, 2=IP-Port Group"},
+                "destinationIds": {"type": "array", "items": {"type": "string"}},
+                "interfaceIds": {"type": "array", "items": {"type": "string"}, "description": "WAN/interface IDs for egress"},
+                "backupInterface": {"type": "boolean", "default": True},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=upsert_policy_route,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="delete_policy_route",
+        title="Delete gateway policy route",
+        description=(
+            "Delete a gateway policy route by ID or exact name (DELETE setting/transmission/policyRoutings/{id})."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "routeId": {"type": "string", "description": "Policy route ID or exact name"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["routeId"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=delete_policy_route,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="upsert_lan_dns_rule",
+        title="Create or update local LAN DNS rule",
+        description=(
+            "Create or update a local LAN DNS record/CNAME/forward rule (setting/lan/dns; Omada v5.14+/v6.x gateway)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "DNS rule name"},
+                "domain": {"type": "string", "description": "Hostname or domain name"},
+                "ruleType": {"type": ["string", "integer"], "default": "ip", "description": "'ip' (0), 'cname' (1), 'forward' (2)"},
+                "ruleId": {"type": "string", "description": "Existing rule ID when updating"},
+                "enable": {"type": "boolean", "default": True},
+                "ipAddresses": {"type": "array", "items": {"type": "string"}, "description": "IPv4 A record addresses for ruleType='ip'"},
+                "ipv6Addresses": {"type": "array", "items": {"type": "string"}, "description": "IPv6 AAAA addresses for ruleType='ip'"},
+                "cname": {"type": "string", "description": "Canonical target hostname for ruleType='cname'"},
+                "dnsServers": {"type": "array", "items": {"type": "string"}, "description": "Upstream forward DNS servers for ruleType='forward'"},
+                "lanNetworkIds": {"type": "array", "items": {"type": "string"}, "description": "LAN network IDs (type 0/1)"},
+                "aliases": {"type": "array", "items": {"type": "string"}},
+                "customTtl": {"type": "boolean", "default": False},
+                "ttl": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 3600},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name", "domain"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=upsert_lan_dns_rule,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="delete_lan_dns_rule",
+        title="Delete local LAN DNS rule",
+        description=(
+            "Delete a local LAN DNS rule by ID or exact name (DELETE setting/lan/dns/{id})."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "ruleId": {"type": "string", "description": "LAN DNS rule ID or exact name"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["ruleId"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=delete_lan_dns_rule,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="create_switch_acl",
+        title="Create switch ACL rule",
+        description=(
+            "Create a switch ACL rule (POST setting/firewall/acls?type=1) with anti-stranding checks. "
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Unique switch ACL rule name"},
+                "policy": {"type": ["string", "integer"], "description": "'deny' (0) or 'permit' (1)"},
+                "source": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["network", "ip_group", "port_group", "mac_group"],
+                        },
+                        "ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["type", "ids"],
+                    "description": "{'type': 'network'|'ip_group'|'port_group'|'mac_group', 'ids': [...]}",
+                },
+                "destination": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["network", "ip_group", "port_group", "mac_group"],
+                        },
+                        "ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["type", "ids"],
+                    "description": "{'type': 'network'|'ip_group'|'port_group'|'mac_group', 'ids': [...]}",
+                },
+                "bindingType": {"type": ["string", "integer"], "default": "all_ports", "description": "'all_ports' (0), 'custom_ports' (1), 'all_switches' (2), 'vlan' (3)"},
+                "customAclPorts": {"type": "array", "items": {"type": ["object", "string"]}},
+                "networkId": {"type": "string", "description": "VLAN/network ID when bindingType='vlan' (3)"},
+                "status": {"type": "boolean", "default": True},
+                "protocols": {"type": "array", "items": {"type": "integer"}},
+                "biDirectional": {"type": "boolean", "default": False},
+                "etherType": {"type": "string", "description": "Optional EtherType hex e.g. '0x0800'"},
+                "syslog": {"type": "boolean", "default": False},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name", "policy", "source", "destination"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=create_switch_acl,
+        read_only=False,
+        destructive=False,
+        idempotent=False,
+    ),
+    Tool(
+        name="create_eap_acl",
+        title="Create EAP wireless ACL rule",
+        description=(
+            "Create an EAP ACL rule (POST setting/firewall/acls?type=2) with anti-stranding checks. "
+            "Supports source/destination type 'ssid' in addition to network/group selectors."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Unique EAP ACL rule name"},
+                "policy": {"type": ["string", "integer"], "description": "'deny' (0) or 'permit' (1)"},
+                "source": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["network", "ip_group", "port_group", "mac_group", "ssid"],
+                        },
+                        "ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["type", "ids"],
+                    "description": "{'type': 'network'|'ip_group'|'port_group'|'mac_group'|'ssid', 'ids': [...]}",
+                },
+                "destination": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["network", "ip_group", "port_group", "mac_group", "ssid"],
+                        },
+                        "ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["type", "ids"],
+                    "description": "{'type': 'network'|'ip_group'|'port_group'|'mac_group'|'ssid', 'ids': [...]}",
+                },
+                "status": {"type": "boolean", "default": True},
+                "protocols": {"type": "array", "items": {"type": "integer"}},
+                "syslog": {"type": "boolean", "default": False},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name", "policy", "source", "destination"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=create_eap_acl,
+        read_only=False,
+        destructive=False,
+        idempotent=False,
+    ),
+    Tool(
+        name="set_client_lock_to_ap",
+        title="Lock or unlock wireless client to AP(s)",
+        description=(
+            "Configure clientLockToApSetting on a wireless client (PATCH clients/{MAC}) using volatile-stripped RMW "
+            "and wire AP MAC string normalization."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "clientMac": {"type": "string", "description": "Client MAC address"},
+                "enabled": {"type": "boolean", "description": "Enable or disable lock-to-AP"},
+                "apMacs": {"type": "array", "items": {"type": "string"}, "description": "Allowed AP MAC addresses or exact names (required when enabled=true)"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["clientMac", "enabled"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=set_client_lock_to_ap,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="set_client_rate_limit",
+        title="Configure client bandwidth rate limit",
+        description=(
+            "Apply or disable a client rate-limit profile or custom Kbps upload/download limits via PATCH clients/{MAC}."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "clientMac": {"type": "string", "description": "Client MAC address"},
+                "enabled": {"type": "boolean", "description": "Enable or disable rate limit"},
+                "rateLimitProfileId": {"type": "string", "description": "Rate limit profile UUID"},
+                "rateLimitProfileName": {"type": "string", "description": "Rate limit profile exact name"},
+                "downLimitKbps": {"type": "integer", "minimum": 1, "description": "Custom download cap in Kbps"},
+                "upLimitKbps": {"type": "integer", "minimum": 1, "description": "Custom upload cap in Kbps"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["clientMac", "enabled"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=set_client_rate_limit,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
 )
 
 TOOL_MAP: Dict[str, Tool] = {tool.name: tool for tool in TOOLS}
@@ -2830,17 +4748,51 @@ def tool_descriptors(
     config: Optional[Config] = None,
     include_all: bool = False,
     write_tools: Optional[Sequence[str]] = None,
+    *,
+    schema_mode: Optional[str] = None,
+    categories: Optional[Sequence[str]] = None,
 ) -> List[Dict[str, Any]]:
+    """Return MCP tool descriptors filtered by config/allowlist, schema mode, and categories."""
+    eff_mode = (
+        schema_mode
+        if schema_mode is not None
+        else (getattr(config, "schema_mode", "slim") if config is not None else "slim")
+    )
+    if str(eff_mode or "slim").strip().lower() not in ("slim", "full"):
+        raise ConfigError(
+            f"invalid schema_mode {eff_mode!r}; expected 'slim' or 'full'",
+            key="OMADA_SCHEMA_MODE",
+        )
+    eff_cats_raw = (
+        categories
+        if categories is not None
+        else (getattr(config, "tool_categories", ()) if config is not None else ())
+    )
+    eff_cats = {str(c).strip().lower() for c in eff_cats_raw if str(c).strip()}
+    unknown_cats = eff_cats - set(_TOOL_CATEGORIES.values())
+    if unknown_cats:
+        raise ConfigError(
+            f"unknown tool category filter: {', '.join(sorted(unknown_cats))}",
+            hint="valid categories: core, diagnostics, switch, wifi, routing, security, rollback",
+            key="OMADA_TOOL_CATEGORIES",
+        )
+
     if include_all:
-        return [tool.descriptor() for tool in TOOLS]
-    enabled_writes = set()
-    if config is not None:
-        if not config.read_only:
-            enabled_writes = set(config.write_tools)
-    elif write_tools is not None:
-        enabled_writes = set(write_tools)
+        selected = TOOLS
+    else:
+        enabled_writes: set[str] = set()
+        if config is not None:
+            if not config.read_only:
+                enabled_writes = set(config.write_tools)
+        elif write_tools is not None:
+            enabled_writes = set(write_tools)
+        selected = tuple(
+            tool for tool in TOOLS
+            if tool.read_only or tool.name in enabled_writes
+        )
+
     return [
-        tool.descriptor()
-        for tool in TOOLS
-        if tool.read_only or tool.name in enabled_writes
+        tool.descriptor(schema_mode=eff_mode)
+        for tool in selected
+        if not eff_cats or tool.category in eff_cats
     ]

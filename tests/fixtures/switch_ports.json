@@ -1,0 +1,8402 @@
+{
+  "switch_detail": {
+    "type": "switch",
+    "mac": "00-11-22-00-00-01",
+    "name": "00-11-22-00-00-01",
+    "model": "ES220GMP",
+    "modelVersion": "1.0",
+    "compoundModel": "ES220GMP v1.0",
+    "showModel": "ES220GMP v1.0",
+    "firmwareVersion": "1.0.4 Build 20260329 Rel.14489",
+    "version": "1.0.4",
+    "hwVersion": "1.0",
+    "status": 14,
+    "statusCategory": 1,
+    "es": true,
+    "site": "site1",
+    "siteName": "Default",
+    "omadacId": "00000000000000000000000000000001",
+    "compatible": 0,
+    "category": "EMS",
+    "sn": "SN0000000001",
+    "addedInAdvanced": false,
+    "customId": "00000000000000000000000000000001",
+    "remember": false,
+    "rememberDevice": 2,
+    "boundSiteTemplate": false,
+    "deviceSeriesType": 0,
+    "resource": 0,
+    "ecspFirstVersion": 3,
+    "deviceMisc": {
+      "portNum": 20
+    },
+    "devCap": {
+      "maxMirrorGroup": 4,
+      "maxMirroredPort": 10,
+      "maxLagNum": 4,
+      "maxLagMember": 8,
+      "maxLacpMember": 8,
+      "poePortNum": 16,
+      "mstpInsNum": 8,
+      "mstpInsNo": 8,
+      "rpvstInsNum": 254,
+      "vlanIfNum": 16,
+      "poeSupport": true,
+      "supportFan": true,
+      "supportBt": false,
+      "jumboSupport": true,
+      "jumboOddSupport": false,
+      "supportMulticast": false,
+      "supportEsMulticast": true,
+      "supportDhcpSnoop": false,
+      "supportArpDetect": false,
+      "supportImpb": false,
+      "lagCap": {
+        "lacpModSupport": false,
+        "lagHashAlgSupport": false,
+        "lagHashAlgs": []
+      },
+      "fecSupport": false,
+      "eeeSupport": true,
+      "flowControlSupport": true,
+      "stormRateModeSupport": false,
+      "igmpFastLeaveSupport": false,
+      "loopbackVlanBasedSupport": false,
+      "dhcpL2RelaySupport": false,
+      "ospfSupport": false,
+      "ospfDeadIntervalSupport": false,
+      "loopbackInterfaceSupport": false,
+      "qosSupport": false,
+      "esQosSupport": false,
+      "ddmSupport": true,
+      "ipcDetectSupport": true,
+      "customDhcpOptionSupport": false,
+      "voiceDscpSupport": false,
+      "sfpBeginNum": 19,
+      "sfpNum": 2,
+      "vrrpSupport": false,
+      "stpExtendSupport": false,
+      "rpvstExtendSupport": false,
+      "mirrorSupport": true,
+      "uplinkSupport": true,
+      "gponSupport": false,
+      "networkCheckSupport": false,
+      "pingSupport": false,
+      "tracerouteSupport": false,
+      "dnsLoopUpSupport": false,
+      "arpTableSupport": false,
+      "packetCaptureSupport": false,
+      "terminalSupport": false,
+      "cableTestSupport": true,
+      "domainPingSupport": false,
+      "domainTraceRouteSupport": false,
+      "dhcpRangeSupport": false,
+      "dhcpReservationSupport": false,
+      "supportGetDhcpClientTable": false,
+      "supportGetDhcpServerInfo": false,
+      "supportGetVlanIfInfo": false,
+      "dhcpServerPoolNum": 32,
+      "dhcpRelayIfNum": 128,
+      "supportEsHealth": true,
+      "supportRelayMultiServer": false,
+      "supportTpclResInfo": false,
+      "maxRelayServerNum": 1,
+      "ouiBasedVlanSupport": false,
+      "locatePortSupport": true,
+      "supportClearCounters": true,
+      "cliSupport": false,
+      "supportConfigSync": false,
+      "supportRunningConfig": false,
+      "needFullSync": true,
+      "maxStackGroupNumber": 4,
+      "vrfNum": 1024,
+      "supportVrf": false,
+      "supportSdm": false,
+      "supportMlag": false,
+      "supportGetOspfNeighborTable": false
+    },
+    "ledSetting": 2,
+    "mvlanNetworkId": "650000000000000000000001",
+    "ipSetting": {
+      "mode": "dhcp",
+      "fallback": true,
+      "fallbackIp": "192.168.0.1",
+      "fallbackMask": "255.255.255.0"
+    },
+    "loopbackDetectEnable": true,
+    "stp": 0,
+    "priority": 40960,
+    "helloTime": 2,
+    "maxAge": 20,
+    "forwardDelay": 15,
+    "txHoldCount": 5,
+    "maxHops": 20,
+    "snmp": {
+      "location": "",
+      "contact": ""
+    },
+    "multicast": {
+      "reportSuppressionEnable": false
+    },
+    "ports": [
+      {
+        "id": "650000000000000000000002",
+        "port": 1,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 1
+        },
+        "configStack": false,
+        "name": "Port1",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 1,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000004",
+        "port": 2,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 2
+        },
+        "configStack": false,
+        "name": "IoT-Hub",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000005",
+        "networkTagsSetting": 1,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 2,
+          "linkStatus": 1,
+          "linkSpeed": 2,
+          "duplex": 2,
+          "poe": true,
+          "poePower": 1.0,
+          "tx": 474572464,
+          "rx": 186050292,
+          "txRate": 7088,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 2,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000006",
+        "port": 3,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 3
+        },
+        "configStack": false,
+        "name": "Port3",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 3,
+          "linkStatus": 1,
+          "linkSpeed": 3,
+          "duplex": 2,
+          "poe": true,
+          "poePower": 6.6,
+          "tx": 1122317026,
+          "rx": 234278402,
+          "txRate": 7120,
+          "rxRate": 688,
+          "stpDiscarding": false,
+          "chassisIdSubtype": "MAC address",
+          "chassisId": "00-11-22-00-00-02",
+          "portIdSubtype": "MAC address",
+          "portId": "00-11-22-00-00-02"
+        },
+        "speed": 3,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000007",
+        "port": 4,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 4
+        },
+        "configStack": false,
+        "name": "Port4",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 4,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000008",
+        "port": 5,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 5
+        },
+        "configStack": false,
+        "name": "NVR",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000005",
+        "networkTagsSetting": 1,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 5,
+          "linkStatus": 1,
+          "linkSpeed": 3,
+          "duplex": 2,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 356487627,
+          "rx": 1931506790,
+          "txRate": 816,
+          "rxRate": 6272,
+          "stpDiscarding": false
+        },
+        "speed": 3,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000009",
+        "port": 6,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 6
+        },
+        "configStack": false,
+        "name": "Port6",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 6,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "65000000000000000000000a",
+        "port": 7,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 7
+        },
+        "configStack": false,
+        "name": "Port7",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 7,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "65000000000000000000000b",
+        "port": 8,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 8
+        },
+        "configStack": false,
+        "name": "Port8",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 8,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "65000000000000000000000c",
+        "port": 9,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 9
+        },
+        "configStack": false,
+        "name": "Port9",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 9,
+          "linkStatus": 1,
+          "linkSpeed": 3,
+          "duplex": 2,
+          "poe": true,
+          "poePower": 6.3,
+          "tx": 886041316,
+          "rx": 372162980,
+          "txRate": 7120,
+          "rxRate": 688,
+          "stpDiscarding": false,
+          "chassisIdSubtype": "MAC address",
+          "chassisId": "00-11-22-00-00-03",
+          "portIdSubtype": "MAC address",
+          "portId": "00-11-22-00-00-03"
+        },
+        "speed": 3,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "65000000000000000000000d",
+        "port": 10,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 10
+        },
+        "configStack": false,
+        "name": "Port10",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 10,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "65000000000000000000000e",
+        "port": 11,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 11
+        },
+        "configStack": false,
+        "name": "Port11",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 11,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "65000000000000000000000f",
+        "port": 12,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 12
+        },
+        "configStack": false,
+        "name": "Port12",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 12,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000010",
+        "port": 13,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 13
+        },
+        "configStack": false,
+        "name": "Port13",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 13,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000011",
+        "port": 14,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 14
+        },
+        "configStack": false,
+        "name": "Port14",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 14,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000012",
+        "port": 15,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 15
+        },
+        "configStack": false,
+        "name": "Port15",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 15,
+          "linkStatus": 1,
+          "linkSpeed": 3,
+          "duplex": 2,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 94176463558,
+          "rx": 87616129273,
+          "txRate": 21296,
+          "rxRate": 17168,
+          "stpDiscarding": false
+        },
+        "speed": 3,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000013",
+        "port": 16,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 16
+        },
+        "configStack": false,
+        "name": "Port16",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 16,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "poePower": 0.0,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000014",
+        "port": 17,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 17
+        },
+        "configStack": false,
+        "name": "Port17",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 17,
+          "linkStatus": 1,
+          "linkSpeed": 3,
+          "duplex": 2,
+          "poe": false,
+          "tx": 88449288229,
+          "rx": 92823458456,
+          "txRate": 25664,
+          "rxRate": 14176,
+          "stpDiscarding": false,
+          "chassisIdSubtype": "MAC address",
+          "chassisId": "00-11-22-00-00-04",
+          "portIdSubtype": "MAC address",
+          "portId": "00-11-22-00-00-04"
+        },
+        "speed": 3,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000015",
+        "port": 18,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 18
+        },
+        "configStack": false,
+        "name": "Port18",
+        "disable": false,
+        "type": 1,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 18,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 0
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "auto",
+              "value": 0
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "100M",
+              "value": 2
+            },
+            "duplex": {
+              "name": "half",
+              "value": 1
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "10M",
+              "value": 1
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000016",
+        "port": 19,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 19
+        },
+        "configStack": false,
+        "name": "Port19",
+        "disable": false,
+        "type": 3,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 19,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      },
+      {
+        "id": "650000000000000000000017",
+        "port": 20,
+        "standardPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 20
+        },
+        "configStack": false,
+        "name": "Port20",
+        "disable": false,
+        "type": 3,
+        "maxSpeed": 3,
+        "nativeNetworkId": "650000000000000000000001",
+        "networkTagsSetting": 0,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "profileId": "650000000000000000000003",
+        "profileName": "All",
+        "profileOverrideEnable": false,
+        "profileVlanOverrideEnable": true,
+        "operation": "switching",
+        "portStatus": {
+          "port": 20,
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "duplex": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "txRate": 0,
+          "rxRate": 0,
+          "stpDiscarding": false
+        },
+        "speed": 1,
+        "portCap": [
+          {
+            "linkSpeed": 3,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          }
+        ],
+        "portSpeedCap": [
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "full",
+              "value": 2
+            }
+          },
+          {
+            "linkSpeed": {
+              "name": "1000M",
+              "value": 3
+            },
+            "duplex": {
+              "name": "auto",
+              "value": 0
+            }
+          }
+        ],
+        "fecSupport": false,
+        "fecCap": [],
+        "configMlagPeerLink": false,
+        "configMlagDad": false
+      }
+    ],
+    "lags": [],
+    "tagIds": [],
+    "ip": "172.16.1.2",
+    "publicIp": "172.16.1.2",
+    "lastSeen": 1794570082426,
+    "needUpgrade": true,
+    "uptime": "14day(s) 2h 30m 6s",
+    "uptimeLong": 1218606,
+    "cpuUtil": 15,
+    "memUtil": 69,
+    "poeTotalPower": 250.0,
+    "poeRemain": 236.1,
+    "poeRemainPercent": 94.44,
+    "fanStatus": 0,
+    "uplink": {
+      "port": 17,
+      "mac": "00-11-22-00-00-04",
+      "name": "00-11-22-00-00-04",
+      "model": "ER7206",
+      "modelVersion": "2.20",
+      "linkSpeed": 3,
+      "duplex": 2,
+      "rx": 92823458456,
+      "rxRate": 14176,
+      "tx": 88449288229,
+      "txRate": 25664,
+      "stpDiscarding": false,
+      "type": "gateway",
+      "ip": "172.16.1.1"
+    },
+    "uplinkPort": 17,
+    "uplinkStPort": "1/0/17",
+    "downlinkList": [
+      {
+        "port": 9,
+        "model": "EAP725-Wall",
+        "hwVersion": "1.0",
+        "modelVersion": "1.0",
+        "mac": "00-11-22-00-00-03",
+        "name": "00-11-22-00-00-03",
+        "linkSpeed": 3,
+        "duplex": 2,
+        "rx": 372162980,
+        "rxRate": 688,
+        "tx": 886041316,
+        "txRate": 7120,
+        "stpDiscarding": false,
+        "type": "ap",
+        "ip": "172.16.1.4"
+      },
+      {
+        "port": 3,
+        "model": "EAP725-Wall",
+        "hwVersion": "1.0",
+        "modelVersion": "1.0",
+        "mac": "00-11-22-00-00-02",
+        "name": "00-11-22-00-00-02",
+        "linkSpeed": 3,
+        "duplex": 2,
+        "rx": 234278402,
+        "rxRate": 688,
+        "tx": 1122317026,
+        "txRate": 7120,
+        "stpDiscarding": false,
+        "type": "ap",
+        "ip": "172.16.1.3"
+      }
+    ],
+    "download": 183163586193,
+    "upload": 185465170220,
+    "supportVlanIf": false,
+    "jumbo": 1518,
+    "speeds": [
+      1,
+      2,
+      3
+    ],
+    "loop": "",
+    "loopbackNum": 0,
+    "txRate": 25664,
+    "rxRate": 14176,
+    "terminalPrefix": "00-11-22-00-00-01",
+    "supportHealth": true
+  },
+  "ports": [
+    {
+      "id": "650000000000000000000002",
+      "port": 1,
+      "switchId": "650000000000000000000018",
+      "switchMac": "00-11-22-00-00-01",
+      "site": "site1",
+      "name": "Port1",
+      "disable": false,
+      "type": 1,
+      "maxSpeed": 3,
+      "tagIds": [],
+      "networkMode": 1,
+      "nativeNetworkId": "650000000000000000000001",
+      "networkTagsSetting": 0,
+      "tagNetworkIds": [],
+      "untagNetworkIds": [],
+      "voiceNetworkEnable": false,
+      "voiceDscpEnable": false,
+      "profileId": "650000000000000000000003",
+      "profileName": "All",
+      "profileOverrideEnable": false,
+      "profileVlanOverrideEnable": true,
+      "operation": "switching",
+      "linkSpeed": 0,
+      "duplex": 0,
+      "dot1x": 2,
+      "supportPoe": true,
+      "supportLocate": true,
+      "poeDisplayType": 4,
+      "poe": 1,
+      "bandWidthCtrlType": 0,
+      "bandCtrl": {
+        "egressEnable": false,
+        "egressLimit": 0,
+        "egressUnit": 1,
+        "ingressEnable": false,
+        "ingressLimit": 0,
+        "ingressUnit": 1,
+        "limitRange": [
+          {
+            "unit": 1,
+            "minIngressRate": 64,
+            "maxIngressRate": 1000000,
+            "minEgressRate": 64,
+            "maxEgressRate": 1000000
+          },
+          {
+            "unit": 2,
+            "minIngressRate": 1,
+            "maxIngressRate": 1000,
+            "minEgressRate": 1,
+            "maxEgressRate": 1000
+          }
+        ],
+        "unitSupport": [
+          1,
+          2
+        ]
+      },
+      "stormCtrl": {
+        "rateMode": 1,
+        "unknownUnicastEnable": false,
+        "unknownUnicast": 0,
+        "multicastEnable": false,
+        "multicast": 0,
+        "broadcastEnable": false,
+        "broadcast": 0,
+        "action": 0,
+        "recoverTime": 3600
+      },
+      "lldpMedEnable": true,
+      "topoNotifyEnable": false,
+      "spanningTreeEnable": false,
+      "spanningTreeSetting": {
+        "priority": 128,
+        "extPathCost": 0,
+        "intPathCost": 0,
+        "edgePort": false,
+        "p2pLink": 0,
+        "mcheck": false,
+        "loopProtect": false,
+        "rootProtect": false,
+        "tcGuard": false,
+        "bpduProtect": false,
+        "bpduFilter": false,
+        "bpduForward": true
+      },
+      "loopbackDetectEnable": false,
+      "loopbackDetectVlanBasedEnable": false,
+      "igmpFastLeaveEnable": false,
+      "mldFastLeaveEnable": false,
+      "portIsolationEnable": false,
+      "portStatus": {
+        "port": 1,
+        "linkStatus": 0,
+        "linkSpeed": 1,
+        "duplex": 1,
+        "poe": false,
+        "poePower": 0.0,
+        "tx": 0,
+        "rx": 0,
+        "txRate": 0,
+        "rxRate": 0,
+        "stpDiscarding": false
+      },
+      "speed": 1,
+      "portCap": [
+        {
+          "linkSpeed": 2,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 0
+        }
+      ],
+      "portSpeedCap": [
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        }
+      ],
+      "eeeEnable": false,
+      "flowControlEnable": false,
+      "extendModeSupport": true,
+      "extendModeEnable": false,
+      "fastLeaveEnable": false,
+      "dhcpL2RelaySettings": {
+        "enable": false,
+        "format": 0
+      },
+      "dot1pPriority": 0,
+      "trustMode": 0,
+      "qosSupport": false,
+      "esQosSupport": false,
+      "qosQueueEnable": false,
+      "resource": 0,
+      "fecSupport": false,
+      "fecCap": [],
+      "locateEnable": false
+    },
+    {
+      "id": "650000000000000000000004",
+      "port": 2,
+      "switchId": "650000000000000000000018",
+      "switchMac": "00-11-22-00-00-01",
+      "site": "site1",
+      "name": "IoT-Hub",
+      "disable": false,
+      "type": 1,
+      "maxSpeed": 3,
+      "tagIds": [],
+      "networkMode": 0,
+      "nativeNetworkId": "650000000000000000000005",
+      "networkTagsSetting": 1,
+      "tagNetworkIds": [],
+      "untagNetworkIds": [],
+      "voiceNetworkEnable": false,
+      "voiceDscpEnable": false,
+      "profileId": "650000000000000000000003",
+      "profileName": "All",
+      "profileOverrideEnable": false,
+      "profileVlanOverrideEnable": true,
+      "operation": "switching",
+      "linkSpeed": 0,
+      "duplex": 0,
+      "dot1x": 2,
+      "supportPoe": true,
+      "supportLocate": true,
+      "poeDisplayType": 4,
+      "poe": 1,
+      "bandWidthCtrlType": 0,
+      "bandCtrl": {
+        "egressEnable": false,
+        "egressLimit": 0,
+        "egressUnit": 1,
+        "ingressEnable": false,
+        "ingressLimit": 0,
+        "ingressUnit": 1,
+        "limitRange": [
+          {
+            "unit": 1,
+            "minIngressRate": 64,
+            "maxIngressRate": 1000000,
+            "minEgressRate": 64,
+            "maxEgressRate": 1000000
+          },
+          {
+            "unit": 2,
+            "minIngressRate": 1,
+            "maxIngressRate": 1000,
+            "minEgressRate": 1,
+            "maxEgressRate": 1000
+          }
+        ],
+        "unitSupport": [
+          1,
+          2
+        ]
+      },
+      "stormCtrl": {
+        "rateMode": 1,
+        "unknownUnicastEnable": false,
+        "unknownUnicast": 0,
+        "multicastEnable": false,
+        "multicast": 0,
+        "broadcastEnable": false,
+        "broadcast": 0,
+        "action": 0,
+        "recoverTime": 3600
+      },
+      "lldpMedEnable": true,
+      "topoNotifyEnable": false,
+      "spanningTreeEnable": false,
+      "spanningTreeSetting": {
+        "priority": 128,
+        "extPathCost": 0,
+        "intPathCost": 0,
+        "edgePort": false,
+        "p2pLink": 0,
+        "mcheck": false,
+        "loopProtect": false,
+        "rootProtect": false,
+        "tcGuard": false,
+        "bpduProtect": false,
+        "bpduFilter": false,
+        "bpduForward": true
+      },
+      "loopbackDetectEnable": false,
+      "loopbackDetectVlanBasedEnable": false,
+      "igmpFastLeaveEnable": false,
+      "mldFastLeaveEnable": false,
+      "portIsolationEnable": false,
+      "portStatus": {
+        "port": 2,
+        "linkStatus": 1,
+        "linkSpeed": 2,
+        "duplex": 2,
+        "poe": true,
+        "poePower": 1.0,
+        "tx": 474572464,
+        "rx": 186050292,
+        "txRate": 7088,
+        "rxRate": 0,
+        "stpDiscarding": false
+      },
+      "speed": 2,
+      "portCap": [
+        {
+          "linkSpeed": 2,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 0
+        }
+      ],
+      "portSpeedCap": [
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        }
+      ],
+      "eeeEnable": false,
+      "flowControlEnable": false,
+      "extendModeSupport": true,
+      "extendModeEnable": false,
+      "fastLeaveEnable": false,
+      "dhcpL2RelaySettings": {
+        "enable": false,
+        "format": 0
+      },
+      "dot1pPriority": 0,
+      "trustMode": 0,
+      "qosSupport": false,
+      "esQosSupport": false,
+      "qosQueueEnable": false,
+      "resource": 0,
+      "fecSupport": false,
+      "fecCap": [],
+      "locateEnable": false
+    },
+    {
+      "id": "650000000000000000000006",
+      "port": 3,
+      "switchId": "650000000000000000000018",
+      "switchMac": "00-11-22-00-00-01",
+      "site": "site1",
+      "name": "Port3",
+      "disable": false,
+      "type": 1,
+      "maxSpeed": 3,
+      "tagIds": [],
+      "networkMode": 1,
+      "nativeNetworkId": "650000000000000000000001",
+      "networkTagsSetting": 0,
+      "tagNetworkIds": [],
+      "untagNetworkIds": [],
+      "voiceNetworkEnable": false,
+      "voiceDscpEnable": false,
+      "profileId": "650000000000000000000003",
+      "profileName": "All",
+      "profileOverrideEnable": false,
+      "profileVlanOverrideEnable": true,
+      "operation": "switching",
+      "linkSpeed": 0,
+      "duplex": 0,
+      "dot1x": 2,
+      "supportPoe": true,
+      "supportLocate": true,
+      "poeDisplayType": 4,
+      "poe": 1,
+      "bandWidthCtrlType": 0,
+      "bandCtrl": {
+        "egressEnable": false,
+        "egressLimit": 0,
+        "egressUnit": 1,
+        "ingressEnable": false,
+        "ingressLimit": 0,
+        "ingressUnit": 1,
+        "limitRange": [
+          {
+            "unit": 1,
+            "minIngressRate": 64,
+            "maxIngressRate": 1000000,
+            "minEgressRate": 64,
+            "maxEgressRate": 1000000
+          },
+          {
+            "unit": 2,
+            "minIngressRate": 1,
+            "maxIngressRate": 1000,
+            "minEgressRate": 1,
+            "maxEgressRate": 1000
+          }
+        ],
+        "unitSupport": [
+          1,
+          2
+        ]
+      },
+      "stormCtrl": {
+        "rateMode": 1,
+        "unknownUnicastEnable": false,
+        "unknownUnicast": 0,
+        "multicastEnable": false,
+        "multicast": 0,
+        "broadcastEnable": false,
+        "broadcast": 0,
+        "action": 0,
+        "recoverTime": 3600
+      },
+      "lldpMedEnable": true,
+      "topoNotifyEnable": false,
+      "spanningTreeEnable": false,
+      "spanningTreeSetting": {
+        "priority": 128,
+        "extPathCost": 0,
+        "intPathCost": 0,
+        "edgePort": false,
+        "p2pLink": 0,
+        "mcheck": false,
+        "loopProtect": false,
+        "rootProtect": false,
+        "tcGuard": false,
+        "bpduProtect": false,
+        "bpduFilter": false,
+        "bpduForward": true
+      },
+      "loopbackDetectEnable": false,
+      "loopbackDetectVlanBasedEnable": false,
+      "igmpFastLeaveEnable": false,
+      "mldFastLeaveEnable": false,
+      "portIsolationEnable": false,
+      "portStatus": {
+        "port": 3,
+        "linkStatus": 1,
+        "linkSpeed": 3,
+        "duplex": 2,
+        "poe": true,
+        "poePower": 6.6,
+        "tx": 1122317026,
+        "rx": 234278402,
+        "txRate": 7120,
+        "rxRate": 688,
+        "stpDiscarding": false,
+        "chassisIdSubtype": "MAC address",
+        "chassisId": "00-11-22-00-00-02",
+        "portIdSubtype": "MAC address",
+        "portId": "00-11-22-00-00-02"
+      },
+      "speed": 3,
+      "portCap": [
+        {
+          "linkSpeed": 2,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 0
+        }
+      ],
+      "portSpeedCap": [
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        }
+      ],
+      "eeeEnable": false,
+      "flowControlEnable": false,
+      "extendModeSupport": false,
+      "extendModeEnable": false,
+      "fastLeaveEnable": false,
+      "dhcpL2RelaySettings": {
+        "enable": false,
+        "format": 0
+      },
+      "dot1pPriority": 0,
+      "trustMode": 0,
+      "qosSupport": false,
+      "esQosSupport": false,
+      "qosQueueEnable": false,
+      "resource": 0,
+      "fecSupport": false,
+      "fecCap": [],
+      "locateEnable": false
+    },
+    {
+      "id": "650000000000000000000007",
+      "port": 4,
+      "switchId": "650000000000000000000018",
+      "switchMac": "00-11-22-00-00-01",
+      "site": "site1",
+      "name": "Port4",
+      "disable": false,
+      "type": 1,
+      "maxSpeed": 3,
+      "tagIds": [],
+      "networkMode": 1,
+      "nativeNetworkId": "650000000000000000000001",
+      "networkTagsSetting": 0,
+      "tagNetworkIds": [],
+      "untagNetworkIds": [],
+      "voiceNetworkEnable": false,
+      "voiceDscpEnable": false,
+      "profileId": "650000000000000000000003",
+      "profileName": "All",
+      "profileOverrideEnable": false,
+      "profileVlanOverrideEnable": true,
+      "operation": "switching",
+      "linkSpeed": 0,
+      "duplex": 0,
+      "dot1x": 2,
+      "supportPoe": true,
+      "supportLocate": true,
+      "poeDisplayType": 4,
+      "poe": 1,
+      "bandWidthCtrlType": 0,
+      "bandCtrl": {
+        "egressEnable": false,
+        "egressLimit": 0,
+        "egressUnit": 1,
+        "ingressEnable": false,
+        "ingressLimit": 0,
+        "ingressUnit": 1,
+        "limitRange": [
+          {
+            "unit": 1,
+            "minIngressRate": 64,
+            "maxIngressRate": 1000000,
+            "minEgressRate": 64,
+            "maxEgressRate": 1000000
+          },
+          {
+            "unit": 2,
+            "minIngressRate": 1,
+            "maxIngressRate": 1000,
+            "minEgressRate": 1,
+            "maxEgressRate": 1000
+          }
+        ],
+        "unitSupport": [
+          1,
+          2
+        ]
+      },
+      "stormCtrl": {
+        "rateMode": 1,
+        "unknownUnicastEnable": false,
+        "unknownUnicast": 0,
+        "multicastEnable": false,
+        "multicast": 0,
+        "broadcastEnable": false,
+        "broadcast": 0,
+        "action": 0,
+        "recoverTime": 3600
+      },
+      "lldpMedEnable": true,
+      "topoNotifyEnable": false,
+      "spanningTreeEnable": false,
+      "spanningTreeSetting": {
+        "priority": 128,
+        "extPathCost": 0,
+        "intPathCost": 0,
+        "edgePort": false,
+        "p2pLink": 0,
+        "mcheck": false,
+        "loopProtect": false,
+        "rootProtect": false,
+        "tcGuard": false,
+        "bpduProtect": false,
+        "bpduFilter": false,
+        "bpduForward": true
+      },
+      "loopbackDetectEnable": false,
+      "loopbackDetectVlanBasedEnable": false,
+      "igmpFastLeaveEnable": false,
+      "mldFastLeaveEnable": false,
+      "portIsolationEnable": false,
+      "portStatus": {
+        "port": 4,
+        "linkStatus": 0,
+        "linkSpeed": 1,
+        "duplex": 1,
+        "poe": false,
+        "poePower": 0.0,
+        "tx": 0,
+        "rx": 0,
+        "txRate": 0,
+        "rxRate": 0,
+        "stpDiscarding": false
+      },
+      "speed": 1,
+      "portCap": [
+        {
+          "linkSpeed": 2,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 0
+        }
+      ],
+      "portSpeedCap": [
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        }
+      ],
+      "eeeEnable": false,
+      "flowControlEnable": false,
+      "extendModeSupport": true,
+      "extendModeEnable": false,
+      "fastLeaveEnable": false,
+      "dhcpL2RelaySettings": {
+        "enable": false,
+        "format": 0
+      },
+      "dot1pPriority": 0,
+      "trustMode": 0,
+      "qosSupport": false,
+      "esQosSupport": false,
+      "qosQueueEnable": false,
+      "resource": 0,
+      "fecSupport": false,
+      "fecCap": [],
+      "locateEnable": false
+    },
+    {
+      "id": "650000000000000000000008",
+      "port": 5,
+      "switchId": "650000000000000000000018",
+      "switchMac": "00-11-22-00-00-01",
+      "site": "site1",
+      "name": "NVR",
+      "disable": false,
+      "type": 1,
+      "maxSpeed": 3,
+      "tagIds": [],
+      "networkMode": 0,
+      "nativeNetworkId": "650000000000000000000005",
+      "networkTagsSetting": 1,
+      "tagNetworkIds": [],
+      "untagNetworkIds": [],
+      "voiceNetworkEnable": false,
+      "voiceDscpEnable": false,
+      "profileId": "650000000000000000000003",
+      "profileName": "All",
+      "profileOverrideEnable": false,
+      "profileVlanOverrideEnable": true,
+      "operation": "switching",
+      "linkSpeed": 0,
+      "duplex": 0,
+      "dot1x": 2,
+      "supportPoe": true,
+      "supportLocate": true,
+      "poeDisplayType": 4,
+      "poe": 1,
+      "bandWidthCtrlType": 0,
+      "bandCtrl": {
+        "egressEnable": false,
+        "egressLimit": 0,
+        "egressUnit": 1,
+        "ingressEnable": false,
+        "ingressLimit": 0,
+        "ingressUnit": 1,
+        "limitRange": [
+          {
+            "unit": 1,
+            "minIngressRate": 64,
+            "maxIngressRate": 1000000,
+            "minEgressRate": 64,
+            "maxEgressRate": 1000000
+          },
+          {
+            "unit": 2,
+            "minIngressRate": 1,
+            "maxIngressRate": 1000,
+            "minEgressRate": 1,
+            "maxEgressRate": 1000
+          }
+        ],
+        "unitSupport": [
+          1,
+          2
+        ]
+      },
+      "stormCtrl": {
+        "rateMode": 1,
+        "unknownUnicastEnable": false,
+        "unknownUnicast": 0,
+        "multicastEnable": false,
+        "multicast": 0,
+        "broadcastEnable": false,
+        "broadcast": 0,
+        "action": 0,
+        "recoverTime": 3600
+      },
+      "lldpMedEnable": true,
+      "topoNotifyEnable": false,
+      "spanningTreeEnable": false,
+      "spanningTreeSetting": {
+        "priority": 128,
+        "extPathCost": 0,
+        "intPathCost": 0,
+        "edgePort": false,
+        "p2pLink": 0,
+        "mcheck": false,
+        "loopProtect": false,
+        "rootProtect": false,
+        "tcGuard": false,
+        "bpduProtect": false,
+        "bpduFilter": false,
+        "bpduForward": true
+      },
+      "loopbackDetectEnable": false,
+      "loopbackDetectVlanBasedEnable": false,
+      "igmpFastLeaveEnable": false,
+      "mldFastLeaveEnable": false,
+      "portIsolationEnable": false,
+      "portStatus": {
+        "port": 5,
+        "linkStatus": 1,
+        "linkSpeed": 3,
+        "duplex": 2,
+        "poe": false,
+        "poePower": 0.0,
+        "tx": 356487627,
+        "rx": 1931506790,
+        "txRate": 816,
+        "rxRate": 6272,
+        "stpDiscarding": false
+      },
+      "speed": 3,
+      "portCap": [
+        {
+          "linkSpeed": 2,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 0
+        }
+      ],
+      "portSpeedCap": [
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        }
+      ],
+      "eeeEnable": false,
+      "flowControlEnable": false,
+      "extendModeSupport": true,
+      "extendModeEnable": false,
+      "fastLeaveEnable": false,
+      "dhcpL2RelaySettings": {
+        "enable": false,
+        "format": 0
+      },
+      "dot1pPriority": 0,
+      "trustMode": 0,
+      "qosSupport": false,
+      "esQosSupport": false,
+      "qosQueueEnable": false,
+      "resource": 0,
+      "fecSupport": false,
+      "fecCap": [],
+      "locateEnable": false
+    },
+    {
+      "id": "650000000000000000000012",
+      "port": 15,
+      "switchId": "650000000000000000000018",
+      "switchMac": "00-11-22-00-00-01",
+      "site": "site1",
+      "name": "Port15",
+      "disable": false,
+      "type": 1,
+      "maxSpeed": 3,
+      "tagIds": [],
+      "networkMode": 1,
+      "nativeNetworkId": "650000000000000000000001",
+      "networkTagsSetting": 0,
+      "tagNetworkIds": [],
+      "untagNetworkIds": [],
+      "voiceNetworkEnable": false,
+      "voiceDscpEnable": false,
+      "profileId": "650000000000000000000003",
+      "profileName": "All",
+      "profileOverrideEnable": false,
+      "profileVlanOverrideEnable": true,
+      "operation": "switching",
+      "linkSpeed": 0,
+      "duplex": 0,
+      "dot1x": 2,
+      "supportPoe": true,
+      "supportLocate": true,
+      "poeDisplayType": 4,
+      "poe": 1,
+      "bandWidthCtrlType": 0,
+      "bandCtrl": {
+        "egressEnable": false,
+        "egressLimit": 0,
+        "egressUnit": 1,
+        "ingressEnable": false,
+        "ingressLimit": 0,
+        "ingressUnit": 1,
+        "limitRange": [
+          {
+            "unit": 1,
+            "minIngressRate": 64,
+            "maxIngressRate": 1000000,
+            "minEgressRate": 64,
+            "maxEgressRate": 1000000
+          },
+          {
+            "unit": 2,
+            "minIngressRate": 1,
+            "maxIngressRate": 1000,
+            "minEgressRate": 1,
+            "maxEgressRate": 1000
+          }
+        ],
+        "unitSupport": [
+          1,
+          2
+        ]
+      },
+      "stormCtrl": {
+        "rateMode": 1,
+        "unknownUnicastEnable": false,
+        "unknownUnicast": 0,
+        "multicastEnable": false,
+        "multicast": 0,
+        "broadcastEnable": false,
+        "broadcast": 0,
+        "action": 0,
+        "recoverTime": 3600
+      },
+      "lldpMedEnable": true,
+      "topoNotifyEnable": false,
+      "spanningTreeEnable": false,
+      "spanningTreeSetting": {
+        "priority": 128,
+        "extPathCost": 0,
+        "intPathCost": 0,
+        "edgePort": false,
+        "p2pLink": 0,
+        "mcheck": false,
+        "loopProtect": false,
+        "rootProtect": false,
+        "tcGuard": false,
+        "bpduProtect": false,
+        "bpduFilter": false,
+        "bpduForward": true
+      },
+      "loopbackDetectEnable": false,
+      "loopbackDetectVlanBasedEnable": false,
+      "igmpFastLeaveEnable": false,
+      "mldFastLeaveEnable": false,
+      "portIsolationEnable": false,
+      "portStatus": {
+        "port": 15,
+        "linkStatus": 1,
+        "linkSpeed": 3,
+        "duplex": 2,
+        "poe": false,
+        "poePower": 0.0,
+        "tx": 94176463558,
+        "rx": 87616129273,
+        "txRate": 21296,
+        "rxRate": 17168,
+        "stpDiscarding": false
+      },
+      "speed": 3,
+      "portCap": [
+        {
+          "linkSpeed": 2,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 0
+        }
+      ],
+      "portSpeedCap": [
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        }
+      ],
+      "eeeEnable": false,
+      "flowControlEnable": false,
+      "extendModeSupport": false,
+      "extendModeEnable": false,
+      "fastLeaveEnable": false,
+      "dhcpL2RelaySettings": {
+        "enable": false,
+        "format": 0
+      },
+      "dot1pPriority": 0,
+      "trustMode": 0,
+      "qosSupport": false,
+      "esQosSupport": false,
+      "qosQueueEnable": false,
+      "resource": 0,
+      "fecSupport": false,
+      "fecCap": [],
+      "locateEnable": false
+    },
+    {
+      "id": "650000000000000000000014",
+      "port": 17,
+      "switchId": "650000000000000000000018",
+      "switchMac": "00-11-22-00-00-01",
+      "site": "site1",
+      "name": "Port17",
+      "disable": false,
+      "type": 1,
+      "maxSpeed": 3,
+      "tagIds": [],
+      "networkMode": 1,
+      "nativeNetworkId": "650000000000000000000001",
+      "networkTagsSetting": 0,
+      "tagNetworkIds": [],
+      "untagNetworkIds": [],
+      "voiceNetworkEnable": false,
+      "voiceDscpEnable": false,
+      "profileId": "650000000000000000000003",
+      "profileName": "All",
+      "profileOverrideEnable": false,
+      "profileVlanOverrideEnable": true,
+      "operation": "switching",
+      "linkSpeed": 0,
+      "duplex": 0,
+      "dot1x": 2,
+      "supportPoe": false,
+      "supportLocate": true,
+      "poeDisplayType": -1,
+      "poe": 1,
+      "bandWidthCtrlType": 0,
+      "bandCtrl": {
+        "egressEnable": false,
+        "egressLimit": 0,
+        "egressUnit": 1,
+        "ingressEnable": false,
+        "ingressLimit": 0,
+        "ingressUnit": 1,
+        "limitRange": [
+          {
+            "unit": 1,
+            "minIngressRate": 64,
+            "maxIngressRate": 1000000,
+            "minEgressRate": 64,
+            "maxEgressRate": 1000000
+          },
+          {
+            "unit": 2,
+            "minIngressRate": 1,
+            "maxIngressRate": 1000,
+            "minEgressRate": 1,
+            "maxEgressRate": 1000
+          }
+        ],
+        "unitSupport": [
+          1,
+          2
+        ]
+      },
+      "stormCtrl": {
+        "rateMode": 1,
+        "unknownUnicastEnable": false,
+        "unknownUnicast": 0,
+        "multicastEnable": false,
+        "multicast": 0,
+        "broadcastEnable": false,
+        "broadcast": 0,
+        "action": 0,
+        "recoverTime": 3600
+      },
+      "lldpMedEnable": true,
+      "topoNotifyEnable": false,
+      "spanningTreeEnable": false,
+      "spanningTreeSetting": {
+        "priority": 128,
+        "extPathCost": 0,
+        "intPathCost": 0,
+        "edgePort": false,
+        "p2pLink": 0,
+        "mcheck": false,
+        "loopProtect": false,
+        "rootProtect": false,
+        "tcGuard": false,
+        "bpduProtect": false,
+        "bpduFilter": false,
+        "bpduForward": true
+      },
+      "loopbackDetectEnable": false,
+      "loopbackDetectVlanBasedEnable": false,
+      "igmpFastLeaveEnable": false,
+      "mldFastLeaveEnable": false,
+      "portIsolationEnable": false,
+      "portStatus": {
+        "port": 17,
+        "linkStatus": 1,
+        "linkSpeed": 3,
+        "duplex": 2,
+        "poe": false,
+        "tx": 88449288229,
+        "rx": 92823458456,
+        "txRate": 25664,
+        "rxRate": 14176,
+        "stpDiscarding": false,
+        "chassisIdSubtype": "MAC address",
+        "chassisId": "00-11-22-00-00-04",
+        "portIdSubtype": "MAC address",
+        "portId": "00-11-22-00-00-04"
+      },
+      "speed": 3,
+      "portCap": [
+        {
+          "linkSpeed": 2,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 1,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 0
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 1
+        },
+        {
+          "linkSpeed": 0,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 3,
+          "duplex": 2
+        },
+        {
+          "linkSpeed": 2,
+          "duplex": 0
+        }
+      ],
+      "portSpeedCap": [
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "auto",
+            "value": 0
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "100M",
+            "value": 2
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "1000M",
+            "value": 3
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "full",
+            "value": 2
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "auto",
+            "value": 0
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        },
+        {
+          "linkSpeed": {
+            "name": "10M",
+            "value": 1
+          },
+          "duplex": {
+            "name": "half",
+            "value": 1
+          }
+        }
+      ],
+      "eeeEnable": false,
+      "flowControlEnable": false,
+      "extendModeSupport": false,
+      "extendModeEnable": false,
+      "fastLeaveEnable": false,
+      "dhcpL2RelaySettings": {
+        "enable": false,
+        "format": 0
+      },
+      "dot1pPriority": 0,
+      "trustMode": 0,
+      "qosSupport": false,
+      "esQosSupport": false,
+      "qosQueueEnable": false,
+      "resource": 0,
+      "fecSupport": false,
+      "fecCap": [],
+      "locateEnable": false
+    }
+  ],
+  "port_1_detail": {
+    "id": "650000000000000000000002",
+    "port": 1,
+    "standardPort": {
+      "unit": 1,
+      "slot": 0,
+      "port": 1
+    },
+    "switchId": "650000000000000000000018",
+    "switchMac": "00-11-22-00-00-01",
+    "site": "site1",
+    "name": "Port1",
+    "disable": false,
+    "type": 1,
+    "maxSpeed": 3,
+    "tagIds": [],
+    "networkMode": 1,
+    "nativeNetworkId": "650000000000000000000001",
+    "networkTagsSetting": 0,
+    "tagNetworkIds": [
+      "650000000000000000000019",
+      "65000000000000000000001a",
+      "650000000000000000000005",
+      "65000000000000000000001b",
+      "65000000000000000000001c"
+    ],
+    "untagNetworkIds": [
+      "650000000000000000000001"
+    ],
+    "voiceNetworkEnable": false,
+    "voiceDscpEnable": false,
+    "profileId": "650000000000000000000003",
+    "profileName": "All",
+    "profileOverrideEnable": false,
+    "profileVlanOverrideEnable": true,
+    "operation": "switching",
+    "allAggregatingPorts": [],
+    "allMirroringPorts": [],
+    "allMirroredPorts": [],
+    "allAggregatingStPorts": [],
+    "allMirroringStPorts": [],
+    "allMirroredStPorts": [],
+    "linkSpeed": 0,
+    "duplex": 0,
+    "dot1x": 2,
+    "supportPoe": true,
+    "poeDisplayType": 4,
+    "poe": 1,
+    "bandWidthCtrlType": 0,
+    "bandCtrl": {
+      "egressEnable": false,
+      "egressLimit": 0,
+      "egressUnit": 1,
+      "ingressEnable": false,
+      "ingressLimit": 0,
+      "ingressUnit": 1,
+      "limitRange": [
+        {
+          "unit": 1,
+          "minIngressRate": 64,
+          "maxIngressRate": 1000000,
+          "minEgressRate": 64,
+          "maxEgressRate": 1000000
+        },
+        {
+          "unit": 2,
+          "minIngressRate": 1,
+          "maxIngressRate": 1000,
+          "minEgressRate": 1,
+          "maxEgressRate": 1000
+        }
+      ],
+      "unitSupport": [
+        1,
+        2
+      ]
+    },
+    "stormCtrl": {
+      "rateMode": 1,
+      "unknownUnicastEnable": false,
+      "unknownUnicast": 0,
+      "multicastEnable": false,
+      "multicast": 0,
+      "broadcastEnable": false,
+      "broadcast": 0,
+      "action": 0,
+      "recoverTime": 3600
+    },
+    "lldpMedEnable": true,
+    "topoNotifyEnable": false,
+    "spanningTreeEnable": false,
+    "spanningTreeSetting": {
+      "priority": 128,
+      "extPathCost": 0,
+      "intPathCost": 0,
+      "edgePort": false,
+      "p2pLink": 0,
+      "mcheck": false,
+      "loopProtect": false,
+      "rootProtect": false,
+      "tcGuard": false,
+      "bpduProtect": false,
+      "bpduFilter": false,
+      "bpduForward": true
+    },
+    "loopbackDetectEnable": false,
+    "loopbackDetectVlanBasedEnable": false,
+    "igmpFastLeaveEnable": false,
+    "mldFastLeaveEnable": false,
+    "portIsolationEnable": false,
+    "portStatus": {
+      "port": 1,
+      "linkStatus": 0,
+      "linkSpeed": 1,
+      "duplex": 1,
+      "poe": false,
+      "poePower": 0.0,
+      "tx": 0,
+      "rx": 0,
+      "txRate": 0,
+      "rxRate": 0,
+      "stpDiscarding": false
+    },
+    "speed": 1,
+    "portCap": [
+      {
+        "linkSpeed": 2,
+        "duplex": 1
+      },
+      {
+        "linkSpeed": 2,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 1,
+        "duplex": 0
+      },
+      {
+        "linkSpeed": 1,
+        "duplex": 1
+      },
+      {
+        "linkSpeed": 1,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 0,
+        "duplex": 0
+      },
+      {
+        "linkSpeed": 3,
+        "duplex": 0
+      },
+      {
+        "linkSpeed": 0,
+        "duplex": 1
+      },
+      {
+        "linkSpeed": 0,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 3,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 2,
+        "duplex": 0
+      }
+    ],
+    "portSpeedCap": [
+      {
+        "linkSpeed": {
+          "name": "auto",
+          "value": 0
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "1000M",
+          "value": 3
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "100M",
+          "value": 2
+        },
+        "duplex": {
+          "name": "half",
+          "value": 1
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "10M",
+          "value": 1
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "auto",
+          "value": 0
+        },
+        "duplex": {
+          "name": "half",
+          "value": 1
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "100M",
+          "value": 2
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "100M",
+          "value": 2
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "auto",
+          "value": 0
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "1000M",
+          "value": 3
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "10M",
+          "value": 1
+        },
+        "duplex": {
+          "name": "half",
+          "value": 1
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "10M",
+          "value": 1
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      }
+    ],
+    "eeeEnable": false,
+    "flowControlEnable": false,
+    "extendModeSupport": true,
+    "extendModeEnable": false,
+    "fastLeaveEnable": false,
+    "dhcpL2RelaySettings": {
+      "enable": false,
+      "format": 0
+    },
+    "dot1pPriority": 0,
+    "trustMode": 0,
+    "qosSupport": false,
+    "esQosSupport": false,
+    "qosQueueEnable": false,
+    "networkConflict": false,
+    "resource": 0,
+    "fecSupport": false,
+    "fecCap": []
+  },
+  "port_3_detail": {
+    "id": "650000000000000000000006",
+    "port": 3,
+    "standardPort": {
+      "unit": 1,
+      "slot": 0,
+      "port": 3
+    },
+    "switchId": "650000000000000000000018",
+    "switchMac": "00-11-22-00-00-01",
+    "site": "site1",
+    "name": "Port3",
+    "disable": false,
+    "type": 1,
+    "maxSpeed": 3,
+    "tagIds": [],
+    "networkMode": 1,
+    "nativeNetworkId": "650000000000000000000001",
+    "networkTagsSetting": 0,
+    "tagNetworkIds": [
+      "650000000000000000000019",
+      "65000000000000000000001a",
+      "650000000000000000000005",
+      "65000000000000000000001b",
+      "65000000000000000000001c"
+    ],
+    "untagNetworkIds": [
+      "650000000000000000000001"
+    ],
+    "voiceNetworkEnable": false,
+    "voiceDscpEnable": false,
+    "profileId": "650000000000000000000003",
+    "profileName": "All",
+    "profileOverrideEnable": false,
+    "profileVlanOverrideEnable": true,
+    "operation": "switching",
+    "allAggregatingPorts": [],
+    "allMirroringPorts": [],
+    "allMirroredPorts": [],
+    "allAggregatingStPorts": [],
+    "allMirroringStPorts": [],
+    "allMirroredStPorts": [],
+    "linkSpeed": 0,
+    "duplex": 0,
+    "dot1x": 2,
+    "supportPoe": true,
+    "poeDisplayType": 4,
+    "poe": 1,
+    "bandWidthCtrlType": 0,
+    "bandCtrl": {
+      "egressEnable": false,
+      "egressLimit": 0,
+      "egressUnit": 1,
+      "ingressEnable": false,
+      "ingressLimit": 0,
+      "ingressUnit": 1,
+      "limitRange": [
+        {
+          "unit": 1,
+          "minIngressRate": 64,
+          "maxIngressRate": 1000000,
+          "minEgressRate": 64,
+          "maxEgressRate": 1000000
+        },
+        {
+          "unit": 2,
+          "minIngressRate": 1,
+          "maxIngressRate": 1000,
+          "minEgressRate": 1,
+          "maxEgressRate": 1000
+        }
+      ],
+      "unitSupport": [
+        1,
+        2
+      ]
+    },
+    "stormCtrl": {
+      "rateMode": 1,
+      "unknownUnicastEnable": false,
+      "unknownUnicast": 0,
+      "multicastEnable": false,
+      "multicast": 0,
+      "broadcastEnable": false,
+      "broadcast": 0,
+      "action": 0,
+      "recoverTime": 3600
+    },
+    "lldpMedEnable": true,
+    "topoNotifyEnable": false,
+    "spanningTreeEnable": false,
+    "spanningTreeSetting": {
+      "priority": 128,
+      "extPathCost": 0,
+      "intPathCost": 0,
+      "edgePort": false,
+      "p2pLink": 0,
+      "mcheck": false,
+      "loopProtect": false,
+      "rootProtect": false,
+      "tcGuard": false,
+      "bpduProtect": false,
+      "bpduFilter": false,
+      "bpduForward": true
+    },
+    "loopbackDetectEnable": false,
+    "loopbackDetectVlanBasedEnable": false,
+    "igmpFastLeaveEnable": false,
+    "mldFastLeaveEnable": false,
+    "portIsolationEnable": false,
+    "portStatus": {
+      "port": 3,
+      "linkStatus": 1,
+      "linkSpeed": 3,
+      "duplex": 2,
+      "poe": true,
+      "poePower": 6.6,
+      "tx": 1122441165,
+      "rx": 234316582,
+      "txRate": 2640,
+      "rxRate": 0,
+      "stpDiscarding": false,
+      "chassisIdSubtype": "MAC address",
+      "chassisId": "00-11-22-00-00-02",
+      "portIdSubtype": "MAC address",
+      "portId": "00-11-22-00-00-02"
+    },
+    "speed": 3,
+    "portCap": [
+      {
+        "linkSpeed": 2,
+        "duplex": 1
+      },
+      {
+        "linkSpeed": 2,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 1,
+        "duplex": 0
+      },
+      {
+        "linkSpeed": 1,
+        "duplex": 1
+      },
+      {
+        "linkSpeed": 1,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 0,
+        "duplex": 0
+      },
+      {
+        "linkSpeed": 3,
+        "duplex": 0
+      },
+      {
+        "linkSpeed": 0,
+        "duplex": 1
+      },
+      {
+        "linkSpeed": 0,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 3,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 2,
+        "duplex": 0
+      }
+    ],
+    "portSpeedCap": [
+      {
+        "linkSpeed": {
+          "name": "100M",
+          "value": 2
+        },
+        "duplex": {
+          "name": "half",
+          "value": 1
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "100M",
+          "value": 2
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "10M",
+          "value": 1
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "1000M",
+          "value": 3
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "auto",
+          "value": 0
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "100M",
+          "value": 2
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "auto",
+          "value": 0
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "1000M",
+          "value": 3
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "10M",
+          "value": 1
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "10M",
+          "value": 1
+        },
+        "duplex": {
+          "name": "half",
+          "value": 1
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "auto",
+          "value": 0
+        },
+        "duplex": {
+          "name": "half",
+          "value": 1
+        }
+      }
+    ],
+    "eeeEnable": false,
+    "flowControlEnable": false,
+    "extendModeSupport": false,
+    "extendModeEnable": false,
+    "fastLeaveEnable": false,
+    "dhcpL2RelaySettings": {
+      "enable": false,
+      "format": 0
+    },
+    "dot1pPriority": 0,
+    "trustMode": 0,
+    "qosSupport": false,
+    "esQosSupport": false,
+    "qosQueueEnable": false,
+    "networkConflict": false,
+    "resource": 0,
+    "fecSupport": false,
+    "fecCap": []
+  },
+  "port_17_detail": {
+    "id": "650000000000000000000014",
+    "port": 17,
+    "standardPort": {
+      "unit": 1,
+      "slot": 0,
+      "port": 17
+    },
+    "switchId": "650000000000000000000018",
+    "switchMac": "00-11-22-00-00-01",
+    "site": "site1",
+    "name": "Port17",
+    "disable": false,
+    "type": 1,
+    "maxSpeed": 3,
+    "tagIds": [],
+    "networkMode": 1,
+    "nativeNetworkId": "650000000000000000000001",
+    "networkTagsSetting": 0,
+    "tagNetworkIds": [
+      "650000000000000000000019",
+      "65000000000000000000001a",
+      "650000000000000000000005",
+      "65000000000000000000001b",
+      "65000000000000000000001c"
+    ],
+    "untagNetworkIds": [
+      "650000000000000000000001"
+    ],
+    "voiceNetworkEnable": false,
+    "voiceDscpEnable": false,
+    "profileId": "650000000000000000000003",
+    "profileName": "All",
+    "profileOverrideEnable": false,
+    "profileVlanOverrideEnable": true,
+    "operation": "switching",
+    "allAggregatingPorts": [],
+    "allMirroringPorts": [],
+    "allMirroredPorts": [],
+    "allAggregatingStPorts": [],
+    "allMirroringStPorts": [],
+    "allMirroredStPorts": [],
+    "linkSpeed": 0,
+    "duplex": 0,
+    "dot1x": 2,
+    "supportPoe": false,
+    "poeDisplayType": -1,
+    "poe": 1,
+    "bandWidthCtrlType": 0,
+    "bandCtrl": {
+      "egressEnable": false,
+      "egressLimit": 0,
+      "egressUnit": 1,
+      "ingressEnable": false,
+      "ingressLimit": 0,
+      "ingressUnit": 1,
+      "limitRange": [
+        {
+          "unit": 1,
+          "minIngressRate": 64,
+          "maxIngressRate": 1000000,
+          "minEgressRate": 64,
+          "maxEgressRate": 1000000
+        },
+        {
+          "unit": 2,
+          "minIngressRate": 1,
+          "maxIngressRate": 1000,
+          "minEgressRate": 1,
+          "maxEgressRate": 1000
+        }
+      ],
+      "unitSupport": [
+        1,
+        2
+      ]
+    },
+    "stormCtrl": {
+      "rateMode": 1,
+      "unknownUnicastEnable": false,
+      "unknownUnicast": 0,
+      "multicastEnable": false,
+      "multicast": 0,
+      "broadcastEnable": false,
+      "broadcast": 0,
+      "action": 0,
+      "recoverTime": 3600
+    },
+    "lldpMedEnable": true,
+    "topoNotifyEnable": false,
+    "spanningTreeEnable": false,
+    "spanningTreeSetting": {
+      "priority": 128,
+      "extPathCost": 0,
+      "intPathCost": 0,
+      "edgePort": false,
+      "p2pLink": 0,
+      "mcheck": false,
+      "loopProtect": false,
+      "rootProtect": false,
+      "tcGuard": false,
+      "bpduProtect": false,
+      "bpduFilter": false,
+      "bpduForward": true
+    },
+    "loopbackDetectEnable": false,
+    "loopbackDetectVlanBasedEnable": false,
+    "igmpFastLeaveEnable": false,
+    "mldFastLeaveEnable": false,
+    "portIsolationEnable": false,
+    "portStatus": {
+      "port": 17,
+      "linkStatus": 1,
+      "linkSpeed": 3,
+      "duplex": 2,
+      "poe": false,
+      "tx": 88451869050,
+      "rx": 92826618036,
+      "txRate": 100824,
+      "rxRate": 128720,
+      "stpDiscarding": false,
+      "chassisIdSubtype": "MAC address",
+      "chassisId": "00-11-22-00-00-04",
+      "portIdSubtype": "MAC address",
+      "portId": "00-11-22-00-00-04"
+    },
+    "speed": 3,
+    "portCap": [
+      {
+        "linkSpeed": 2,
+        "duplex": 1
+      },
+      {
+        "linkSpeed": 2,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 1,
+        "duplex": 0
+      },
+      {
+        "linkSpeed": 1,
+        "duplex": 1
+      },
+      {
+        "linkSpeed": 1,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 0,
+        "duplex": 0
+      },
+      {
+        "linkSpeed": 3,
+        "duplex": 0
+      },
+      {
+        "linkSpeed": 0,
+        "duplex": 1
+      },
+      {
+        "linkSpeed": 0,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 3,
+        "duplex": 2
+      },
+      {
+        "linkSpeed": 2,
+        "duplex": 0
+      }
+    ],
+    "portSpeedCap": [
+      {
+        "linkSpeed": {
+          "name": "10M",
+          "value": 1
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "100M",
+          "value": 2
+        },
+        "duplex": {
+          "name": "half",
+          "value": 1
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "100M",
+          "value": 2
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "auto",
+          "value": 0
+        },
+        "duplex": {
+          "name": "half",
+          "value": 1
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "auto",
+          "value": 0
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "auto",
+          "value": 0
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "10M",
+          "value": 1
+        },
+        "duplex": {
+          "name": "half",
+          "value": 1
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "1000M",
+          "value": 3
+        },
+        "duplex": {
+          "name": "auto",
+          "value": 0
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "100M",
+          "value": 2
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "10M",
+          "value": 1
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      },
+      {
+        "linkSpeed": {
+          "name": "1000M",
+          "value": 3
+        },
+        "duplex": {
+          "name": "full",
+          "value": 2
+        }
+      }
+    ],
+    "eeeEnable": false,
+    "flowControlEnable": false,
+    "extendModeSupport": false,
+    "extendModeEnable": false,
+    "fastLeaveEnable": false,
+    "dhcpL2RelaySettings": {
+      "enable": false,
+      "format": 0
+    },
+    "dot1pPriority": 0,
+    "trustMode": 0,
+    "qosSupport": false,
+    "esQosSupport": false,
+    "qosQueueEnable": false,
+    "networkConflict": false,
+    "resource": 0,
+    "fecSupport": false,
+    "fecCap": []
+  },
+  "lags": [],
+  "insight_overview": [
+    {
+      "port": 1,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 1
+      },
+      "portName": "Port1",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 0,
+      "linkSpeed": 1,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "mode": "switching",
+      "profile": "All",
+      "profileType": 0,
+      "stpDiscarding": false,
+      "txSum": 0,
+      "rxSum": 0,
+      "txRate": 0,
+      "rxRate": 0
+    },
+    {
+      "port": 2,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 2
+      },
+      "portName": "IoT-Hub",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": true,
+      "linkStatus": 1,
+      "linkSpeed": 2,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "poeStatus": 1.0,
+      "mode": "switching",
+      "profile": "All",
+      "profileType": 0,
+      "linkInfo": "100M FULL",
+      "stp": "Forwarding",
+      "stpDiscarding": false,
+      "txSum": 474572464,
+      "rxSum": 186050292,
+      "txRate": 886,
+      "rxRate": 0
+    },
+    {
+      "port": 3,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 3
+      },
+      "portName": "Port3",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": true,
+      "linkStatus": 1,
+      "linkSpeed": 3,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "poeStatus": 6.6,
+      "mode": "switching",
+      "profile": "All",
+      "profileType": 0,
+      "linkInfo": "1000M FULL",
+      "stp": "Forwarding",
+      "stpDiscarding": false,
+      "txSum": 1122317026,
+      "rxSum": 234278402,
+      "txRate": 890,
+      "rxRate": 86
+    },
+    {
+      "port": 4,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 4
+      },
+      "portName": "Port4",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 0,
+      "linkSpeed": 1,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "mode": "switching",
+      "profile": "All",
+      "profileType": 0,
+      "stpDiscarding": false,
+      "txSum": 0,
+      "rxSum": 0,
+      "txRate": 0,
+      "rxRate": 0
+    },
+    {
+      "port": 5,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 5
+      },
+      "portName": "NVR",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 1,
+      "linkSpeed": 3,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "mode": "switching",
+      "profile": "All",
+      "profileType": 0,
+      "linkInfo": "1000M FULL",
+      "stp": "Forwarding",
+      "stpDiscarding": false,
+      "txSum": 356487627,
+      "rxSum": 1931506790,
+      "txRate": 102,
+      "rxRate": 784
+    },
+    {
+      "port": 15,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 15
+      },
+      "portName": "Port15",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 1,
+      "linkSpeed": 3,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "mode": "switching",
+      "profile": "All",
+      "profileType": 0,
+      "linkInfo": "1000M FULL",
+      "stp": "Forwarding",
+      "stpDiscarding": false,
+      "txSum": 94176463558,
+      "rxSum": 87616129273,
+      "txRate": 2662,
+      "rxRate": 2146
+    },
+    {
+      "port": 17,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 17
+      },
+      "portName": "Port17",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 1,
+      "linkSpeed": 3,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "mode": "switching",
+      "profile": "All",
+      "profileType": 0,
+      "linkInfo": "1000M FULL",
+      "stp": "Forwarding",
+      "stpDiscarding": false,
+      "txSum": 88449288229,
+      "rxSum": 92823458456,
+      "txRate": 3208,
+      "rxRate": 1772
+    }
+  ],
+  "insight_poe": [
+    {
+      "port": 1,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 1
+      },
+      "portName": "Port1",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 0,
+      "linkSpeed": 1,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "pdClass": "--",
+      "power": 0.0,
+      "voltage": 0.0,
+      "current": 0.0
+    },
+    {
+      "port": 2,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 2
+      },
+      "portName": "IoT-Hub",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": true,
+      "linkStatus": 1,
+      "linkSpeed": 2,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "poeStatus": 1.0,
+      "pdClass": "--",
+      "power": 1.0,
+      "voltage": 52.7,
+      "current": 19.0
+    },
+    {
+      "port": 3,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 3
+      },
+      "portName": "Port3",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": true,
+      "linkStatus": 1,
+      "linkSpeed": 3,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "poeStatus": 6.6,
+      "pdClass": "--",
+      "power": 6.6,
+      "voltage": 52.5,
+      "current": 126.0
+    },
+    {
+      "port": 4,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 4
+      },
+      "portName": "Port4",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 0,
+      "linkSpeed": 1,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "pdClass": "--",
+      "power": 0.0,
+      "voltage": 0.0,
+      "current": 0.0
+    },
+    {
+      "port": 5,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 5
+      },
+      "portName": "NVR",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 1,
+      "linkSpeed": 3,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "pdClass": "--",
+      "power": 0.0,
+      "voltage": 0.0,
+      "current": 0.0
+    }
+  ],
+  "insight_counters": [
+    {
+      "port": 1,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 1
+      },
+      "portName": "Port1",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 0,
+      "linkSpeed": 1,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "txBytes": 0,
+      "txFrames": 0,
+      "txMulticast": 0,
+      "txBroadcast": 0,
+      "txErrors": 0,
+      "rxBytes": 0,
+      "rxFrames": 0,
+      "rxMulticast": 0,
+      "rxBroadcast": 0,
+      "rxErrors": 0
+    },
+    {
+      "port": 2,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 2
+      },
+      "portName": "IoT-Hub",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": true,
+      "linkStatus": 1,
+      "linkSpeed": 2,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "txBytes": 474572464,
+      "txFrames": 3558241,
+      "txMulticast": 318069,
+      "txBroadcast": 2247115,
+      "txErrors": 0,
+      "rxBytes": 186050292,
+      "rxFrames": 2235699,
+      "rxMulticast": 903861,
+      "rxBroadcast": 136637,
+      "rxErrors": 0
+    },
+    {
+      "port": 3,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 3
+      },
+      "portName": "Port3",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": true,
+      "linkStatus": 1,
+      "linkSpeed": 3,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "txBytes": 1122317026,
+      "txFrames": 4916158,
+      "txMulticast": 1187560,
+      "txBroadcast": 2714658,
+      "txErrors": 0,
+      "rxBytes": 234278402,
+      "rxFrames": 1376823,
+      "rxMulticast": 43272,
+      "rxBroadcast": 134445,
+      "rxErrors": 0
+    },
+    {
+      "port": 4,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 4
+      },
+      "portName": "Port4",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 0,
+      "linkSpeed": 1,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "txBytes": 0,
+      "txFrames": 0,
+      "txMulticast": 0,
+      "txBroadcast": 0,
+      "txErrors": 0,
+      "rxBytes": 0,
+      "rxFrames": 0,
+      "rxMulticast": 0,
+      "rxBroadcast": 0,
+      "rxErrors": 0
+    },
+    {
+      "port": 5,
+      "configStack": false,
+      "oswStandPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 5
+      },
+      "portName": "NVR",
+      "switchMac": "00-11-22-00-00-01",
+      "switchName": "00-11-22-00-00-01",
+      "site": "site1",
+      "disable": false,
+      "type": 1,
+      "operation": "switching",
+      "poe": false,
+      "linkStatus": 1,
+      "linkSpeed": 3,
+      "switchType": 1,
+      "configMlagDad": false,
+      "configMlagPeerLink": false,
+      "txBytes": 356487627,
+      "txFrames": 3259528,
+      "txMulticast": 957542,
+      "txBroadcast": 1736768,
+      "txErrors": 0,
+      "rxBytes": 1931506790,
+      "rxFrames": 2500604,
+      "rxMulticast": 200468,
+      "rxBroadcast": 646960,
+      "rxErrors": 0
+    }
+  ],
+  "insight_switch_detail": [
+    {
+      "mac": "00-11-22-00-00-01",
+      "statusCategory": 14,
+      "uplink": {
+        "port": 17
+      },
+      "lags": [
+        {
+          "lagId": 1
+        },
+        {
+          "lagId": 2
+        },
+        {
+          "lagId": 3
+        },
+        {
+          "lagId": 4
+        }
+      ],
+      "supportClearCounters": true
+    }
+  ],
+  "stat_switch": {
+    "name": "00-11-22-00-00-01",
+    "status": 14,
+    "statusCategory": 1,
+    "portNum": 20,
+    "ports": [
+      {
+        "port": 1,
+        "name": "Port1",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 1
+        }
+      },
+      {
+        "port": 2,
+        "name": "IoT-Hub",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 1,
+          "linkSpeed": 2,
+          "poe": true,
+          "tx": 474698158,
+          "rx": 186094039,
+          "total": 660792197,
+          "stpDiscarding": false
+        },
+        "downlink": {
+          "mac": "00-11-22-00-00-05",
+          "type": "client",
+          "clientType": "Unknown",
+          "name": "00-11-22-00-00-05"
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 2
+        }
+      },
+      {
+        "port": 3,
+        "name": "Port3",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 1,
+          "linkSpeed": 3,
+          "poe": true,
+          "tx": 1122441165,
+          "rx": 234316582,
+          "total": 1356757747,
+          "stpDiscarding": false
+        },
+        "downlink": {
+          "mac": "00-11-22-00-00-02",
+          "type": "ap",
+          "name": "00-11-22-00-00-02",
+          "statusCategory": 1,
+          "model": "EAP725-Wall",
+          "modelVersion": "1.0"
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 3
+        }
+      },
+      {
+        "port": 4,
+        "name": "Port4",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 4
+        }
+      },
+      {
+        "port": 5,
+        "name": "NVR",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 1,
+          "linkSpeed": 3,
+          "poe": false,
+          "tx": 356587042,
+          "rx": 1932266699,
+          "total": 2288853741,
+          "stpDiscarding": false
+        },
+        "downlink": {
+          "mac": "00-11-22-00-00-06",
+          "type": "client",
+          "clientType": "IPC",
+          "name": "Camera-01"
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 5
+        }
+      },
+      {
+        "port": 6,
+        "name": "Port6",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 6
+        }
+      },
+      {
+        "port": 7,
+        "name": "Port7",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 7
+        }
+      },
+      {
+        "port": 8,
+        "name": "Port8",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 8
+        }
+      },
+      {
+        "port": 9,
+        "name": "Port9",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 1,
+          "linkSpeed": 3,
+          "poe": true,
+          "tx": 886175556,
+          "rx": 372246985,
+          "total": 1258422541,
+          "stpDiscarding": false
+        },
+        "downlink": {
+          "mac": "00-11-22-00-00-03",
+          "type": "ap",
+          "name": "00-11-22-00-00-03",
+          "statusCategory": 1,
+          "model": "EAP725-Wall",
+          "modelVersion": "1.0"
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 9
+        }
+      },
+      {
+        "port": 10,
+        "name": "Port10",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 10
+        }
+      },
+      {
+        "port": 11,
+        "name": "Port11",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 11
+        }
+      },
+      {
+        "port": 12,
+        "name": "Port12",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 12
+        }
+      },
+      {
+        "port": 13,
+        "name": "Port13",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 13
+        }
+      },
+      {
+        "port": 14,
+        "name": "Port14",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 14
+        }
+      },
+      {
+        "port": 15,
+        "name": "Port15",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 1,
+          "linkSpeed": 3,
+          "poe": false,
+          "tx": 94180295419,
+          "rx": 87618390544,
+          "total": 181798685963,
+          "stpDiscarding": false
+        },
+        "downlink": {
+          "mac": "00-11-22-00-00-07",
+          "type": "client",
+          "clientType": "Unknown",
+          "name": "00-11-22-00-00-07"
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 15
+        }
+      },
+      {
+        "port": 16,
+        "name": "Port16",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 16
+        }
+      },
+      {
+        "port": 17,
+        "name": "Port17",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 1,
+          "linkSpeed": 3,
+          "poe": false,
+          "tx": 88451869050,
+          "rx": 92826618036,
+          "total": 181278487086,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 17
+        }
+      },
+      {
+        "port": 18,
+        "name": "Port18",
+        "type": 1,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 18
+        }
+      },
+      {
+        "port": 19,
+        "name": "Port19",
+        "type": 3,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 19
+        }
+      },
+      {
+        "port": 20,
+        "name": "Port20",
+        "type": 3,
+        "operation": "switching",
+        "portStatus": {
+          "linkStatus": 0,
+          "linkSpeed": 1,
+          "poe": false,
+          "tx": 0,
+          "rx": 0,
+          "total": 0,
+          "stpDiscarding": false
+        },
+        "maxSpeed": 3,
+        "disable": false,
+        "configStack": false,
+        "configMlagPeerLink": false,
+        "configMlagDad": false,
+        "madUsed": false,
+        "oswStandPort": {
+          "unit": 1,
+          "slot": 0,
+          "port": 20
+        }
+      }
+    ],
+    "uplink": {
+      "port": 17,
+      "mac": "00-11-22-00-00-04",
+      "name": "00-11-22-00-00-04",
+      "type": "gateway",
+      "statusCategory": 1,
+      "model": "ER7206",
+      "modelVersion": "2.20"
+    },
+    "supportPoe": true,
+    "speeds": [
+      1,
+      2,
+      3
+    ],
+    "supportStack": false,
+    "supportSTP": false
+  },
+  "cable_test_ports": [
+    {
+      "port": 1,
+      "standardPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 1
+      },
+      "type": 1,
+      "name": "Port1",
+      "editEnable": true,
+      "isUpperPort": false,
+      "isDisabled": false,
+      "downlinkDevices": []
+    },
+    {
+      "port": 2,
+      "standardPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 2
+      },
+      "type": 1,
+      "name": "IoT-Hub",
+      "editEnable": true,
+      "isUpperPort": false,
+      "isDisabled": false,
+      "downlinkDevices": [
+        {
+          "name": "00-11-22-00-00-05",
+          "mac": "00-11-22-00-00-05",
+          "statusCategory": 1,
+          "isClient": true,
+          "deviceType": "Unknown"
+        }
+      ]
+    },
+    {
+      "port": 3,
+      "standardPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 3
+      },
+      "type": 1,
+      "name": "Port3",
+      "editEnable": true,
+      "isUpperPort": false,
+      "isDisabled": false,
+      "downlinkDevices": [
+        {
+          "name": "00-11-22-00-00-02",
+          "mac": "00-11-22-00-00-02",
+          "model": "EAP725-Wall",
+          "modelVersion": "1.0",
+          "type": "ap",
+          "statusCategory": 1,
+          "ip": "172.16.1.3"
+        }
+      ]
+    },
+    {
+      "port": 4,
+      "standardPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 4
+      },
+      "type": 1,
+      "name": "Port4",
+      "editEnable": true,
+      "isUpperPort": false,
+      "isDisabled": false,
+      "downlinkDevices": []
+    },
+    {
+      "port": 5,
+      "standardPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 5
+      },
+      "type": 1,
+      "name": "NVR",
+      "editEnable": true,
+      "isUpperPort": false,
+      "isDisabled": false,
+      "downlinkDevices": [
+        {
+          "name": "Camera-01",
+          "mac": "00-11-22-00-00-06",
+          "model": "RLN8-410",
+          "type": "IPC",
+          "statusCategory": 1,
+          "ip": "172.16.20.100",
+          "isClient": false,
+          "deviceType": "IPC"
+        }
+      ]
+    },
+    {
+      "port": 15,
+      "standardPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 15
+      },
+      "type": 1,
+      "name": "Port15",
+      "editEnable": true,
+      "isUpperPort": false,
+      "isDisabled": false,
+      "downlinkDevices": [
+        {
+          "name": "00-11-22-00-00-07",
+          "mac": "00-11-22-00-00-07",
+          "statusCategory": 1,
+          "isClient": true,
+          "deviceType": "Unknown"
+        },
+        {
+          "name": "00-11-22-00-00-08",
+          "mac": "00-11-22-00-00-08",
+          "statusCategory": 1,
+          "isClient": true,
+          "deviceType": "Unknown"
+        },
+        {
+          "name": "00-11-22-00-00-09",
+          "mac": "00-11-22-00-00-09",
+          "statusCategory": 1,
+          "isClient": true,
+          "deviceType": "Unknown"
+        },
+        {
+          "name": "00-11-22-00-00-0A",
+          "mac": "00-11-22-00-00-0A",
+          "statusCategory": 1,
+          "isClient": true,
+          "deviceType": "Unknown"
+        },
+        {
+          "name": "00-11-22-00-00-0B",
+          "mac": "00-11-22-00-00-0B",
+          "statusCategory": 1,
+          "isClient": true,
+          "deviceType": "Unknown"
+        },
+        {
+          "name": "Omada Controller",
+          "mac": "00-11-22-00-00-0C",
+          "statusCategory": 1,
+          "isClient": true,
+          "deviceType": "Omada Controller"
+        },
+        {
+          "name": "00-11-22-00-00-0D",
+          "mac": "00-11-22-00-00-0D",
+          "statusCategory": 1,
+          "isClient": true,
+          "deviceType": "Unknown"
+        }
+      ]
+    },
+    {
+      "port": 17,
+      "standardPort": {
+        "unit": 1,
+        "slot": 0,
+        "port": 17
+      },
+      "type": 1,
+      "name": "Port17",
+      "editEnable": false,
+      "isUpperPort": true,
+      "isDisabled": false,
+      "reasons": [
+        -1
+      ],
+      "downlinkDevices": [
+        {
+          "name": "00-11-22-00-00-04",
+          "mac": "00-11-22-00-00-04",
+          "model": "ER7206",
+          "modelVersion": "2.20",
+          "type": "gateway",
+          "statusCategory": 1,
+          "ip": "172.16.1.1"
+        }
+      ]
+    }
+  ],
+  "cable_test_full": {
+    "status": 0,
+    "data": []
+  },
+  "lan_profiles": {
+    "totalRows": 3,
+    "currentPage": 1,
+    "currentSize": 20,
+    "data": [
+      {
+        "id": "650000000000000000000003",
+        "site": "site1",
+        "flag": 0,
+        "prohibitModify": false,
+        "name": "All",
+        "poe": 2,
+        "vlanConfigEnable": false,
+        "networkTagsSetting": 0,
+        "nativeNetworkId": "650000000000000000000001",
+        "tagNetworkIds": [
+          "650000000000000000000019",
+          "65000000000000000000001a",
+          "650000000000000000000005",
+          "65000000000000000000001b",
+          "65000000000000000000001c"
+        ],
+        "esEnableTaggedNetworkIds": [
+          "650000000000000000000019",
+          "65000000000000000000001a",
+          "650000000000000000000005",
+          "65000000000000000000001b",
+          "65000000000000000000001c"
+        ],
+        "untagNetworkIds": [
+          "650000000000000000000001"
+        ],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "dot1x": 2,
+        "portIsolationEnable": false,
+        "lldpMedEnable": true,
+        "topoNotifyEnable": false,
+        "bandWidthCtrlType": 0,
+        "spanningTreeEnable": true,
+        "spanningTreeSetting": {
+          "priority": 128,
+          "extPathCost": 0,
+          "intPathCost": 0,
+          "edgePort": false,
+          "p2pLink": 0,
+          "mcheck": false,
+          "loopProtect": false,
+          "rootProtect": false,
+          "tcGuard": false,
+          "bpduProtect": false,
+          "bpduFilter": false,
+          "bpduForward": true,
+          "instances": []
+        },
+        "loopbackDetectEnable": false,
+        "eeeEnable": false,
+        "flowControlEnable": false,
+        "fastLeaveEnable": false,
+        "loopbackDetectVlanBasedEnable": false,
+        "igmpFastLeaveEnable": false,
+        "mldFastLeaveEnable": false,
+        "dhcpL2RelaySettings": {
+          "enable": false
+        },
+        "dot1pPriority": 0,
+        "trustMode": 0,
+        "type": 0,
+        "supportESEnable": false,
+        "esEnable": false,
+        "esTaggedModified": false,
+        "networkConflict": true,
+        "resource": 0
+      },
+      {
+        "id": "65000000000000000000001d",
+        "site": "site1",
+        "flag": 0,
+        "prohibitModify": true,
+        "name": "Disable",
+        "poe": 2,
+        "vlanConfigEnable": false,
+        "networkTagsSetting": 1,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "dot1x": 2,
+        "portIsolationEnable": false,
+        "lldpMedEnable": true,
+        "topoNotifyEnable": false,
+        "bandWidthCtrlType": 0,
+        "spanningTreeEnable": false,
+        "spanningTreeSetting": {
+          "priority": 128,
+          "extPathCost": 0,
+          "intPathCost": 0,
+          "edgePort": false,
+          "p2pLink": 0,
+          "mcheck": false,
+          "loopProtect": false,
+          "rootProtect": false,
+          "tcGuard": false,
+          "bpduProtect": false,
+          "bpduFilter": false,
+          "bpduForward": true,
+          "instances": []
+        },
+        "loopbackDetectEnable": true,
+        "eeeEnable": false,
+        "flowControlEnable": false,
+        "fastLeaveEnable": false,
+        "loopbackDetectVlanBasedEnable": false,
+        "igmpFastLeaveEnable": false,
+        "mldFastLeaveEnable": false,
+        "dhcpL2RelaySettings": {
+          "enable": false
+        },
+        "dot1pPriority": 0,
+        "trustMode": 0,
+        "type": 1,
+        "supportESEnable": true,
+        "networkConflict": false,
+        "resource": 0
+      },
+      {
+        "id": "65000000000000000000001e",
+        "site": "site1",
+        "flag": 0,
+        "prohibitModify": false,
+        "name": "Management",
+        "poe": 2,
+        "vlanConfigEnable": false,
+        "networkTagsSetting": 1,
+        "nativeNetworkId": "650000000000000000000001",
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": false,
+        "voiceDscpEnable": false,
+        "dot1x": 2,
+        "portIsolationEnable": false,
+        "lldpMedEnable": true,
+        "topoNotifyEnable": false,
+        "bandWidthCtrlType": 0,
+        "spanningTreeEnable": true,
+        "spanningTreeSetting": {
+          "priority": 128,
+          "extPathCost": 0,
+          "intPathCost": 0,
+          "edgePort": false,
+          "p2pLink": 0,
+          "mcheck": false,
+          "loopProtect": false,
+          "rootProtect": false,
+          "tcGuard": false,
+          "bpduProtect": false,
+          "bpduFilter": false,
+          "bpduForward": true,
+          "instances": []
+        },
+        "loopbackDetectEnable": false,
+        "eeeEnable": false,
+        "flowControlEnable": false,
+        "fastLeaveEnable": false,
+        "loopbackDetectVlanBasedEnable": false,
+        "igmpFastLeaveEnable": false,
+        "mldFastLeaveEnable": false,
+        "dhcpL2RelaySettings": {
+          "enable": false
+        },
+        "dot1pPriority": 0,
+        "trustMode": 0,
+        "type": 2,
+        "supportESEnable": true,
+        "networkConflict": false,
+        "resource": 0
+      }
+    ]
+  }
+}

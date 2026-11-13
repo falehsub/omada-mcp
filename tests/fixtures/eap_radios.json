@@ -1,0 +1,1054 @@
+{
+  "eap_detail": {
+    "type": "ap",
+    "mac": "00-11-22-00-00-02",
+    "name": "00-11-22-00-00-02",
+    "model": "EAP725-Wall",
+    "modelVersion": "1.0",
+    "compoundModel": "EAP725-Wall(EU) v1.0",
+    "showModel": "EAP725-Wall(EU) v1.0",
+    "firmwareVersion": "1.3.30 Build 20260828 Rel. 24025",
+    "version": "1.3.30",
+    "hwVersion": "1.0",
+    "status": 14,
+    "statusCategory": 1,
+    "site": "site1",
+    "siteName": "Default",
+    "omadacId": "00000000000000000000000000000001",
+    "compatible": 0,
+    "category": "EAP",
+    "location": {},
+    "addedInAdvanced": false,
+    "customId": "00000000000000000000000000000001",
+    "remember": false,
+    "rememberDevice": 2,
+    "deviceSeriesType": 0,
+    "wirelessLinked": false,
+    "supportRFScan": true,
+    "deviceMisc": {
+      "support2g": true,
+      "support5g": true,
+      "support5g2": false,
+      "support6g": false,
+      "support11ac": true,
+      "supportLag": false,
+      "supportMesh": 1,
+      "customizeRegion": 276,
+      "minPower2G": 7,
+      "maxPower2G": 20,
+      "maxPowerOd2G": 20,
+      "minPower5G": 7,
+      "maxPower5G": 25,
+      "maxPowerOd5G": 25,
+      "supportChannelLimit": false,
+      "supportDfs": 7,
+      "lanPortsNum": 3,
+      "lanVlanPorts": [
+        "ETH1",
+        "ETH2",
+        "ETH3"
+      ],
+      "lanPoePorts": [
+        "ETH3"
+      ],
+      "supportRoaming": 1,
+      "supportP2P": false,
+      "supportOuiMacFilter": true,
+      "supportChannelRange": true,
+      "supportUplinkPortConfig": false,
+      "supportTerminal": true,
+      "supportCapture": true,
+      "supportNetworkCheck": true,
+      "supportPing": true,
+      "supportTraceroute": true,
+      "supportDnsLoopUp": true,
+      "supportArpTable": true
+    },
+    "devCap": {
+      "supportPa": 0,
+      "meshChainNum": 2,
+      "supportOFDMA2g": true,
+      "supportOFDMA5g": true,
+      "supportOFDMA5g2": false,
+      "supportOFDMA6g": false,
+      "supportWifiControl": true,
+      "supportMeshPriority": true,
+      "supportL3Access": true,
+      "supportEnergySaving": true,
+      "supportLldp": true,
+      "supportLoopbackDetect": true,
+      "supportIpv6": true,
+      "supportTrunkSetting": false,
+      "supportRadioMode2g": 436,
+      "supportRadioMode5g": 1380,
+      "rssiLedNum": 0,
+      "rssiLedIds": [],
+      "defaultRssiLed": [],
+      "supportSpeedTest": false,
+      "supportMaxAssocClient2g": 128,
+      "supportMaxAssocClient5g": 128,
+      "supportSingleBandRFScan": true,
+      "notSupportLanClient": false,
+      "supportEnableSlideSwitch": false,
+      "supportLanMCastStat": true,
+      "supportAfc": false,
+      "supportReportEffectSsid": true,
+      "support6GPpsk": false,
+      "supportGps": false,
+      "eirpStatus": 1,
+      "supportDisableHwReset": true,
+      "supportAnteGainSetting2g": false,
+      "supportAnteGainSetting5g": false,
+      "supportAnteGainSetting5g2": false,
+      "supportAnteGainSetting6g": false,
+      "supportRFscan2g": true,
+      "supportRFscan5g": true,
+      "supportRFscan5g2": false,
+      "supportRFscan6g": false,
+      "supportLoadBalance": true,
+      "supportRssi": true,
+      "supportQos": true,
+      "supportVoipVlanSetting": false,
+      "supportCapture": true,
+      "supportOTACapture": true,
+      "supportStreamCapture": true,
+      "supportWirelessAdvanced": true,
+      "supportConfigSync": true,
+      "needFullSync": true,
+      "supportPortStatus": true,
+      "supportAntSwitch": false
+    },
+    "ledSetting": 2,
+    "ipSetting": {
+      "mode": "dhcp",
+      "fallback": true,
+      "fallbackIp": "192.168.0.254",
+      "fallbackMask": "255.255.255.0",
+      "fallbackGate": "",
+      "useFixedAddr": false
+    },
+    "ipv6Enable": false,
+    "radioSetting2g": {
+      "radioEnable": true,
+      "channelWidth": "2",
+      "channel": "11",
+      "txPower": 20,
+      "txPowerLevel": 3,
+      "freq": 2462,
+      "wirelessMode": -2
+    },
+    "radioSetting5g": {
+      "radioEnable": true,
+      "channelWidth": "7",
+      "channel": "9",
+      "txPower": 25,
+      "txPowerLevel": 3,
+      "freq": 5500,
+      "wirelessMode": -2
+    },
+    "wlanId": "65000000000000000000001f",
+    "ssidOverrides": [
+      {
+        "index": 1642388540,
+        "globalSsid": "CorpWiFi",
+        "supportBands": [
+          0,
+          1
+        ],
+        "security": 4,
+        "enable": false,
+        "vlanEnable": false,
+        "vlanId": 1,
+        "vlanPoolIds": "1",
+        "ssid": "CorpWiFi",
+        "ssidEnable": true
+      },
+      {
+        "index": 303134411,
+        "globalSsid": "IoTWiFi",
+        "supportBands": [
+          0
+        ],
+        "security": 3,
+        "enable": false,
+        "vlanEnable": false,
+        "vlanId": 1,
+        "vlanPoolIds": "1",
+        "ssid": "IoTWiFi",
+        "psk": "***REDACTED***",
+        "ssidEnable": true
+      }
+    ],
+    "mvlanEnable": false,
+    "mvlanNetworkId": "650000000000000000000001",
+    "snmp": {
+      "location": "",
+      "contact": ""
+    },
+    "loopbackDetectEnable": false,
+    "l3AccessSetting": {
+      "enable": true
+    },
+    "lbSetting2g": {
+      "lbEnable": false,
+      "maxClients": 1
+    },
+    "lbSetting5g": {
+      "lbEnable": false,
+      "maxClients": 1
+    },
+    "rssiSetting2g": {
+      "rssiEnable": false,
+      "threshold": -95
+    },
+    "rssiSetting5g": {
+      "rssiEnable": false,
+      "threshold": -95
+    },
+    "qosSetting2g": {
+      "wmmEnable": true,
+      "noAcknowledgement": false,
+      "deliveryEnable": true
+    },
+    "qosSetting5g": {
+      "wmmEnable": true,
+      "noAcknowledgement": false,
+      "deliveryEnable": true
+    },
+    "lanPortSettings": [
+      {
+        "lanPort": "ETH1",
+        "portType": 0,
+        "supportVlan": true,
+        "localVlanEnable": false,
+        "supportPoe": false,
+        "poeOutEnable": false,
+        "dot1xEnable": false,
+        "mabEnable": false,
+        "tagged": [],
+        "untagged": [],
+        "taggedNetworkId": [],
+        "untaggedNetworkId": [],
+        "supportVlanTagged": false,
+        "supportStatusEnable": true,
+        "status": true,
+        "name": "ETH1",
+        "supportBandwidthControl": false,
+        "bandwidthControlEnable": false,
+        "ingressRateLimit": {
+          "status": false,
+          "rate": 0
+        },
+        "egressRateLimit": {
+          "status": false,
+          "rate": 0
+        }
+      },
+      {
+        "lanPort": "ETH2",
+        "portType": 0,
+        "supportVlan": true,
+        "localVlanEnable": false,
+        "supportPoe": false,
+        "poeOutEnable": false,
+        "dot1xEnable": false,
+        "mabEnable": false,
+        "tagged": [],
+        "untagged": [],
+        "taggedNetworkId": [],
+        "untaggedNetworkId": [],
+        "supportVlanTagged": false,
+        "supportStatusEnable": true,
+        "status": true,
+        "name": "ETH2",
+        "supportBandwidthControl": false,
+        "bandwidthControlEnable": false,
+        "ingressRateLimit": {
+          "status": false,
+          "rate": 0
+        },
+        "egressRateLimit": {
+          "status": false,
+          "rate": 0
+        }
+      },
+      {
+        "lanPort": "ETH3",
+        "portType": 0,
+        "supportVlan": true,
+        "localVlanEnable": false,
+        "supportPoe": true,
+        "poeOutEnable": false,
+        "dot1xEnable": false,
+        "mabEnable": false,
+        "tagged": [],
+        "untagged": [],
+        "taggedNetworkId": [],
+        "untaggedNetworkId": [],
+        "supportVlanTagged": false,
+        "supportStatusEnable": true,
+        "status": true,
+        "name": "ETH3",
+        "supportBandwidthControl": false,
+        "bandwidthControlEnable": false,
+        "ingressRateLimit": {
+          "status": false,
+          "rate": 0
+        },
+        "egressRateLimit": {
+          "status": false,
+          "rate": 0
+        }
+      }
+    ],
+    "anyPoeEnable": false,
+    "ofdmaEnable2g": false,
+    "ofdmaEnable5g": false,
+    "tagIds": [],
+    "ip": "172.16.1.3",
+    "publicIp": "172.16.1.3",
+    "uptime": "5day(s) 7h 55m 54s",
+    "uptimeLong": 460554,
+    "cpuUtil": 2,
+    "memUtil": 62,
+    "lastSeen": 1794109624983,
+    "lanTraffic": {
+      "rxPkts": 1448610,
+      "txPkts": 338996,
+      "rx": 188761100,
+      "tx": 56556493,
+      "rxDropPkts": 0,
+      "txDropPkts": 0,
+      "rxErrPkts": 0,
+      "txErrPkts": 0
+    },
+    "wp2g": {
+      "actualChannel": "11  / 2462MHz",
+      "maxTxRate": 344,
+      "txPower": 20,
+      "region": 276,
+      "bandWidth": "20MHz",
+      "rdMode": "b/g/n/ax/be mixed",
+      "txUtil": 1,
+      "rxUtil": 24,
+      "interUtil": 1
+    },
+    "wp5g": {
+      "actualChannel": "100 / 5500MHz",
+      "maxTxRate": 2882,
+      "txPower": 25,
+      "region": 276,
+      "bandWidth": "160MHz",
+      "rdMode": "a/n/ac/ax/be mixed",
+      "txUtil": 0,
+      "rxUtil": 1,
+      "interUtil": 0
+    },
+    "radioTraffic2g": {
+      "rxPkts": 414690,
+      "txPkts": 1040361,
+      "rx": 28394241,
+      "tx": 135169178,
+      "rxDropPkts": 3,
+      "txDropPkts": 0,
+      "rxErrPkts": 75,
+      "txErrPkts": 155,
+      "rxRetryPkts": 24294,
+      "txRetryPkts": 6442
+    },
+    "radioTraffic5g": {
+      "rxPkts": 0,
+      "txPkts": 0,
+      "rx": 0,
+      "tx": 0,
+      "rxDropPkts": 0,
+      "txDropPkts": 0,
+      "rxErrPkts": 0,
+      "txErrPkts": 0,
+      "rxRetryPkts": 0,
+      "txRetryPkts": 0
+    },
+    "wiredUplink": {
+      "uplinkMac": "00-11-22-00-00-01",
+      "type": "switch",
+      "name": "00-11-22-00-00-01",
+      "rate": "1000",
+      "duplex": 2,
+      "upBytes": 56556493,
+      "downBytes": 188761100,
+      "upPackets": 338996,
+      "downPackets": 1448610,
+      "activity": 504,
+      "ip": "172.16.1.2",
+      "portType": 0,
+      "model": "ES220GMP",
+      "modelVersion": "1.0",
+      "uplinkPort": "3",
+      "linkStatus": 1,
+      "linkSpeed": 3
+    },
+    "wifiControlEnable": false,
+    "energySetting": {
+      "enable": false,
+      "bandEnable": false
+    },
+    "nonPscEnable": false,
+    "lldpEnable": 2,
+    "rssiLedSettings": [],
+    "downlinkList": [
+      {
+        "port": "ETH1",
+        "portType": 0,
+        "link": 0,
+        "rxPkts": 0,
+        "txPkts": 1343368,
+        "rx": 0,
+        "tx": 162524660,
+        "rxDropPkts": 0,
+        "rxErrPkts": 0,
+        "txErrPkts": 0
+      },
+      {
+        "port": "ETH2",
+        "portType": 0,
+        "link": 0,
+        "rxPkts": 0,
+        "txPkts": 1343369,
+        "rx": 0,
+        "tx": 162524730,
+        "rxDropPkts": 0,
+        "rxErrPkts": 0,
+        "txErrPkts": 0
+      },
+      {
+        "port": "ETH3",
+        "portType": 0,
+        "link": 0,
+        "rxPkts": 0,
+        "txPkts": 1343368,
+        "rx": 0,
+        "tx": 162524660,
+        "rxDropPkts": 0,
+        "rxErrPkts": 0,
+        "txErrPkts": 0
+      }
+    ],
+    "mvlanSetting": {
+      "mode": 0
+    },
+    "loop": "",
+    "loopbackNum": 0,
+    "supportVlanPool": true,
+    "txRate": 888,
+    "rxRate": 3144,
+    "supportFullChanDetect": false,
+    "supportSpectralScan": false,
+    "supportWifiInterference": true,
+    "supportNonWifiInterf": false,
+    "supportChannelUtil": false,
+    "supportScanRadio": false,
+    "isMeshStatus": false,
+    "mgtSsidSetting": {
+      "status": true,
+      "name": "Omada_2.4GHz_Default",
+      "band": 0,
+      "security": 0,
+      "broadcast": true,
+      "vlanSetting": {
+        "mode": 0
+      }
+    }
+  },
+  "eap_channel_info": {
+    "data": [
+      {
+        "radioId": 0,
+        "band": "2.4G",
+        "channelList": [
+          {
+            "freq": 2412,
+            "channelName": "1/2412MHz",
+            "value": 1,
+            "maxPow": 20,
+            "widthFlag": 196832,
+            "limit": 1,
+            "channelValue": 1,
+            "maxPowId": 20,
+            "widthFlagId": 196832
+          },
+          {
+            "freq": 2417,
+            "channelName": "2/2417MHz",
+            "value": 2,
+            "maxPow": 20,
+            "widthFlag": 196832,
+            "limit": 1,
+            "channelValue": 2,
+            "maxPowId": 20,
+            "widthFlagId": 196832
+          },
+          {
+            "freq": 2422,
+            "channelName": "3/2422MHz",
+            "value": 3,
+            "maxPow": 20,
+            "widthFlag": 196832,
+            "limit": 1,
+            "channelValue": 3,
+            "maxPowId": 20,
+            "widthFlagId": 196832
+          },
+          {
+            "freq": 2427,
+            "channelName": "4/2427MHz",
+            "value": 4,
+            "maxPow": 20,
+            "widthFlag": 196832,
+            "limit": 1,
+            "channelValue": 4,
+            "maxPowId": 20,
+            "widthFlagId": 196832
+          },
+          {
+            "freq": 2432,
+            "channelName": "5/2432MHz",
+            "value": 5,
+            "maxPow": 20,
+            "widthFlag": 458976,
+            "limit": 1,
+            "channelValue": 5,
+            "maxPowId": 20,
+            "widthFlagId": 458976
+          },
+          {
+            "freq": 2437,
+            "channelName": "6/2437MHz",
+            "value": 6,
+            "maxPow": 20,
+            "widthFlag": 458976,
+            "limit": 1,
+            "channelValue": 6,
+            "maxPowId": 20,
+            "widthFlagId": 458976
+          },
+          {
+            "freq": 2442,
+            "channelName": "7/2442MHz",
+            "value": 7,
+            "maxPow": 20,
+            "widthFlag": 458976,
+            "limit": 1,
+            "channelValue": 7,
+            "maxPowId": 20,
+            "widthFlagId": 458976
+          },
+          {
+            "freq": 2447,
+            "channelName": "8/2447MHz",
+            "value": 8,
+            "maxPow": 20,
+            "widthFlag": 458976,
+            "limit": 1,
+            "channelValue": 8,
+            "maxPowId": 20,
+            "widthFlagId": 458976
+          },
+          {
+            "freq": 2452,
+            "channelName": "9/2452MHz",
+            "value": 9,
+            "maxPow": 20,
+            "widthFlag": 458976,
+            "limit": 1,
+            "channelValue": 9,
+            "maxPowId": 20,
+            "widthFlagId": 458976
+          },
+          {
+            "freq": 2457,
+            "channelName": "10/2457MHz",
+            "value": 10,
+            "maxPow": 20,
+            "widthFlag": 327904,
+            "limit": 1,
+            "channelValue": 10,
+            "maxPowId": 20,
+            "widthFlagId": 327904
+          },
+          {
+            "freq": 2462,
+            "channelName": "11/2462MHz",
+            "value": 11,
+            "maxPow": 20,
+            "widthFlag": 327904,
+            "limit": 1,
+            "channelValue": 11,
+            "maxPowId": 20,
+            "widthFlagId": 327904
+          },
+          {
+            "freq": 2467,
+            "channelName": "12/2467MHz",
+            "value": 12,
+            "maxPow": 20,
+            "widthFlag": 327904,
+            "limit": 1,
+            "channelValue": 12,
+            "maxPowId": 20,
+            "widthFlagId": 327904
+          },
+          {
+            "freq": 2472,
+            "channelName": "13/2472MHz",
+            "value": 13,
+            "maxPow": 20,
+            "widthFlag": 327904,
+            "limit": 1,
+            "channelValue": 13,
+            "maxPowId": 20,
+            "widthFlagId": 327904
+          }
+        ]
+      },
+      {
+        "radioId": 1,
+        "band": "5G",
+        "channelList": [
+          {
+            "freq": 5180,
+            "channelName": "36/5180MHz",
+            "value": 1,
+            "maxPow": 23,
+            "widthFlag": 28508992,
+            "dfs": 64,
+            "limit": 1,
+            "channelValue": 36,
+            "maxPowId": 23,
+            "widthFlagId": 28508992
+          },
+          {
+            "freq": 5200,
+            "channelName": "40/5200MHz",
+            "value": 2,
+            "maxPow": 23,
+            "widthFlag": 30737216,
+            "dfs": 64,
+            "limit": 1,
+            "channelValue": 40,
+            "maxPowId": 23,
+            "widthFlagId": 30737216
+          },
+          {
+            "freq": 5220,
+            "channelName": "44/5220MHz",
+            "value": 3,
+            "maxPow": 23,
+            "widthFlag": 28508992,
+            "dfs": 64,
+            "limit": 1,
+            "channelValue": 44,
+            "maxPowId": 23,
+            "widthFlagId": 28508992
+          },
+          {
+            "freq": 5240,
+            "channelName": "48/5240MHz",
+            "value": 4,
+            "maxPow": 23,
+            "widthFlag": 30737216,
+            "dfs": 64,
+            "limit": 1,
+            "channelValue": 48,
+            "maxPowId": 23,
+            "widthFlagId": 30737216
+          },
+          {
+            "freq": 5260,
+            "channelName": "52/5260MHz",
+            "value": 5,
+            "maxPow": 23,
+            "widthFlag": 28508992,
+            "dfs": 4418,
+            "limit": 1,
+            "channelValue": 52,
+            "maxPowId": 23,
+            "widthFlagId": 28508992
+          },
+          {
+            "freq": 5280,
+            "channelName": "56/5280MHz",
+            "value": 6,
+            "maxPow": 23,
+            "widthFlag": 30737216,
+            "dfs": 4418,
+            "limit": 1,
+            "channelValue": 56,
+            "maxPowId": 23,
+            "widthFlagId": 30737216
+          },
+          {
+            "freq": 5300,
+            "channelName": "60/5300MHz",
+            "value": 7,
+            "maxPow": 23,
+            "widthFlag": 28508992,
+            "dfs": 4418,
+            "limit": 1,
+            "channelValue": 60,
+            "maxPowId": 23,
+            "widthFlagId": 28508992
+          },
+          {
+            "freq": 5320,
+            "channelName": "64/5320MHz",
+            "value": 8,
+            "maxPow": 23,
+            "widthFlag": 30737216,
+            "dfs": 4418,
+            "limit": 1,
+            "channelValue": 64,
+            "maxPowId": 23,
+            "widthFlagId": 30737216
+          },
+          {
+            "freq": 5500,
+            "channelName": "100/5500MHz",
+            "value": 9,
+            "maxPow": 25,
+            "widthFlag": 28508992,
+            "dfs": 4674,
+            "limit": 1,
+            "channelValue": 100,
+            "maxPowId": 25,
+            "widthFlagId": 28508992
+          },
+          {
+            "freq": 5520,
+            "channelName": "104/5520MHz",
+            "value": 10,
+            "maxPow": 25,
+            "widthFlag": 30737216,
+            "dfs": 4674,
+            "limit": 1,
+            "channelValue": 104,
+            "maxPowId": 25,
+            "widthFlagId": 30737216
+          },
+          {
+            "freq": 5540,
+            "channelName": "108/5540MHz",
+            "value": 11,
+            "maxPow": 25,
+            "widthFlag": 28508992,
+            "dfs": 4674,
+            "limit": 1,
+            "channelValue": 108,
+            "maxPowId": 25,
+            "widthFlagId": 28508992
+          },
+          {
+            "freq": 5560,
+            "channelName": "112/5560MHz",
+            "value": 12,
+            "maxPow": 25,
+            "widthFlag": 30737216,
+            "dfs": 4674,
+            "limit": 1,
+            "channelValue": 112,
+            "maxPowId": 25,
+            "widthFlagId": 30737216
+          },
+          {
+            "freq": 5580,
+            "channelName": "116/5580MHz",
+            "value": 13,
+            "maxPow": 25,
+            "widthFlag": 28508992,
+            "dfs": 4674,
+            "limit": 1,
+            "channelValue": 116,
+            "maxPowId": 25,
+            "widthFlagId": 28508992
+          },
+          {
+            "freq": 5600,
+            "channelName": "120/5600MHz",
+            "value": 14,
+            "maxPow": 25,
+            "widthFlag": 30737216,
+            "dfs": 5698,
+            "limit": 1,
+            "channelValue": 120,
+            "maxPowId": 25,
+            "widthFlagId": 30737216
+          },
+          {
+            "freq": 5620,
+            "channelName": "124/5620MHz",
+            "value": 15,
+            "maxPow": 25,
+            "widthFlag": 28508992,
+            "dfs": 5698,
+            "limit": 1,
+            "channelValue": 124,
+            "maxPowId": 25,
+            "widthFlagId": 28508992
+          },
+          {
+            "freq": 5640,
+            "channelName": "128/5640MHz",
+            "value": 16,
+            "maxPow": 25,
+            "widthFlag": 30737216,
+            "dfs": 5698,
+            "limit": 1,
+            "channelValue": 128,
+            "maxPowId": 25,
+            "widthFlagId": 30737216
+          },
+          {
+            "freq": 5660,
+            "channelName": "132/5660MHz",
+            "value": 17,
+            "maxPow": 25,
+            "widthFlag": 3343168,
+            "dfs": 4674,
+            "limit": 1,
+            "channelValue": 132,
+            "maxPowId": 25,
+            "widthFlagId": 3343168
+          },
+          {
+            "freq": 5680,
+            "channelName": "136/5680MHz",
+            "value": 18,
+            "maxPow": 25,
+            "widthFlag": 5571392,
+            "dfs": 4674,
+            "limit": 1,
+            "channelValue": 136,
+            "maxPowId": 25,
+            "widthFlagId": 5571392
+          },
+          {
+            "freq": 5700,
+            "channelName": "140/5700MHz",
+            "value": 19,
+            "maxPow": 25,
+            "widthFlag": 1114944,
+            "dfs": 4674,
+            "limit": 1,
+            "channelValue": 140,
+            "maxPowId": 25,
+            "widthFlagId": 1114944
+          }
+        ]
+      }
+    ]
+  },
+  "eap_rf_scan": {
+    "time": 1794570098657,
+    "status": 1,
+    "status2g": 1,
+    "status5g": 1,
+    "status5g2": 1,
+    "status6g": 1
+  },
+  "eap_ports": [
+    {
+      "id": "ETH1",
+      "portType": 0,
+      "lanPort": "ETH1",
+      "name": "ETH1",
+      "linkStatus": 0,
+      "linkSpeed": 0,
+      "supportVlan": true,
+      "localVlanEnable": false,
+      "status": true,
+      "supportPoe": false,
+      "poeOutEnable": false,
+      "supportVlanOption": true,
+      "supportVlanTagged": true,
+      "supportStatusEnable": true,
+      "supportStatusInform": true,
+      "taggedNetworkId": [],
+      "untaggedNetworkId": [],
+      "uplinkPort": false,
+      "supportBandwidthControl": false,
+      "bandwidthControlEnable": false,
+      "ingressRateLimit": {
+        "status": false,
+        "rate": 0
+      },
+      "egressRateLimit": {
+        "status": false,
+        "rate": 0
+      },
+      "portStatus": {
+        "tx": 162524660,
+        "rx": 0
+      }
+    },
+    {
+      "id": "ETH2",
+      "portType": 0,
+      "lanPort": "ETH2",
+      "name": "ETH2",
+      "linkStatus": 0,
+      "linkSpeed": 0,
+      "supportVlan": true,
+      "localVlanEnable": false,
+      "status": true,
+      "supportPoe": false,
+      "poeOutEnable": false,
+      "supportVlanOption": true,
+      "supportVlanTagged": true,
+      "supportStatusEnable": true,
+      "supportStatusInform": true,
+      "taggedNetworkId": [],
+      "untaggedNetworkId": [],
+      "uplinkPort": false,
+      "supportBandwidthControl": false,
+      "bandwidthControlEnable": false,
+      "ingressRateLimit": {
+        "status": false,
+        "rate": 0
+      },
+      "egressRateLimit": {
+        "status": false,
+        "rate": 0
+      },
+      "portStatus": {
+        "tx": 162524730,
+        "rx": 0
+      }
+    },
+    {
+      "id": "ETH3",
+      "portType": 0,
+      "lanPort": "ETH3",
+      "name": "ETH3",
+      "linkStatus": 0,
+      "linkSpeed": 0,
+      "supportVlan": true,
+      "localVlanEnable": false,
+      "status": true,
+      "supportPoe": true,
+      "poeOutEnable": false,
+      "supportVlanOption": true,
+      "supportVlanTagged": true,
+      "supportStatusEnable": true,
+      "supportStatusInform": true,
+      "taggedNetworkId": [],
+      "untaggedNetworkId": [],
+      "uplinkPort": false,
+      "supportBandwidthControl": false,
+      "bandwidthControlEnable": false,
+      "ingressRateLimit": {
+        "status": false,
+        "rate": 0
+      },
+      "egressRateLimit": {
+        "status": false,
+        "rate": 0
+      },
+      "portStatus": {
+        "tx": 162524660,
+        "rx": 0
+      }
+    }
+  ],
+  "setting_wlans": {
+    "maxSsids2G": 8,
+    "data": [
+      {
+        "name": "Default",
+        "clone": false,
+        "site": "site1",
+        "primary": true,
+        "id": "65000000000000000000001f",
+        "resource": 0
+      }
+    ],
+    "maxSsids6G": 8,
+    "maxSsidsMlo": 8,
+    "maxSsids5G": 8
+  },
+  "wlan_ssid": [
+    {
+      "wlanId": "65000000000000000000001f",
+      "wlanName": "Default",
+      "primary": true,
+      "ssids": [
+        {
+          "idInt": 1642388540,
+          "name": "CorpWiFi",
+          "bandInfo": 3,
+          "securityMode": 4,
+          "ouiMacFilterEnable": false,
+          "mloEnable": false
+        },
+        {
+          "idInt": 303134411,
+          "name": "IoTWiFi",
+          "bandInfo": 1,
+          "securityMode": 3,
+          "psk": "***REDACTED***",
+          "ouiMacFilterEnable": false,
+          "hidePwd": false,
+          "vlanId": 20,
+          "vlanPoolIds": "20",
+          "mloEnable": false
+        }
+      ]
+    }
+  ],
+  "locktoap_aps": [
+    {
+      "mac": "00-11-22-00-00-02",
+      "name": "00-11-22-00-00-02",
+      "ip": "172.16.1.3",
+      "statusCategory": 1,
+      "status": 14,
+      "model": "EAP725-Wall",
+      "modelVersion": "1.0",
+      "type": "ap",
+      "showModel": "EAP725-Wall(EU) v1.0",
+      "supportLockToAp": true
+    },
+    {
+      "mac": "00-11-22-00-00-03",
+      "name": "00-11-22-00-00-03",
+      "ip": "172.16.1.4",
+      "statusCategory": 1,
+      "status": 14,
+      "model": "EAP725-Wall",
+      "modelVersion": "1.0",
+      "type": "ap",
+      "showModel": "EAP725-Wall(EU) v1.0",
+      "supportLockToAp": true
+    }
+  ],
+  "rate_limits": [
+    {
+      "id": "650000000000000000000020",
+      "name": "Default",
+      "site": "site1",
+      "downLimitEnable": false,
+      "upLimitEnable": false,
+      "isDefault": true,
+      "resource": 0
+    },
+    {
+      "id": "650000000000000000000021",
+      "name": "Guest",
+      "site": "site1",
+      "downLimitEnable": true,
+      "downLimit": 10240,
+      "upLimitEnable": true,
+      "upLimit": 1,
+      "isDefault": false,
+      "resource": 0
+    }
+  ]
+}

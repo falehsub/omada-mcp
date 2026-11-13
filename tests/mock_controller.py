@@ -180,6 +180,128 @@ class MockController:
             {"id": "au-1", "level": 4, "auditType": 1, "content": "Admin session started", "operator": username, "time": now_ms - 15000},
         ]
 
+        # Milestone 1 / Milestone 2 diagnostic & config fixtures mapped to MockController MACs
+        sp_fx = load_fixture("switch_ports.json")
+        er_fx = load_fixture("eap_radios.json")
+        tw_fx = load_fixture("topology_and_wan.json")
+
+        sw_detail = copy.deepcopy(sp_fx["switch_detail"])
+        sw_detail.update({"mac": "AA-BB-CC-00-00-02", "name": "sw-access"})
+        if isinstance(sw_detail.get("uplink"), dict):
+            sw_detail["uplink"].update({"mac": "AA-BB-CC-00-00-01", "name": "gw-core"})
+        self.switch_details: Dict[str, Dict[str, Any]] = {"AA-BB-CC-00-00-02": sw_detail}
+
+        sw_ports = copy.deepcopy(sp_fx["ports"])
+        for p in sw_ports:
+            p["switchMac"] = "AA-BB-CC-00-00-02"
+            ps = p.get("portStatus")
+            if isinstance(ps, dict) and ps.get("port") == 3:
+                ps["chassisId"] = "AA-BB-CC-00-00-03"
+                ps["portId"] = "AA-BB-CC-00-00-03"
+            elif isinstance(ps, dict) and ps.get("port") == 17:
+                ps["chassisId"] = "AA-BB-CC-00-00-01"
+                ps["portId"] = "AA-BB-CC-00-00-01"
+        self.switch_ports: Dict[str, List[Dict[str, Any]]] = {"AA-BB-CC-00-00-02": sw_ports}
+        self.switch_lags: Dict[str, List[Dict[str, Any]]] = {"AA-BB-CC-00-00-02": copy.deepcopy(sp_fx.get("lags", []))}
+
+        self.switch_insight_counters: Dict[str, List[Dict[str, Any]]] = {
+            "AA-BB-CC-00-00-02": [
+                {**copy.deepcopy(r), "switchMac": "AA-BB-CC-00-00-02", "switchName": "sw-access"}
+                for r in sp_fx.get("insight_counters", [])
+            ]
+        }
+        self.switch_insight_poe: Dict[str, List[Dict[str, Any]]] = {
+            "AA-BB-CC-00-00-02": [
+                {**copy.deepcopy(r), "switchMac": "AA-BB-CC-00-00-02", "switchName": "sw-access"}
+                for r in sp_fx.get("insight_poe", [])
+            ]
+        }
+        ins_detail = copy.deepcopy(sp_fx.get("insight_switch_detail", []))
+        if ins_detail:
+            ins_detail[0]["mac"] = "AA-BB-CC-00-00-02"
+        self.switch_insight_detail: List[Dict[str, Any]] = ins_detail
+        self.switch_stat: Dict[str, Dict[str, Any]] = {
+            "AA-BB-CC-00-00-02": copy.deepcopy(sp_fx.get("stat_switch", {}))
+        }
+        ct_ports = copy.deepcopy(sp_fx.get("cable_test_ports", []))
+        for ctp in ct_ports:
+            for dl in ctp.get("downlinkDevices") or []:
+                if isinstance(dl, dict):
+                    if dl.get("type") == "ap":
+                        dl.update({"mac": "AA-BB-CC-00-00-03", "name": "ap-living"})
+                    elif dl.get("type") == "gateway":
+                        dl.update({"mac": "AA-BB-CC-00-00-01", "name": "gw-core"})
+        self.cable_test_ports: Dict[str, List[Dict[str, Any]]] = {"AA-BB-CC-00-00-02": ct_ports}
+        self.cable_test_results: Dict[str, Dict[str, Any]] = {
+            "AA-BB-CC-00-00-02": copy.deepcopy(sp_fx.get("cable_test_full", {"status": 0, "data": []}))
+        }
+        self.port_profiles: List[Dict[str, Any]] = copy.deepcopy(sp_fx["lan_profiles"]["data"])
+
+        ap_detail = copy.deepcopy(er_fx["eap_detail"])
+        ap_detail.update({"mac": "AA-BB-CC-00-00-03", "name": "ap-living", "wlanId": "wlan-grp-1"})
+        self.eap_details: Dict[str, Dict[str, Any]] = {"AA-BB-CC-00-00-03": ap_detail}
+        self.eap_channel_info: Dict[str, Any] = {
+            "AA-BB-CC-00-00-03": copy.deepcopy(er_fx["eap_channel_info"])
+        }
+        self.eap_rf_scan: Dict[str, Dict[str, Any]] = {
+            "AA-BB-CC-00-00-03": copy.deepcopy(er_fx["eap_rf_scan"])
+        }
+
+        gw_detail = copy.deepcopy(tw_fx["gateway_detail"])
+        gw_detail.update({"mac": "AA-BB-CC-00-00-01", "name": "gw-core"})
+        self.gateway_details: Dict[str, Dict[str, Any]] = {"AA-BB-CC-00-00-01": gw_detail}
+        self.wan_lan_status: Dict[str, Any] = copy.deepcopy(tw_fx["wanlanstatus"])
+        self.port_state_details: Dict[str, Any] = copy.deepcopy(tw_fx["portstatedetails"])
+        self.speedtest_result: Optional[Dict[str, Any]] = None
+        topo = copy.deepcopy(tw_fx["topology_v2"])
+        if topo.get("topologyArray"):
+            gw_node = topo["topologyArray"][0]
+            gw_node.update({"mac": "AA-BB-CC-00-00-01", "name": "gw-core"})
+            for sw_node in gw_node.get("successors") or []:
+                if sw_node.get("type") == "switch":
+                    sw_node.update({"mac": "AA-BB-CC-00-00-02", "name": "sw-access"})
+                    for child in sw_node.get("successors") or []:
+                        if child.get("type") == "ap":
+                            child.update({"mac": "AA-BB-CC-00-00-03", "name": "ap-living"})
+        self.topology_v2: Dict[str, Any] = topo
+
+        self.ips_settings: Dict[str, Any] = copy.deepcopy(tw_fx["setting_ips"])
+        self.threat_alerts: List[Dict[str, Any]] = copy.deepcopy(tw_fx["ips_threat_management"].get("data", []))
+        self.attack_defense: Dict[str, Any] = copy.deepcopy(tw_fx["setting_attackdefense"])
+        self.rogue_aps: List[Dict[str, Any]] = copy.deepcopy(tw_fx["insight_rogueaps"].get("data", []))
+        self.wids_events: List[Dict[str, Any]] = []
+        self.wids_blacklist: List[Dict[str, Any]] = []
+        self.wids_supported: bool = False
+
+        self.vpn_tunnels: List[Dict[str, Any]] = []
+        self.vpn_configs: List[Dict[str, Any]] = []
+        self.wireguard_configs: List[Dict[str, Any]] = []
+        self.wireguard_peers: List[Dict[str, Any]] = []
+        self.past_connections: List[Dict[str, Any]] = []
+
+        self.policy_routes: List[Dict[str, Any]] = copy.deepcopy(tw_fx["policy_routings"].get("data", []))
+        self.lan_dns_rules: List[Dict[str, Any]] = copy.deepcopy(tw_fx["lan_dns"].get("data", []))
+        self.switch_acls: List[Dict[str, Any]] = copy.deepcopy(tw_fx["acls_switch"].get("data", []))
+        self.eap_acls: List[Dict[str, Any]] = copy.deepcopy(tw_fx["acls_eap"].get("data", []))
+        self.rate_limit_profiles: List[Dict[str, Any]] = [
+            {
+                "id": "rl-prof-1",
+                "name": "Guest-10M",
+                "downLimit": {"enable": True, "limit": 10000, "unit": 1},
+                "upLimit": {"enable": True, "limit": 5000, "unit": 1},
+            },
+            {
+                "id": "rl-prof-2",
+                "name": "IoT-2M",
+                "downLimit": {"enable": True, "limit": 2000, "unit": 1},
+                "upLimit": {"enable": True, "limit": 1000, "unit": 1},
+            },
+        ]
+
+        self.has_gateway: bool = True
+        self.lan_dns_supported: bool = True
+        self.topology_v2_supported: bool = True
+
         self.cookie_jar = http.cookiejar.CookieJar()
         self.token: str = "tok-mock-001"
         self.logins: int = 0
@@ -411,11 +533,27 @@ class MockController:
             dev = next((d for d in self.devices if _normalize_mac(d["mac"]) == mac and d.get("type") == expected_type), None)
             if dev is None:
                 return self._err(err_code, f"{kind} device does not exist.")
+            if method == "GET" and not has_general:
+                store = {
+                    "eaps": self.eap_details,
+                    "switches": self.switch_details,
+                    "gateways": self.gateway_details,
+                }[kind]
+                merged = copy.deepcopy(dev)
+                merged.update(copy.deepcopy(store.get(mac, {})))
+                return self._ok(merged)
             if method in ("PATCH", "PUT"):
                 if not isinstance(body, Mapping):
                     return self._err(-1001, "Device update body must be JSON object.")
+                store = {
+                    "eaps": self.eap_details,
+                    "switches": self.switch_details,
+                    "gateways": self.gateway_details,
+                }[kind]
                 for k, v in body.items():
                     dev[k] = copy.deepcopy(v)
+                    if mac in store:
+                        store[mac][k] = copy.deepcopy(v)
                 return self._ok(copy.deepcopy(dev))
             return self._err(-1600, "Method not supported.")
 
@@ -439,16 +577,16 @@ class MockController:
             for c in self.clients.values():
                 rows.append({
                     "mac": c["mac"],
-                    "name": c["name"],
-                    "hostName": c["hostName"],
-                    "ip": c["ip"],
-                    "wireless": c["wireless"],
-                    "guest": c["guest"],
-                    "active": c["active"],
-                    "ssid": c["ssid"],
+                    "name": c.get("name") or c["mac"],
+                    "hostName": c.get("hostName", ""),
+                    "ip": c.get("ip", ""),
+                    "wireless": bool(c.get("wireless")),
+                    "guest": bool(c.get("guest")),
+                    "active": bool(c.get("active", True)),
+                    "ssid": c.get("ssid", ""),
                     "apName": c.get("apName") or c.get("switchName", ""),
-                    "networkName": c["networkName"],
-                    "vid": c["vid"],
+                    "networkName": c.get("networkName", ""),
+                    "vid": c.get("vid", 1),
                     "download": c.get("trafficDown", 0),
                     "upload": c.get("trafficUp", 0),
                     "duration": c.get("uptime", 0),
@@ -510,6 +648,11 @@ class MockController:
                         return self._err(-1, "General error.")
                     if not ip_setting.get("ip"):
                         return self._err(-1001, "Missing fixed ip.")
+                lock_setting = body.get("clientLockToApSetting")
+                if isinstance(lock_setting, Mapping):
+                    aps = lock_setting.get("aps")
+                    if isinstance(aps, list) and any(not isinstance(a, str) for a in aps):
+                        return self._err(-1001, "clientLockToApSetting.aps must be wire MAC strings.")
                 updated = copy.deepcopy(client_obj)
                 for k, v in body.items():
                     updated[k] = copy.deepcopy(v)
@@ -718,21 +861,25 @@ class MockController:
 
         m_acls = re.fullmatch(r"sites/([^/]+)/setting/firewall/acls", ep)
         if m_acls:
+            acl_t = params.get("type", ["0"])[0]
+            acl_store = {"0": self.acls, "1": self.switch_acls, "2": self.eap_acls}.get(acl_t)
+            if acl_store is None:
+                return self._err(-1600, f"Invalid ACL type {acl_t!r}.")
             if method == "GET":
-                paged = self._paginate_rows(self.acls, params)
+                paged = self._paginate_rows(acl_store, params)
                 paged["aclDisable"] = self.acl_disable
                 return self._ok(paged)
             if method == "POST":
                 if not isinstance(body, Mapping):
                     return self._err(-1001, "Invalid ACL body.")
                 direction = body.get("direction") if isinstance(body.get("direction"), Mapping) else {}
-                if direction.get("lanToWan") and not direction.get("lanToLan") and int(body.get("destinationType", -1)) == 0:
+                if acl_t == "0" and direction.get("lanToWan") and not direction.get("lanToLan") and int(body.get("destinationType", -1)) == 0:
                     return self._err(-33601, "Invalid Destination Type.")
                 new_id = self._next_id("acl-new")
                 created = copy.deepcopy(dict(body))
                 created["id"] = new_id
-                created.setdefault("index", len(self.acls))
-                self.acls.append(created)
+                created.setdefault("index", len(acl_store))
+                acl_store.append(created)
                 return self._ok({"id": new_id})
             return self._err(-1600, "Method not supported.")
 
@@ -740,24 +887,26 @@ class MockController:
         if m_acl_id:
             if method == "PATCH":
                 return self._err(-1600, "Unsupported request path.")
-            if params.get("type", [""])[0] != "0":
-                return self._err(-1600, "Gateway ACL PUT/DELETE requires ?type=0.")
+            acl_t = params.get("type", [""])[0]
+            acl_store = {"0": self.acls, "1": self.switch_acls, "2": self.eap_acls}.get(acl_t)
+            if acl_store is None:
+                return self._err(-1600, "ACL PUT/DELETE requires ?type=0, 1, or 2.")
             acl_id = m_acl_id.group(2)
-            idx = next((i for i, a in enumerate(self.acls) if str(a.get("id")) == acl_id), None)
+            idx = next((i for i, a in enumerate(acl_store) if str(a.get("id")) == acl_id), None)
             if idx is None:
                 return self._err(-1600, "ACL rule not found.")
             if method == "PUT":
-                updated = copy.deepcopy(self.acls[idx])
+                updated = copy.deepcopy(acl_store[idx])
                 if isinstance(body, Mapping):
                     for k, v in body.items():
                         updated[k] = copy.deepcopy(v)
                 updated["id"] = acl_id
-                if isinstance(body, Mapping) and "syslog" in body and body["syslog"] != self.acls[idx].get("syslog"):
+                if isinstance(body, Mapping) and "syslog" in body and body["syslog"] != acl_store[idx].get("syslog"):
                     updated["existSyslog"] = bool(updated.get("syslog"))
-                self.acls[idx] = updated
+                acl_store[idx] = updated
                 return self._ok({})
             if method == "DELETE":
-                self.acls.pop(idx)
+                acl_store.pop(idx)
                 return self._ok({})
             return self._err(-1600, "Method not supported.")
 
@@ -852,7 +1001,18 @@ class MockController:
             if method == "PUT":
                 if not isinstance(body, Mapping) or "enable" not in body:
                     return self._err(-1001, "enable is required.")
-                self.upnp["enable"] = bool(body["enable"])
+                enabled = bool(body["enable"])
+                if enabled:
+                    wan_ports = body.get("wanPortIds")
+                    net_ids = body.get("networkIds")
+                    if not isinstance(wan_ports, list) or not wan_ports or not isinstance(net_ids, list) or not net_ids:
+                        return self._err(-1001, "Invalid request parameters.")
+                    self.upnp["wanPortIds"] = [str(p) for p in wan_ports]
+                    self.upnp["networkIds"] = [str(n) for n in net_ids]
+                else:
+                    self.upnp.pop("wanPortIds", None)
+                    self.upnp.pop("networkIds", None)
+                self.upnp["enable"] = enabled
                 return self._ok({})
             return self._err(-1600, "Method not supported.")
 
@@ -875,6 +1035,378 @@ class MockController:
         m_audit = re.fullmatch(r"sites/([^/]+)/audit/logs", ep)
         if m_audit and method == "GET":
             return self._ok(self._paginate_rows(self.logs_audit, params))
+
+        # -- Milestone 1 & Milestone 2 endpoints ------------------------------
+        m_sw_ports = re.fullmatch(r"sites/([^/]+)/switches/([^/]+)/ports", ep)
+        if m_sw_ports and method == "GET":
+            mac = _normalize_mac(urllib.parse.unquote(m_sw_ports.group(2)))
+            if mac not in self.switch_ports:
+                return self._err(-39700, "Switch does not exist.")
+            return self._ok(copy.deepcopy(self.switch_ports[mac]))
+
+        m_sw_port_item = re.fullmatch(r"sites/([^/]+)/switches/([^/]+)/ports/(\d+)", ep)
+        if m_sw_port_item and method == "PATCH":
+            mac = _normalize_mac(urllib.parse.unquote(m_sw_port_item.group(2)))
+            pnum = int(m_sw_port_item.group(3))
+            ports = self.switch_ports.get(mac)
+            if ports is None:
+                return self._err(-39700, "Switch does not exist.")
+            idx = next((i for i, r in enumerate(ports) if int(r.get("port", 0)) == pnum), None)
+            if idx is None:
+                return self._err(-1001, f"Switch port {pnum} does not exist.")
+            if not isinstance(body, Mapping):
+                return self._err(-1001, "Invalid body.")
+            if not body.get("profileOverrideEnable") and any(
+                k in body for k in ("poe", "portIsolationEnable", "lldpMedEnable", "spanningTreeEnable")
+            ):
+                return self._err(-1001, "Override fields require profileOverrideEnable=True.")
+            updated = copy.deepcopy(ports[idx])
+            for k, v in body.items():
+                updated[k] = copy.deepcopy(v)
+            if "profileId" in body:
+                prof = next((p for p in self.port_profiles if str(p.get("id")) == str(body["profileId"])), None)
+                if prof is None:
+                    return self._err(-1001, f"Unknown profileId {body['profileId']!r}.")
+                updated["profileName"] = prof.get("name", updated.get("profileName"))
+                if int(prof.get("type", 0)) == 1:
+                    updated["disable"] = True
+                else:
+                    updated["disable"] = False
+            ports[idx] = updated
+            return self._ok({})
+
+        m_sw_port_restart = re.fullmatch(r"sites/([^/]+)/cmd/switches/([^/]+)/ports/(\d+)/restart", ep)
+        if m_sw_port_restart and method == "POST":
+            mac = _normalize_mac(urllib.parse.unquote(m_sw_port_restart.group(2)))
+            pnum = int(m_sw_port_restart.group(3))
+            ports = self.switch_ports.get(mac)
+            if ports is None:
+                return self._err(-39700, "Switch does not exist.")
+            row = next((r for r in ports if int(r.get("port", 0)) == pnum), None)
+            if row is None:
+                return self._err(-1001, f"Switch port {pnum} does not exist.")
+            row["lastPoeCycleAt"] = int(time.time() * 1000)
+            return self._ok({})
+
+        m_sw_lags = re.fullmatch(r"sites/([^/]+)/switches/([^/]+)/lags", ep)
+        if m_sw_lags and method == "GET":
+            mac = _normalize_mac(urllib.parse.unquote(m_sw_lags.group(2)))
+            return self._ok(copy.deepcopy(self.switch_lags.get(mac, [])))
+
+        m_ins_cnt = re.fullmatch(r"sites/([^/]+)/insight/switch/port/counters", ep)
+        if m_ins_cnt and method == "GET":
+            all_rows = [row for rows in self.switch_insight_counters.values() for row in rows]
+            return self._ok(self._paginate_rows(all_rows, params))
+
+        m_ins_poe = re.fullmatch(r"sites/([^/]+)/insight/switch/port/poe", ep)
+        if m_ins_poe and method == "GET":
+            all_rows = [row for rows in self.switch_insight_poe.values() for row in rows]
+            return self._ok(self._paginate_rows(all_rows, params))
+
+        m_ins_sw_detail = re.fullmatch(r"sites/([^/]+)/insight/switch/detail", ep)
+        if m_ins_sw_detail and method == "GET":
+            return self._ok(copy.deepcopy(self.switch_insight_detail))
+
+        m_ct_ports = re.fullmatch(r"sites/([^/]+)/cable-test/switches/([^/]+)/ports", ep)
+        if m_ct_ports and method == "GET":
+            mac = _normalize_mac(urllib.parse.unquote(m_ct_ports.group(2)))
+            return self._ok(copy.deepcopy(self.cable_test_ports.get(mac, [])))
+
+        m_ct_full = re.fullmatch(r"sites/([^/]+)/cable-test/switches/([^/]+)/full-results", ep)
+        if m_ct_full and method == "GET":
+            mac = _normalize_mac(urllib.parse.unquote(m_ct_full.group(2)))
+            return self._ok(copy.deepcopy(self.cable_test_results.get(mac, {"status": 0, "data": []})))
+
+        m_stat_sw = re.fullmatch(r"sites/([^/]+)/stat/switches/([^/]+)", ep)
+        if m_stat_sw and method == "GET":
+            mac = _normalize_mac(urllib.parse.unquote(m_stat_sw.group(2)))
+            return self._ok(copy.deepcopy(self.switch_stat.get(mac, {"ports": []})))
+
+        m_eap_ci = re.fullmatch(r"sites/([^/]+)/eaps/([^/]+)/channelInfo", ep)
+        if m_eap_ci and method == "GET":
+            mac = _normalize_mac(urllib.parse.unquote(m_eap_ci.group(2)))
+            if mac not in self.eap_channel_info:
+                return self._err(-39303, "EAP does not exist.")
+            return self._ok(copy.deepcopy(self.eap_channel_info[mac]))
+
+        m_eap_rf = re.fullmatch(r"sites/([^/]+)/eaps/([^/]+)/tools/rfScan", ep)
+        if m_eap_rf and method == "GET":
+            mac = _normalize_mac(urllib.parse.unquote(m_eap_rf.group(2)))
+            if mac not in self.eap_rf_scan:
+                return self._err(-39303, "EAP does not exist.")
+            return self._ok(copy.deepcopy(self.eap_rf_scan[mac]))
+
+        m_eap_rf_cmd = re.fullmatch(r"sites/([^/]+)/cmd/eaps/([^/]+)/tools/rfScan", ep)
+        if m_eap_rf_cmd and method == "POST":
+            mac = _normalize_mac(urllib.parse.unquote(m_eap_rf_cmd.group(2)))
+            if mac not in self.eap_details:
+                return self._err(-39303, "EAP does not exist.")
+            rf_obj = self.eap_rf_scan.setdefault(mac, {"status": 0})
+            rf_obj["lastScanAt"] = int(time.time() * 1000)
+            if isinstance(body, Mapping) and "scanType" in body:
+                rf_obj["lastScanBands"] = copy.deepcopy(body["scanType"])
+            return self._ok({})
+
+        m_eap_radios = re.fullmatch(r"sites/([^/]+)/eaps/([^/]+)/config/radios", ep)
+        if m_eap_radios:
+            mac = _normalize_mac(urllib.parse.unquote(m_eap_radios.group(2)))
+            ap = self.eap_details.get(mac)
+            if ap is None:
+                return self._err(-39303, "EAP does not exist.")
+            if method == "GET":
+                out = {k: copy.deepcopy(ap[k]) for k in ("radioSetting2g", "radioSetting5g", "radioSetting5g1", "radioSetting5g2", "radioSetting6g") if k in ap}
+                return self._ok(out)
+            if method in ("PUT", "PATCH"):
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid radio body.")
+                for k, v in body.items():
+                    if k.startswith("radioSetting"):
+                        ap[k] = copy.deepcopy(v)
+                        dev = next((d for d in self.devices if _normalize_mac(d["mac"]) == mac), None)
+                        if dev is not None:
+                            dev[k] = copy.deepcopy(v)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
+
+        m_eap_wlans = re.fullmatch(r"sites/([^/]+)/eaps/([^/]+)/config/wlans", ep)
+        if m_eap_wlans and method in ("PUT", "PATCH"):
+            mac = _normalize_mac(urllib.parse.unquote(m_eap_wlans.group(2)))
+            ap = self.eap_details.get(mac)
+            if ap is None:
+                return self._err(-39303, "EAP does not exist.")
+            if not isinstance(body, Mapping) or "wlanId" not in body:
+                return self._err(-1001, "wlanId is required.")
+            wid = str(body["wlanId"])
+            if not any(str(w.get("id")) == wid for w in self.wlans):
+                return self._err(-1001, f"Unknown wlanId {wid!r}.")
+            ap["wlanId"] = wid
+            if "ssidOverrides" in body:
+                ap["ssidOverrides"] = copy.deepcopy(body["ssidOverrides"])
+            dev = next((d for d in self.devices if _normalize_mac(d["mac"]) == mac), None)
+            if dev is not None:
+                dev["wlanId"] = wid
+            return self._ok({})
+
+        m_wlan_ssid = re.fullmatch(r"sites/([^/]+)/wlanSsid", ep)
+        if m_wlan_ssid and method == "GET":
+            rows = [
+                {
+                    "wlanId": g["id"],
+                    "wlanName": g["name"],
+                    "primary": g.get("primary", False),
+                    "ssids": copy.deepcopy(self.ssids_by_group.get(g["id"], [])),
+                }
+                for g in self.wlans
+            ]
+            return self._ok(rows)
+
+        m_profiles = re.fullmatch(r"sites/([^/]+)/setting/lan/profiles", ep)
+        if m_profiles:
+            if method == "GET":
+                return self._ok(self._paginate_rows(self.port_profiles, params))
+            if method == "POST":
+                if not isinstance(body, Mapping) or not body.get("name"):
+                    return self._err(-1001, "Profile name required.")
+                new_id = self._next_id("prof-new")
+                created = copy.deepcopy(dict(body))
+                created.update({"id": new_id, "type": 0, "prohibitModify": False})
+                self.port_profiles.append(created)
+                return self._ok({"id": new_id})
+            return self._err(-1600, "Method not supported.")
+
+        m_profile_id = re.fullmatch(r"sites/([^/]+)/setting/lan/profiles/([^/]+)", ep)
+        if m_profile_id:
+            pid = m_profile_id.group(2)
+            idx = next((i for i, p in enumerate(self.port_profiles) if str(p.get("id")) == pid), None)
+            if idx is None:
+                return self._err(-1600, "Port profile not found.")
+            if method in ("PATCH", "PUT"):
+                if self.port_profiles[idx].get("prohibitModify"):
+                    return self._err(-1001, "Built-in port profile cannot be modified.")
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                updated = copy.deepcopy(self.port_profiles[idx])
+                updated.update(copy.deepcopy(dict(body)))
+                updated["id"] = pid
+                self.port_profiles[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                if self.port_profiles[idx].get("prohibitModify"):
+                    return self._err(-1001, "Built-in port profile cannot be deleted.")
+                self.port_profiles.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
+
+        m_rate_limits = re.fullmatch(r"sites/([^/]+)/setting/profiles/rateLimits", ep)
+        if m_rate_limits and method == "GET":
+            return self._ok(self._paginate_rows(self.rate_limit_profiles, params))
+
+        m_wls = re.fullmatch(r"sites/([^/]+)/setting/wanlanstatus", ep)
+        if m_wls and method == "GET":
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            return self._ok(copy.deepcopy(self.wan_lan_status))
+
+        m_psd = re.fullmatch(r"sites/([^/]+)/dashboard/portstatedetails", ep)
+        if m_psd and method == "GET":
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            return self._ok(copy.deepcopy(self.port_state_details))
+
+        m_st = re.fullmatch(r"sites/([^/]+)/cmd/getSpeedTestResult", ep)
+        if m_st and method == "GET":
+            if self.speedtest_result is None:
+                return self._err(-1600, "No speedtest result available.")
+            return self._ok(copy.deepcopy(self.speedtest_result))
+
+        m_vpn_stats = re.fullmatch(r"sites/([^/]+)/setting/vpn/stats/(tunnel|ipsec|sslvpn)", ep)
+        if m_vpn_stats and method == "GET":
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            kind = m_vpn_stats.group(2)
+            rows = [t for t in self.vpn_tunnels if t.get("vpnCategory") == kind]
+            return self._ok(self._paginate_rows(rows, params))
+
+        m_vpn_dash = re.fullmatch(r"sites/([^/]+)/dashboard/(wireguardtunnels|ipsectunnels|sslvpntunnels|openvpntunnels)", ep)
+        if m_vpn_dash and method == "GET":
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            seg = m_vpn_dash.group(2)
+            wanted = {"wireguardtunnels": "wireguard", "ipsectunnels": "ipsec", "sslvpntunnels": "sslvpn"}.get(seg)
+            if seg == "openvpntunnels":
+                ov_type = "openvpn_server" if params.get("type", ["0"])[0] == "0" else "openvpn_client"
+                rows = [t for t in self.vpn_tunnels if t.get("vpnCategory") == ov_type]
+            else:
+                rows = [t for t in self.vpn_tunnels if t.get("vpnCategory") == wanted]
+            return self._ok(copy.deepcopy(rows))
+
+        m_vpn_cfg = re.fullmatch(r"sites/([^/]+)/setting/(vpns|wireguard|wireguard/peer)", ep)
+        if m_vpn_cfg and method == "GET":
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            kind = m_vpn_cfg.group(2)
+            store = {"vpns": self.vpn_configs, "wireguard": self.wireguard_configs, "wireguard/peer": self.wireguard_peers}[kind]
+            return self._ok(self._paginate_rows(store, params))
+
+        m_topo = re.fullmatch(r"sites/([^/]+)/(topology-v2|topology)", ep)
+        if m_topo and method == "GET":
+            which = m_topo.group(2)
+            if which == "topology-v2" and not self.topology_v2_supported:
+                return self._err(-1600, "topology-v2 not supported on 5.x.")
+            return self._ok(copy.deepcopy(self.topology_v2))
+
+        m_ips = re.fullmatch(r"sites/([^/]+)/setting/ips", ep)
+        if m_ips and method == "GET":
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            return self._ok(copy.deepcopy(self.ips_settings))
+
+        m_threats = re.fullmatch(r"sites/([^/]+)/ips/threat-management", ep)
+        if m_threats and method == "GET":
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            return self._ok(self._paginate_rows(self.threat_alerts, params))
+
+        m_ad = re.fullmatch(r"sites/([^/]+)/setting/firewall/attackdefense", ep)
+        if m_ad and method == "GET":
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            return self._ok(copy.deepcopy(self.attack_defense))
+
+        m_wids = re.fullmatch(r"sites/([^/]+)/insight/wids(?:/(blacklist))?", ep)
+        if m_wids and method == "GET":
+            if not self.wids_supported:
+                return self._err(-1001, "WIDS unsupported on this controller.")
+            rows = self.wids_blacklist if m_wids.group(2) else self.wids_events
+            return self._ok(self._paginate_rows(rows, params))
+
+        m_rogue = re.fullmatch(r"sites/([^/]+)/insight/rogueaps", ep)
+        if m_rogue and method == "GET":
+            return self._ok(self._paginate_rows(self.rogue_aps, params))
+
+        m_past = re.fullmatch(r"sites/([^/]+)/insight/pastConnection", ep)
+        if m_past and method == "GET":
+            key = params.get("searchKey", [""])[0].strip().lower()
+            rows = self.past_connections
+            if key:
+                rows = [r for r in rows if key in json.dumps(r).lower()]
+            return self._ok(self._paginate_rows(rows, params))
+
+        m_pr = re.fullmatch(r"sites/([^/]+)/setting/transmission/policyRoutings", ep)
+        if m_pr:
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            if method == "GET":
+                return self._ok(self._paginate_rows(self.policy_routes, params))
+            if method == "POST":
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                new_id = self._next_id("pr-new")
+                created = copy.deepcopy(dict(body))
+                created["id"] = new_id
+                self.policy_routes.append(created)
+                return self._ok({"id": new_id})
+            return self._err(-1600, "Method not supported.")
+
+        m_pr_id = re.fullmatch(r"sites/([^/]+)/setting/transmission/policyRoutings/([^/]+)", ep)
+        if m_pr_id:
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            rid = m_pr_id.group(2)
+            idx = next((i for i, r in enumerate(self.policy_routes) if str(r.get("id")) == rid), None)
+            if idx is None:
+                return self._err(-1600, "Policy route not found.")
+            if method in ("PUT", "PATCH"):
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                updated = copy.deepcopy(self.policy_routes[idx])
+                updated.update(copy.deepcopy(dict(body)))
+                updated["id"] = rid
+                self.policy_routes[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                self.policy_routes.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
+
+        m_dns = re.fullmatch(r"sites/([^/]+)/setting/lan/dns", ep)
+        if m_dns:
+            if not self.lan_dns_supported:
+                return self._err(-41011, "LAN DNS not supported on this controller version.")
+            if method == "GET":
+                res = self._paginate_rows(self.lan_dns_rules, params)
+                res["supportTtl"] = True
+                return self._ok(res)
+            if method == "POST":
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                new_id = self._next_id("dns-new")
+                created = copy.deepcopy(dict(body))
+                created["id"] = new_id
+                self.lan_dns_rules.append(created)
+                return self._ok({"id": new_id})
+            return self._err(-1600, "Method not supported.")
+
+        m_dns_id = re.fullmatch(r"sites/([^/]+)/setting/lan/dns/([^/]+)", ep)
+        if m_dns_id:
+            if not self.lan_dns_supported:
+                return self._err(-41011, "LAN DNS not supported on this controller version.")
+            did = m_dns_id.group(2)
+            idx = next((i for i, r in enumerate(self.lan_dns_rules) if str(r.get("id")) == did), None)
+            if idx is None:
+                return self._err(-1600, "LAN DNS rule not found.")
+            if method in ("PATCH", "PUT"):
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                updated = copy.deepcopy(self.lan_dns_rules[idx])
+                updated.update(copy.deepcopy(dict(body)))
+                updated["id"] = did
+                self.lan_dns_rules[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                self.lan_dns_rules.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
 
         return self._err(-1600, f"Unmocked endpoint: {method} {ep}")
 

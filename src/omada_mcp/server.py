@@ -37,7 +37,8 @@ SERVER_NAME = "omada-mcp"
 
 INSTRUCTIONS = (
     "Read-only access by default to a TP-Link Omada SDN controller through its Web API v2. "
-    "Eleven read-only tools are always available, including get_config_snapshot, network_audit, "
+    "Thirty-three read-only tools are always available, including get_config_snapshot, network_audit, "
+    "get_switch_ports, get_ap_radios, get_wan_status, get_topology, diagnose_client, diagnose_wan, "
     "get_site_info, list_devices / list_clients, get_device / get_client, and explain_error. "
     "Optional write tools remain hidden and disabled unless both OMADA_READ_ONLY=false and "
     "OMADA_WRITE_TOOLS explicitly allowlist them. Timestamps are UTC ISO-8601. Error messages "
@@ -285,7 +286,7 @@ class Server:
             raise RpcError(
                 -32003,
                 f"OMADA_READ_ONLY=true refuses the non-read-only tool {name!r}",
-                hint=("unset OMADA_READ_ONLY (or set it to false) and allowlist the tool in "
+                hint=("set OMADA_READ_ONLY=false and allowlist the tool in "
                       "OMADA_WRITE_TOOLS to enable write operations; read-only tools: "
                       + ", ".join(read_only_names)),
                 data={"tool": name, "readOnly": True},
@@ -333,7 +334,10 @@ class Server:
                 "isError": True,
             }
 
-        rendered = json.dumps(data, indent=2, ensure_ascii=False, default=str)
+        if getattr(self.config, "compact_output", True):
+            rendered = json.dumps(data, separators=(",", ":"), ensure_ascii=False, default=str)
+        else:
+            rendered = json.dumps(data, indent=2, ensure_ascii=False, default=str)
         result: Dict[str, Any] = {
             "content": [{"type": "text", "text": rendered}],
             "isError": False,
@@ -419,6 +423,9 @@ class Server:
             elif ptype == "integer":
                 if isinstance(val, bool) or not isinstance(val, int):
                     raise RpcError(-32602, f"{spec.name}: {key} must be an integer")
+            elif ptype == "number":
+                if isinstance(val, bool) or not isinstance(val, (int, float)):
+                    raise RpcError(-32602, f"{spec.name}: {key} must be a number")
             elif ptype == "string":
                 if not isinstance(val, str):
                     raise RpcError(-32602, f"{spec.name}: {key} must be a string")

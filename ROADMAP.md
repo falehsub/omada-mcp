@@ -76,15 +76,18 @@ fail closed unless explicitly enabled.
 
 * `OMADA_WRITE_TOOLS` allowlist (default empty): `OMADA_READ_ONLY=false` alone cannot
   run writes; wildcards and `all` are rejected cleanly at startup.
-* Read-only `get_config_snapshot` plus expanded read tools (`list_lan_networks`,
-  `list_dhcp_reservations`, `list_acls`, `list_ip_groups`, `list_port_forwards`,
-  `list_static_routes`, `get_network_services`, `list_logs`) and 31 opt-in write tools:
+* Expanded diagnostics (`33` read-only tools including `get_switch_ports`,
+  `get_ap_radios`, `get_rf_scan`, `get_wan_status`, `list_vpn_tunnels`,
+  `get_topology`, `get_security_status`, `diagnose_client`, `diagnose_wan`,
+  `list_port_profiles`, `list_wlan_groups`, `list_policy_routes`,
+  `list_lan_dns_rules`) plus `46` opt-in write tools:
   the core 8 (`set_client_fixed_ip`, `release_client_fixed_ip`, `set_vlan_dhcp_pools`,
   `set_vlan_isolation`, `create_ip_group`, `replace_ip_group`, `create_gateway_acl`,
-  `set_acl_rule_status`) plus offline DHCP reservation CRUD, LAN/VLAN CRUD, ACL
-  update/delete, IP-group delete, SSID CRUD (PSK-redacted), port forwarding, static
-  routing, mDNS/UPnP service controls, client block/reconnect/rename, and device
-  rename/LED/locate/reboot.
+  `set_acl_rule_status`), offline DHCP / LAN / ACL / IP-group / SSID / port-forward /
+  static-route / mDNS / UPnP / client / device CRUD, and Milestone 2 automation +
+  rollback (`rollback_from_snapshot`, switch port/PoE/profile controls with LAG/uplink
+  anti-stranding, AP radio/RF scan/WLAN group tuning, policy routes, local LAN DNS,
+  switch/EAP ACLs, and client Lock-to-AP / rate limiting).
 * Every write tool defaults `dryRun` to `true`, requires `confirm: "<tool>:<target-id>"`
   for `dryRun=false`, saves pre-write JSON snapshots + `audit.jsonl` records, enforces
   controller/management-host anti-stranding guards, and verifies read-back state.
@@ -121,14 +124,19 @@ clients are on the guest VLAN".
 
 ## v1.3 — "operational"
 
-* **Prometheus text endpoint** (`--export-metrics`) reusing the audit data, for
-  people who already scrape.
-* **Docker image** and a Home Assistant add-on manifest.
+* **Prometheus text endpoint & HTTP server** (`--export-metrics`, `--metrics-port`)
+  *(shipped on `main`)*: single persistent authenticated session respecting `>= 0.8 s`
+  pacing, exporting WAN link/failover, AP retries/utilization, client RSSI/signal,
+  and DHCP pool metrics (`/metrics` + `/healthz`).
+* **`omada-mcp --watch`** *(shipped on `main`)*: continuous read-only polling on one
+  session emitting JSON diffs (`wan_failover`, `ap_retry_spike`, `weak_client_rssi`,
+  `dhcp_pool_utilization`) with `--interval` / `--iterations`.
+* **Container packaging** (`Dockerfile`) *(shipped on `main`)*: minimal non-root image
+  with `OMADA_READ_ONLY=true` (`stdio` default, `--watch`, `--export-metrics`).
+  *(Home Assistant add-on manifest remains planned.)*
 * **Contract fixtures**: anonymised `--doctor --json` captures from v5.6, v5.13,
   v6.1 and v6.2 replayed in CI, so a firmware change is caught before a user
-  reports it.
-* **`omada-mcp --watch`**: sample AP retries and client RSSI for N minutes and
-  report the trend, for "why is the WiFi slow at 21:00" questions.
+  reports it. *(v6.2 diagnostics/write fixtures captured; v5.6/v5.13/v6.1 captures planned.)*
 
 ## Explicitly out of scope
 

@@ -423,3 +423,35 @@ Additional endpoints & live `v6.2.14.11` behaviors observed during Docker E2E te
 - **JSON `-30109` session expiry**:
   - `OmadaClient` treats JSON `errorCode == -30109` on non-login endpoints identically to
     HTTP 200 HTML expiry (re-authenticating once cleanly and re-running write `reauth_prepare`).
+
+---
+
+## 12. Diagnostics closure & Milestone 2 config/rollback surface (33 RO + 46 write tools)
+
+Expanding beyond the initial 20+31 surface, the current `main` branch adds 13 read-only
+diagnostic/lookup tools and 15 opt-in write tools (**79 tools total**), all enforcing
+Section 1's invariants:
+
+- **Snapshot rollback (`rollback_from_snapshot`)**: resolves snapshot paths strictly under
+  `OMADA_SNAPSHOT_DIR` (rejecting traversal/out-of-dir paths), computes live field drift on
+  `dryRun=true`, and dispatches the resource-specific verified write/delete path + read-back
+  diff check on `dryRun=false`.
+- **Switch port, PoE cycling & port profiles (`update_switch_port`, `cycle_poe_port`, `upsert_port_profile`)**:
+  - Detects switch uplink ports (preferring `upperPort.port` over upstream `upLinkPort` from
+    `topology-v2`), LAG group members (`lags`), and controller-hosting ports (`carriesController`).
+  - Fail-closed anti-stranding rejects disabling, reassigning profiles/VLANs, or power-cycling
+    uplink, LAG member, or controller ports unless `allowUplinkMutation=true` is explicitly supplied.
+  - Refuses edits on `prohibitModify=true` built-in switch profiles (`All`, `Disabled`).
+- **AP radios, RF scan & WLAN groups (`update_ap_radio`, `start_rf_scan`, `assign_ap_wlan_group`)**:
+  - `update_ap_radio` reads the whole `eaps/{mac}` config, modifies only the requested band
+    (`2g`/`5g`/`5g2`/`6g`), preserves all sibling band settings, validates requested channels
+    and widths against `channelInfo` `availableChannels` before calling `PUT .../config/radios`,
+    and verifies the change on read-back.
+  - `assign_ap_wlan_group` updates `eaps/{mac}/config/wlans`.
+- **Policy routes, local LAN DNS, Switch/EAP ACLs & client Wi-Fi controls**:
+  - `upsert_policy_route` / `delete_policy_route` (`setting/routing/policy`, guarded when no gateway exists).
+  - `upsert_lan_dns_rule` / `delete_lan_dns_rule` (`setting/dns/local`, degrading cleanly on older firmware).
+  - `create_switch_acl` / `create_eap_acl` (`setting/firewall/acls?type=1` and `?type=2`) with
+    management-host anti-stranding where applicable.
+  - `set_client_lock_to_ap` (`clientLockToApSetting`) and `set_client_rate_limit`
+    (`rateLimitSetting` / `setting/profiles/rateLimits`) via the stripped 20-volatile-key RMW pattern.

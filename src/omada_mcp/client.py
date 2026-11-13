@@ -63,15 +63,40 @@ __all__ = [
     "redact_secrets",
 ]
 
+import contextlib
+import copy
+import http.client
+import select
+import urllib.parse
+
 _SECRET_FIELD_NAMES = frozenset({
     "securityKey",
     "password",
     "passphrase",
     "psk",
+    "preSharedKey",
+    "presharedKey",
     "radiusSecret",
     "acctSecret",
     "secretKey",
     "privateKey",
+    "clientPassword",
+    "wanPwd",
+    "ddnsPwd",
+    "bindPwd",
+    "authKey",
+    "authPwd",
+    "privKey",
+    "privPwd",
+    "community",
+    "roCommunity",
+    "rwCommunity",
+    "sharedSecret",
+    "radiusKey",
+    "acctKey",
+    "secret",
+    "tlsKey",
+    "encKey",
 })
 
 
@@ -573,14 +598,25 @@ def classify_controller_family(
     return f"{kind}-{ver_family}"
 
 
+class _CookieResponseAdapter:
+    """Minimal ``urllib`` response adapter for ``http.cookiejar.CookieJar``."""
+
+    def __init__(self, headers: Any) -> None:
+        self._headers = headers
+
+    def info(self) -> Any:
+        return self._headers
+
+
 class UrllibTransport:
-    """HTTP transport over :mod:`urllib` with a shared cookie jar and TLS context.
+    """HTTP transport over pooled HTTP/1.1 keep-alive connections and ``CookieJar``.
 
     System proxies are **disabled by default**. On Windows, :mod:`urllib` picks
     up the WinINET/registry proxy configuration; routing a controller call
     through a corporate proxy produces confusing timeouts for an address that is
     one hop away. Set ``OMADA_USE_SYSTEM_PROXY=true`` when the proxy is genuinely
-    required (an out-of-band management route, for example).
+    required (an out-of-band management route, for example); when a matching
+    system proxy applies, requests fall back to :attr:`opener`.
     """
 
     def __init__(self, ssl_context: ssl.SSLContext, timeout: float = 30.0,
@@ -595,6 +631,90 @@ class UrllibTransport:
             urllib.request.HTTPCookieProcessor(self.cookie_jar),
         )
         self.timeout = timeout
+        self._ssl_context = ssl_context
+        self._use_system_proxy = bool(use_system_proxy)
+        self._conn_lock = threading.RLock()
+        self._pool: Dict[Tuple[str, str, int], http.client.HTTPConnection] = {}
+        self.connections_created = 0
+        self.requests_reused = 0
+
+    def _should_use_opener(self, scheme: str, host: str, port: Optional[int]) -> bool:
+        if not self._use_system_proxy:
+            return False
+        proxies = getattr(self.proxy_handler, "proxies", None) or {}
+        if scheme not in proxies and "all" not in proxies:
+            return False
+        netloc = f"[{host}]" if ":" in host else host
+        if port is not None:
+            netloc = f"{netloc}:{port}"
+        try:
+            return not urllib.request.proxy_bypass(netloc)
+        except OSError:
+            return True
+
+    def _new_connection(
+        self, scheme: str, host: str, port: int, timeout: float,
+    ) -> http.client.HTTPConnection:
+        if scheme == "https":
+            return http.client.HTTPSConnection(
+                host, port, timeout=timeout, context=self._ssl_context,
+            )
+        return http.client.HTTPConnection(host, port, timeout=timeout)
+
+    def _drop_conn(
+        self, key: Tuple[str, str, int], conn: Optional[http.client.HTTPConnection],
+    ) -> None:
+        if self._pool.get(key) is conn:
+            self._pool.pop(key, None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - best-effort socket cleanup
+                pass
+
+    @staticmethod
+    def _is_socket_readable_eof(sock: Any) -> bool:
+        """Detect an already-closed idle socket strictly pre-send via non-blocking select."""
+        if sock is None:
+            return False
+        try:
+            fd = sock.fileno()
+        except Exception:  # noqa: BLE001
+            return False
+        if not isinstance(fd, int) or fd < 0:
+            return False
+        try:
+            readable, _, _ = select.select([sock], [], [], 0.0)
+            return bool(readable)
+        except (OSError, ValueError, TypeError):
+            return False
+
+    def close(self) -> None:
+        """Close all pooled keep-alive connections."""
+        with self._conn_lock:
+            for conn in list(self._pool.values()):
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            self._pool.clear()
+
+    def _request_via_opener(
+        self,
+        method: str,
+        url: str,
+        headers: Optional[Dict[str, str]],
+        data: Optional[bytes],
+        req_timeout: float,
+    ) -> Tuple[int, bytes]:
+        req = urllib.request.Request(url, method=method, data=data)
+        for key, value in (headers or {}).items():
+            req.add_header(key, value)
+        try:
+            response = self.opener.open(req, timeout=req_timeout)
+            return int(response.getcode() or 200), response.read()
+        except urllib.error.HTTPError as exc:
+            return int(exc.code), exc.read()
 
     def request(
         self,
@@ -609,14 +729,97 @@ class UrllibTransport:
         HTTP error statuses are returned rather than raised: the controller
         frequently answers 4xx/5xx with a useful JSON ``errorCode`` payload.
         """
-        req = urllib.request.Request(url, method=method, data=data)
-        for key, value in (headers or {}).items():
-            req.add_header(key, value)
-        try:
-            response = self.opener.open(req, timeout=timeout or self.timeout)
-            return int(response.getcode() or 200), response.read()
-        except urllib.error.HTTPError as exc:
-            return int(exc.code), exc.read()
+        req_timeout = timeout or self.timeout
+        parts = urllib.parse.urlsplit(url)
+        scheme = parts.scheme.lower()
+        host = parts.hostname or ""
+        if scheme not in ("http", "https") or not host or self._should_use_opener(scheme, host, parts.port):
+            return self._request_via_opener(method, url, headers, data, req_timeout)
+
+        port = parts.port or (443 if scheme == "https" else 80)
+        target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+        key = (scheme, host, port)
+        method_upper = method.upper()
+        idempotent = method_upper in ("GET", "HEAD", "OPTIONS")
+
+        with self._conn_lock:
+            for attempt in range(2):
+                conn = self._pool.get(key)
+                reused = conn is not None
+                if conn is not None and self._is_socket_readable_eof(getattr(conn, "sock", None)):
+                    # Idle keep-alive socket already closed by peer; recycle strictly pre-send.
+                    self._drop_conn(key, conn)
+                    conn = None
+                    reused = False
+                if conn is None:
+                    conn = self._new_connection(scheme, host, port, req_timeout)
+                    self._pool[key] = conn
+                    self.connections_created += 1
+                else:
+                    conn.timeout = req_timeout
+
+                # Pre-send connect step: safe to reopen once on failure for any method.
+                try:
+                    if getattr(conn, "sock", None) is None:
+                        conn.connect()
+                except (
+                    http.client.HTTPException,
+                    ConnectionResetError,
+                    BrokenPipeError,
+                    OSError,
+                ):
+                    self._drop_conn(key, conn)
+                    if reused and attempt == 0:
+                        continue
+                    raise
+
+                cookie_req = urllib.request.Request(url, method=method_upper)
+                self.cookie_jar.add_cookie_header(cookie_req)
+                send_headers: Dict[str, str] = dict(headers or {})
+                header_lower = {k.lower() for k in send_headers}
+                if "connection" not in header_lower:
+                    send_headers["Connection"] = "keep-alive"
+                for ck, cv in cookie_req.header_items():
+                    if ck.lower() not in header_lower:
+                        send_headers[ck] = cv
+
+                try:
+                    conn.request(method_upper, target, body=data, headers=send_headers)
+                    resp = conn.getresponse()
+                    raw_body = resp.read()
+                except (
+                    http.client.RemoteDisconnected,
+                    http.client.BadStatusLine,
+                    ConnectionResetError,
+                    BrokenPipeError,
+                    ssl.SSLEOFError,
+                ) as exc:
+                    self._drop_conn(key, conn)
+                    if idempotent and attempt == 0:
+                        continue
+                    if not idempotent:
+                        raise OmadaError(
+                            f"connection closed after sending non-idempotent {method_upper} {target}: {exc}",
+                            hint="verify controller state before retrying; write was not replayed automatically",
+                            endpoint=target,
+                        ) from None
+                    raise
+                except (http.client.HTTPException, OSError):
+                    self._drop_conn(key, conn)
+                    raise
+
+                if reused:
+                    self.requests_reused += 1
+                headers_obj = getattr(resp, "headers", None)
+                if headers_obj is None:
+                    headers_obj = getattr(resp, "msg", None)
+                if headers_obj is not None:
+                    self.cookie_jar.extract_cookies(_CookieResponseAdapter(headers_obj), cookie_req)
+                if getattr(resp, "will_close", False):
+                    self._drop_conn(key, conn)
+                return int(resp.status), raw_body
+
+        raise RuntimeError("unreachable retry exhaustion in UrllibTransport.request")
 
 
 def build_ssl_context(config: Config) -> ssl.SSLContext:
@@ -715,11 +918,34 @@ class OmadaClient:
         self._last_write_at: Optional[float] = None
         self._snapshot_seq = 0
         self._auth_in_progress = False
+        self._cache: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None
+        self._cache_depth: int = 0
+        self._cache_bypass_depth: int = 0
         self.token: Optional[str] = None
         self.controller_id: Optional[str] = None
         self.site: Optional[SiteInfo] = None
         self.auth_info: Optional[AuthInfo] = None
         self.request_count = 0
+
+    @contextlib.contextmanager
+    def scoped_cache(self):
+        """Memoize GET API calls within one composite tool invocation.
+
+        Caches deep-copied responses in memory only until the outermost scope
+        exits. Never reads cached data during mutating operations or read-back
+        verification inside :meth:`write`.
+        """
+        with self._lock:
+            if self._cache_depth == 0:
+                self._cache = {}
+            self._cache_depth += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._cache_depth = max(0, self._cache_depth - 1)
+                if self._cache_depth == 0:
+                    self._cache = None
 
     # -- infrastructure -------------------------------------------------------
 
@@ -961,6 +1187,7 @@ class OmadaClient:
         require_auth: bool = True,
         _retry: bool = True,
         _burst: int = 0,
+        use_cache: bool = True,
     ) -> Dict[str, Any]:
         """Call ``/{omadacId}/api/v2/{endpoint}`` and return the raw JSON envelope.
 
@@ -973,6 +1200,26 @@ class OmadaClient:
             self.authenticate()
 
         endpoint = endpoint.lstrip("/")
+        method_upper = method.upper()
+        cache_key = (self.controller_id or "", endpoint)
+        if (
+            use_cache
+            and method_upper == "GET"
+            and data is None
+            and require_auth
+            and _retry
+            and _burst == 0
+        ):
+            with self._lock:
+                if self._cache is not None and self._cache_bypass_depth == 0:
+                    cached = self._cache.get(cache_key)
+                    if cached is not None:
+                        return copy.deepcopy(cached)
+        elif method_upper != "GET":
+            with self._lock:
+                if self._cache is not None:
+                    self._cache.clear()
+
         separator = "&" if "?" in endpoint else "?"
         url = (f"{self.config.base_url}/{self.controller_id}/api/v2/"
                f"{endpoint}{separator}token={self.token}")
@@ -981,7 +1228,6 @@ class OmadaClient:
 
         status, raw = self._raw(method, url, headers=headers, data=body)
 
-        method_upper = method.upper()
         if self._looks_like_html(raw):
             # 200 + SPA shell == the server-side API session is gone.
             if not _retry:
@@ -1049,6 +1295,10 @@ class OmadaClient:
                             _burst=_burst + 1)
 
         payload["_httpStatus"] = status
+        if use_cache and method_upper == "GET" and data is None and code in (0, None):
+            with self._lock:
+                if self._cache is not None and self._cache_bypass_depth == 0:
+                    self._cache[cache_key] = copy.deepcopy(payload)
         return payload
 
     def api_result(self, endpoint: str, method: str = "GET",
@@ -1254,6 +1504,44 @@ class OmadaClient:
         eff_fields = fields_changed if fields_changed is not None else sorted((expect_keys or {}).keys())
 
         with self._lock:
+            if self._cache is not None:
+                self._cache.clear()
+            self._cache_bypass_depth += 1
+            try:
+                return self._write_locked(
+                    endpoint=endpoint,
+                    method_upper=method_upper,
+                    data=data,
+                    expect_keys=expect_keys,
+                    eff_tool=eff_tool,
+                    eff_target=eff_target,
+                    eff_fields=eff_fields,
+                    before=before,
+                    snapshot_payload=snapshot_payload,
+                    read_back=read_back,
+                    verify_fn=verify_fn,
+                    reauth_prepare=reauth_prepare,
+                )
+            finally:
+                self._cache_bypass_depth = max(0, self._cache_bypass_depth - 1)
+
+    def _write_locked(
+        self,
+        *,
+        endpoint: str,
+        method_upper: str,
+        data: Optional[Dict[str, Any]],
+        expect_keys: Optional[Mapping[str, Any]],
+        eff_tool: str,
+        eff_target: str,
+        eff_fields: Any,
+        before: Any,
+        snapshot_payload: Any,
+        read_back: Optional[Callable[[], Any]],
+        verify_fn: Optional[Callable[[Any, Any], Tuple[bool, Optional[str]]]],
+        reauth_prepare: Optional[Callable[[], Tuple[bool, Optional[Dict[str, Any]], Any]]],
+    ) -> Dict[str, Any]:
+        with self._lock:
             snap_data = before if snapshot_payload is None else snapshot_payload
             snapshot_id = self._save_snapshot(eff_tool, eff_target, snap_data)
 
@@ -1436,3 +1724,6 @@ class OmadaClient:
 
     def close(self) -> None:
         self.token = None
+        closer = getattr(self._transport, "close", None)
+        if callable(closer):
+            closer()

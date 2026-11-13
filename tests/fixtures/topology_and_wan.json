@@ -1,0 +1,2153 @@
+{
+  "topology_v2": {
+    "topologyArray": [
+      {
+        "type": "gateway",
+        "name": "00-11-22-00-00-04",
+        "mac": "00-11-22-00-00-04",
+        "macList": [
+          "00-11-22-00-00-0E",
+          "00-11-22-00-00-04",
+          "00-11-22-00-00-0F"
+        ],
+        "model": "ER7206",
+        "modelVersion": "2.20",
+        "deviceSeriesType": 0,
+        "compatible": 0,
+        "ecspFirstVersion": 2,
+        "showModel": "ER7206 v2.20",
+        "ip": "172.16.1.1",
+        "status": 14,
+        "statusCategory": 1,
+        "devTxRate": 8192,
+        "devRxRate": 16384,
+        "clientCount": 0,
+        "mixClientCount": 0,
+        "realIpcCount": 0,
+        "realMixClientCount": 0,
+        "successors": [
+          {
+            "type": "switch",
+            "name": "00-11-22-00-00-01",
+            "mac": "00-11-22-00-00-01",
+            "model": "ES220GMP",
+            "modelVersion": "1.0",
+            "deviceSeriesType": 0,
+            "compatible": 0,
+            "ecspFirstVersion": 2,
+            "showModel": "ES220GMP v1.0",
+            "ip": "172.16.1.2",
+            "status": 14,
+            "statusCategory": 1,
+            "devTxRate": 25664,
+            "devRxRate": 14176,
+            "clientCount": 8,
+            "mixClientCount": 8,
+            "realIpcCount": 1,
+            "realMixClientCount": 8,
+            "successors": [
+              {
+                "type": "omada controller",
+                "name": "Omada Controller",
+                "mac": "00-11-22-00-00-0C",
+                "clientType": "Omada Controller",
+                "switchUpLink": {
+                  "upLinkPort": {
+                    "port": 15
+                  },
+                  "linkSpeed": 3,
+                  "duplex": 2
+                },
+                "wiredUpInfo": {
+                  "upLinkPort": {
+                    "port": "15"
+                  },
+                  "linkSpeed": 3,
+                  "duplex": 2
+                }
+              },
+              {
+                "type": "ap",
+                "name": "00-11-22-00-00-02",
+                "mac": "00-11-22-00-00-02",
+                "model": "EAP725-Wall",
+                "modelVersion": "1.0",
+                "deviceSeriesType": 0,
+                "compatible": 0,
+                "ecspFirstVersion": 2,
+                "showModel": "EAP725-Wall(EU) v1.0",
+                "ip": "172.16.1.3",
+                "ipv6List": [],
+                "status": 14,
+                "statusCategory": 1,
+                "devTxRate": 888,
+                "devRxRate": 3144,
+                "clientCount": 1,
+                "mixClientCount": 1,
+                "realIpcCount": 0,
+                "realMixClientCount": 1,
+                "successors": [],
+                "healthScore": -1,
+                "clientHealth": {
+                  "good": 1,
+                  "fair": 0,
+                  "poor": 0,
+                  "noData": 0
+                },
+                "disconnected": false,
+                "wireUpLink": {
+                  "upLinkPort": {
+                    "port": 3
+                  },
+                  "linkSpeed": 3,
+                  "duplex": 2
+                },
+                "wiredUpInfo": {
+                  "upLinkPort": {
+                    "port": "3",
+                    "poePower": 6,
+                    "poePowerDecimal": 6.6
+                  },
+                  "linkSpeed": 3,
+                  "duplex": 2,
+                  "rxDropPkts": 0,
+                  "txDropPkts": 0,
+                  "rxErrPkts": 0,
+                  "txErrPkts": 0
+                },
+                "rdMode2g": "b/g/n/ax/be mixed",
+                "channel2g": 11,
+                "rdMode5g": "a/n/ac/ax/be mixed",
+                "channel5g": 100,
+                "support5g2": false,
+                "supportLanPort": true,
+                "allVigiSuccessor": [],
+                "vigiSuccessor": []
+              },
+              {
+                "type": "ap",
+                "name": "00-11-22-00-00-03",
+                "mac": "00-11-22-00-00-03",
+                "model": "EAP725-Wall",
+                "modelVersion": "1.0",
+                "deviceSeriesType": 0,
+                "compatible": 0,
+                "ecspFirstVersion": 2,
+                "showModel": "EAP725-Wall(EU) v1.0",
+                "ip": "172.16.1.4",
+                "ipv6List": [],
+                "status": 14,
+                "statusCategory": 1,
+                "devTxRate": 2112,
+                "devRxRate": 3472,
+                "clientCount": 5,
+                "mixClientCount": 5,
+                "realIpcCount": 0,
+                "realMixClientCount": 5,
+                "successors": [],
+                "healthScore": -1,
+                "clientHealth": {
+                  "good": 3,
+                  "fair": 2,
+                  "poor": 0,
+                  "noData": 0
+                },
+                "disconnected": false,
+                "wireUpLink": {
+                  "upLinkPort": {
+                    "port": 9
+                  },
+                  "linkSpeed": 3,
+                  "duplex": 2
+                },
+                "wiredUpInfo": {
+                  "upLinkPort": {
+                    "port": "9",
+                    "poePower": 6,
+                    "poePowerDecimal": 6.3
+                  },
+                  "linkSpeed": 3,
+                  "duplex": 2,
+                  "rxDropPkts": 0,
+                  "txDropPkts": 0,
+                  "rxErrPkts": 0,
+                  "txErrPkts": 0
+                },
+                "rdMode2g": "b/g/n/ax/be mixed",
+                "channel2g": 6,
+                "rdMode5g": "a/n/ac/ax/be mixed",
+                "channel5g": 100,
+                "support5g2": false,
+                "supportLanPort": true,
+                "allVigiSuccessor": [],
+                "vigiSuccessor": []
+              }
+            ],
+            "healthScore": -1,
+            "clientHealth": {
+              "good": 0,
+              "fair": 0,
+              "poor": 0,
+              "noData": 8
+            },
+            "disconnected": false,
+            "stackGroup": false,
+            "stackMacs": [],
+            "upperPort": {
+              "port": {
+                "port": 17
+              },
+              "upLinkPort": {
+                "port": 3,
+                "name": "WAN/LAN3"
+              },
+              "linkSpeed": 3,
+              "duplex": 2
+            },
+            "wiredUpInfo": {
+              "port": {
+                "port": "17"
+              },
+              "upLinkPort": {
+                "port": "3",
+                "name": "LAN3"
+              },
+              "linkSpeed": 3,
+              "duplex": 2
+            },
+            "allVigiSuccessor": [],
+            "vigiSuccessor": []
+          }
+        ],
+        "healthScore": -1,
+        "disconnected": false,
+        "wanPorts": [
+          {
+            "port": "1",
+            "name": "WAN1",
+            "status": 0,
+            "internetState": 0,
+            "onlineDetection": 0,
+            "linkSpeed": 1,
+            "duplex": 1,
+            "healthLevel": 3,
+            "wireless": false
+          },
+          {
+            "port": "2",
+            "name": "WAN2",
+            "status": 1,
+            "internetState": 1,
+            "onlineDetection": 1,
+            "linkSpeed": 2,
+            "duplex": 2,
+            "healthLevel": 0,
+            "wireless": false
+          }
+        ],
+        "lanPorts": [
+          {
+            "port": "3",
+            "name": "LAN3",
+            "linkSpeed": 3,
+            "duplex": 2
+          },
+          {
+            "port": "4",
+            "name": "LAN4",
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "port": "5",
+            "name": "LAN5",
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "port": "6",
+            "name": "LAN6",
+            "linkSpeed": 1,
+            "duplex": 1
+          }
+        ],
+        "allVigiSuccessor": [],
+        "vigiSuccessor": []
+      }
+    ],
+    "lastUpdateTime": 1794570026588
+  },
+  "wan_networks": {
+    "omadacId": "00000000000000000000000000000001",
+    "siteId": "site1",
+    "enable": true,
+    "osgPortInfo": {
+      "realOsgModel": "ER7206 v2.20",
+      "preOsgModel": 20,
+      "wanLanPortSettings": [
+        {
+          "portUuid": "7_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "portName": "USB Modem",
+          "type": 4,
+          "mode": -1,
+          "supportVpn": false,
+          "supportIptv": false,
+          "closable": true,
+          "supportInternetVlan": false,
+          "status": 1
+        },
+        {
+          "portUuid": "1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "portName": "SFP WAN/LAN1",
+          "type": 1,
+          "mode": 0,
+          "supportVpn": true,
+          "supportIptv": true,
+          "closable": true,
+          "supportInternetVlan": true,
+          "wanIpv6Comptent": 1,
+          "supportQosTagEnable": true,
+          "status": 1
+        },
+        {
+          "portUuid": "2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "portName": "WAN2",
+          "type": 3,
+          "mode": 0,
+          "supportVpn": true,
+          "supportIptv": false,
+          "closable": false,
+          "supportInternetVlan": true,
+          "wanIpv6Comptent": 1,
+          "supportQosTagEnable": true,
+          "status": 1
+        },
+        {
+          "portUuid": "3_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "portName": "WAN/LAN3",
+          "type": 1,
+          "mode": 1,
+          "lanNetworkNames": [
+            "Management",
+            "Services",
+            "Main",
+            "IoT & Security",
+            "Kids",
+            "Guest"
+          ],
+          "supportVpn": true,
+          "supportIptv": true,
+          "closable": true,
+          "supportInternetVlan": true,
+          "wanIpv6Comptent": 1,
+          "supportQosTagEnable": true,
+          "status": 1
+        },
+        {
+          "portUuid": "4_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "portName": "WAN/LAN4",
+          "type": 1,
+          "mode": 1,
+          "lanNetworkNames": [
+            "Management",
+            "Services",
+            "Main",
+            "IoT & Security",
+            "Kids",
+            "Guest"
+          ],
+          "supportVpn": true,
+          "supportIptv": true,
+          "closable": true,
+          "supportInternetVlan": true,
+          "wanIpv6Comptent": 1,
+          "supportQosTagEnable": true,
+          "status": 1
+        },
+        {
+          "portUuid": "5_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "portName": "WAN/LAN5",
+          "type": 1,
+          "mode": 1,
+          "lanNetworkNames": [
+            "Management",
+            "Services",
+            "Main",
+            "IoT & Security",
+            "Kids",
+            "Guest"
+          ],
+          "supportVpn": true,
+          "supportIptv": true,
+          "closable": true,
+          "supportInternetVlan": true,
+          "wanIpv6Comptent": 1,
+          "supportQosTagEnable": true,
+          "status": 1
+        },
+        {
+          "portUuid": "6_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "portName": "WAN/LAN6",
+          "type": 1,
+          "mode": 1,
+          "lanNetworkNames": [
+            "Management",
+            "Services",
+            "Main",
+            "IoT & Security",
+            "Kids",
+            "Guest"
+          ],
+          "supportVpn": true,
+          "supportIptv": true,
+          "closable": true,
+          "supportInternetVlan": true,
+          "wanIpv6Comptent": 1,
+          "supportQosTagEnable": true,
+          "status": 1
+        }
+      ]
+    },
+    "portUuids": [
+      "1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "interval": 10,
+    "unit": 1,
+    "supportCustomInterval": true,
+    "supportDiscreteWan": true,
+    "supportReduceUsbRfi": false,
+    "supportAllWan": false,
+    "supportMaxWanNum": 7,
+    "supportIpv6NonAddress": true,
+    "supportMssClamping": true,
+    "supportPppoeMru": true,
+    "supportWanMultipleIp": true,
+    "supportLte": false,
+    "supportDualSim": 0,
+    "supportDsl": false,
+    "supportVirtualWan": true,
+    "supportNetworkIsolation": true,
+    "supportSpeedTestSchedule": true,
+    "supportDhcpOptions": true,
+    "supportUsbDhcpOptions": true,
+    "supportDsLite": true,
+    "supportMapE": true,
+    "supportTimingMode": true,
+    "wanPortSettings": [
+      {
+        "portUuid": "1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "portName": "SFP WAN/LAN1",
+        "wanPortIpv4Setting": {
+          "portUuid": "1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "proto": "dhcp",
+          "protoType": 1,
+          "vlanId": 0,
+          "qosTag": 0,
+          "supportQosTagEnable": true,
+          "supportInternetVlan": true,
+          "supportDslMer": false,
+          "qosTagEnable": false,
+          "vlanPriority": 0,
+          "ipv4Dhcp": {
+            "unicast": "off",
+            "mtu": 1500
+          }
+        },
+        "wanPortIpv6Setting": {
+          "portUuid": "1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "enable": 0
+        },
+        "wanIpv6Comptent": 1,
+        "wanPortMacSetting": {
+          "portUuid": "1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "method": "recover",
+          "mac": "00-11-22-00-00-0F"
+        }
+      },
+      {
+        "portUuid": "2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "portName": "WAN2",
+        "wanPortIpv4Setting": {
+          "portUuid": "2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "proto": "dhcp",
+          "protoType": 1,
+          "vlanId": 0,
+          "qosTag": 0,
+          "supportQosTagEnable": true,
+          "supportInternetVlan": true,
+          "supportDslMer": false,
+          "qosTagEnable": false,
+          "vlanPriority": 0,
+          "ipv4Dhcp": {
+            "unicast": "off",
+            "mtu": 1500
+          }
+        },
+        "wanPortIpv6Setting": {
+          "portUuid": "2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "enable": 0
+        },
+        "wanIpv6Comptent": 1,
+        "wanPortMacSetting": {
+          "portUuid": "2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "method": "recover",
+          "mac": "00-11-22-00-00-0E"
+        }
+      }
+    ],
+    "wanLoadBalance": {
+      "weight": "1,1",
+      "appOptRouting": true,
+      "linkBackup": false,
+      "primaryWan": [],
+      "method": "backup",
+      "mode": 0
+    },
+    "gatewayMac": "00-11-22-00-00-04",
+    "enableModified": true,
+    "lteIntervalTips": false,
+    "portOnlineStatus": {
+      "wanOnlineStatus": [
+        {
+          "portUuid": "1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "onlineDetection": 0
+        },
+        {
+          "portUuid": "2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "onlineDetection": 1
+        }
+      ]
+    }
+  },
+  "wanlanstatus": {
+    "portName": {
+      "6_f39958b8011b40a7b39bdfb0150d4d2b": "WAN/LAN6",
+      "4_ad92201c0dd04d2c974531bacee83092": "WAN/LAN4",
+      "5_f40bae2ce59c413da49f3d7ba584e6bc": "WAN/LAN5",
+      "3_dcf9d7e5e04c4b699cd6615d660ec7cf": "WAN/LAN3"
+    },
+    "networkComptent": 1,
+    "adoptedGateway": true,
+    "supportIpv6": 1,
+    "wanList": [
+      {
+        "portUuid": "1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "portName": "SFP WAN/LAN1",
+        "enable": 0,
+        "prefix": "",
+        "type": 1
+      },
+      {
+        "portUuid": "2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "portName": "WAN2",
+        "enable": 0,
+        "prefix": "",
+        "type": 3
+      }
+    ],
+    "iptvPorts": [],
+    "osgAddInAdvance": false,
+    "wirelessRouter": false,
+    "hasGateway": true
+  },
+  "portstatedetails": {
+    "portInfos": [
+      {
+        "port": 1,
+        "portName": "SFP WAN/LAN1",
+        "portUuid": "1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maxBandwidth": 1000,
+        "rxRate": 0,
+        "txRate": 0,
+        "ip": "0.0.0.0"
+      },
+      {
+        "port": 2,
+        "portName": "WAN2",
+        "portUuid": "2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "maxBandwidth": 1000,
+        "rxRate": 0,
+        "txRate": 0,
+        "ip": "192.168.8.100"
+      }
+    ],
+    "supportSpeedTest": false
+  },
+  "gateway_detail": {
+    "type": "gateway",
+    "mac": "00-11-22-00-00-04",
+    "name": "00-11-22-00-00-04",
+    "model": "ER7206",
+    "modelVersion": "2.20",
+    "compoundModel": "ER7206 v2.20",
+    "showModel": "ER7206 v2.20",
+    "firmwareVersion": "2.3.2 Build 20260509 Rel.21080",
+    "version": "2.3.2",
+    "hwVersion": "ER7206 v2.20",
+    "status": 14,
+    "statusCategory": 1,
+    "site": "site1",
+    "siteName": "Default",
+    "omadacId": "00000000000000000000000000000001",
+    "compatible": 0,
+    "category": "gateway",
+    "location": {},
+    "addedInAdvanced": false,
+    "customId": "00000000000000000000000000000001",
+    "remember": false,
+    "rememberDevice": 2,
+    "boundSiteTemplate": false,
+    "deviceSeriesType": 0,
+    "ecspFirstVersion": 3,
+    "devCap": {
+      "supportConfigSync": true,
+      "needFullSync": true,
+      "supportRunningConfig": false,
+      "supportClientPortInfo": false,
+      "supportDhcpClient": true,
+      "supportArpTableGet": true
+    },
+    "portNum": 7,
+    "ledSetting": 2,
+    "snmpSeting": {
+      "location": "",
+      "contact": ""
+    },
+    "iptvSetting": {
+      "igmpEnable": true,
+      "igmpVersion": "2"
+    },
+    "supportHwOffload": true,
+    "supportPoe": false,
+    "hwOffloadEnable": true,
+    "lldpEnable": true,
+    "lldpSetting": 1,
+    "echoServer": "0.0.0.0",
+    "ip": "172.16.1.1",
+    "publicIp": "172.16.1.1",
+    "uptime": "14day(s) 2h 24m 48s",
+    "uptimeLong": 1218288,
+    "cpuUtil": 0,
+    "memUtil": 19,
+    "lastSeen": 1794570095771,
+    "portStats": [
+      {
+        "port": 7,
+        "name": "USB Modem",
+        "type": 4,
+        "physicalType": -1,
+        "mode": -1,
+        "status": 0,
+        "rx": 0,
+        "rxPkt": 0,
+        "rxPktRate": 0,
+        "rxRate": 0,
+        "tx": 0,
+        "txPkt": 0,
+        "txPktRate": 0,
+        "txRate": 0,
+        "mirroredPorts": []
+      },
+      {
+        "port": 1,
+        "name": "SFP WAN/LAN1",
+        "mac": "00-11-22-00-00-0F",
+        "type": 1,
+        "physicalType": 1,
+        "mode": 0,
+        "poe": false,
+        "status": 0,
+        "internetState": 0,
+        "ip": "0.0.0.0",
+        "onlineDetection": 0,
+        "speed": 1,
+        "duplex": 1,
+        "rx": 0,
+        "rxPkt": 0,
+        "rxPktRate": 0,
+        "rxRate": 0,
+        "tx": 0,
+        "txPkt": 0,
+        "txPktRate": 0,
+        "txRate": 0,
+        "proto": "dhcp",
+        "wanIpv6Comptent": 1,
+        "wanPortIpv6Config": {
+          "enable": 0,
+          "addr": "",
+          "gateway": "",
+          "priDns": "",
+          "sndDns": "",
+          "internetState": 0
+        },
+        "wanPortIpv4Config": {
+          "ip": "0.0.0.0",
+          "netmask": "0.0.0.0",
+          "gateway": "0.0.0.0",
+          "gateway2": "0.0.0.0",
+          "priDns": "0.0.0.0",
+          "sndDns": "0.0.0.0",
+          "priDns2": "0.0.0.0",
+          "sndDns2": "0.0.0.0"
+        },
+        "mirroredPorts": [],
+        "loss": 0.0,
+        "rxErrorPkts": 0,
+        "txErrorPkts": 0
+      },
+      {
+        "port": 2,
+        "name": "WAN2",
+        "mac": "00-11-22-00-00-0E",
+        "type": 3,
+        "physicalType": 0,
+        "mode": 0,
+        "poe": false,
+        "status": 1,
+        "internetState": 1,
+        "ip": "192.168.8.100",
+        "onlineDetection": 1,
+        "speed": 2,
+        "duplex": 2,
+        "rx": 9981543508,
+        "rxPkt": 13886693,
+        "rxPktRate": 7,
+        "rxRate": 2,
+        "tx": 5249044488,
+        "txPkt": 12738693,
+        "txPktRate": 7,
+        "txRate": 1,
+        "proto": "dhcp",
+        "wanIpv6Comptent": 1,
+        "wanPortIpv6Config": {
+          "enable": 0,
+          "addr": "",
+          "gateway": "",
+          "priDns": "",
+          "sndDns": "",
+          "internetState": 0
+        },
+        "wanPortIpv4Config": {
+          "ip": "192.168.8.100",
+          "netmask": "255.255.255.0",
+          "gateway": "192.168.8.1",
+          "gateway2": "0.0.0.0",
+          "priDns": "192.168.8.1",
+          "sndDns": "0.0.0.0",
+          "priDns2": "0.0.0.0",
+          "sndDns2": "0.0.0.0"
+        },
+        "mirroredPorts": [],
+        "healthLevel": 0,
+        "latency": 96,
+        "loss": 0.0,
+        "rxErrorPkts": 0,
+        "txErrorPkts": 0
+      },
+      {
+        "port": 3,
+        "name": "WAN/LAN3",
+        "type": 1,
+        "physicalType": 0,
+        "mode": 1,
+        "poe": false,
+        "status": 1,
+        "internetState": 0,
+        "ip": "172.16.1.1",
+        "speed": 3,
+        "duplex": 2,
+        "rx": 88257391774,
+        "rxPkt": 80688070,
+        "rxPktRate": 16,
+        "rxRate": 3,
+        "tx": 92691138401,
+        "txPkt": 76885055,
+        "txPktRate": 12,
+        "txRate": 4,
+        "wanIpv6Comptent": 1,
+        "mirroredPorts": [],
+        "loss": 0.0,
+        "rxErrorPkts": 0,
+        "txErrorPkts": 0
+      },
+      {
+        "port": 4,
+        "name": "WAN/LAN4",
+        "type": 1,
+        "physicalType": 0,
+        "mode": 1,
+        "poe": false,
+        "status": 0,
+        "internetState": 0,
+        "ip": "172.16.1.1",
+        "speed": 1,
+        "duplex": 1,
+        "rx": 0,
+        "rxPkt": 0,
+        "rxPktRate": 0,
+        "rxRate": 0,
+        "tx": 0,
+        "txPkt": 0,
+        "txPktRate": 0,
+        "txRate": 0,
+        "wanIpv6Comptent": 1,
+        "mirroredPorts": [],
+        "loss": 0.0,
+        "rxErrorPkts": 0,
+        "txErrorPkts": 0
+      },
+      {
+        "port": 5,
+        "name": "WAN/LAN5",
+        "type": 1,
+        "physicalType": 0,
+        "mode": 1,
+        "poe": false,
+        "status": 0,
+        "internetState": 0,
+        "ip": "172.16.1.1",
+        "speed": 1,
+        "duplex": 1,
+        "rx": 0,
+        "rxPkt": 0,
+        "rxPktRate": 0,
+        "rxRate": 0,
+        "tx": 0,
+        "txPkt": 0,
+        "txPktRate": 0,
+        "txRate": 0,
+        "wanIpv6Comptent": 1,
+        "mirroredPorts": [],
+        "loss": 0.0,
+        "rxErrorPkts": 0,
+        "txErrorPkts": 0
+      },
+      {
+        "port": 6,
+        "name": "WAN/LAN6",
+        "type": 1,
+        "physicalType": 0,
+        "mode": 1,
+        "poe": false,
+        "status": 0,
+        "internetState": 0,
+        "ip": "172.16.1.1",
+        "speed": 1,
+        "duplex": 1,
+        "rx": 0,
+        "rxPkt": 0,
+        "rxPktRate": 0,
+        "rxRate": 0,
+        "tx": 0,
+        "txPkt": 0,
+        "txPktRate": 0,
+        "txRate": 0,
+        "wanIpv6Comptent": 1,
+        "mirroredPorts": [],
+        "loss": 0.0,
+        "rxErrorPkts": 0,
+        "txErrorPkts": 0
+      }
+    ],
+    "virtualWanStats": [],
+    "supportLanClientStats": true,
+    "supportPortForwardingStatus": true,
+    "supportSessionLimitStatus": true,
+    "supportChannelUtilizationStatus": true,
+    "supportDroppedPacketsStatus": true,
+    "supportRetriedPacketsStatus": true,
+    "supportBandScan": true,
+    "supportNetworkSearch": true,
+    "lanClientStats": [
+      {
+        "lanName": "Management",
+        "vlan": 1,
+        "ip": "172.16.1.1",
+        "rx": 836281282467,
+        "tx": 721076532016,
+        "clientNum": 0,
+        "lanPortIpv6Config": {
+          "addr": "fe80::ceba:bdff:feaf:dd78"
+        }
+      },
+      {
+        "lanName": "Services",
+        "vlan": 5,
+        "ip": "172.16.5.1",
+        "rx": 2134118635466,
+        "tx": 1230214057515,
+        "clientNum": 0,
+        "lanPortIpv6Config": {
+          "addr": "fe80::ceba:bdff:feaf:dd78"
+        }
+      },
+      {
+        "lanName": "Main",
+        "vlan": 10,
+        "ip": "172.16.10.1",
+        "rx": 5151246295,
+        "tx": 3530402723,
+        "clientNum": 0,
+        "lanPortIpv6Config": {
+          "addr": "fe80::ceba:bdff:feaf:dd78"
+        }
+      },
+      {
+        "lanName": "IoT & Security",
+        "vlan": 20,
+        "ip": "172.16.20.1",
+        "rx": 104592042569,
+        "tx": 119642495851,
+        "clientNum": 1,
+        "lanPortIpv6Config": {
+          "addr": "fe80::ceba:bdff:feaf:dd78"
+        }
+      },
+      {
+        "lanName": "Kids",
+        "vlan": 40,
+        "ip": "172.16.40.1",
+        "rx": 0,
+        "tx": 0,
+        "clientNum": 0,
+        "lanPortIpv6Config": {
+          "addr": "fe80::ceba:bdff:feaf:dd78"
+        }
+      },
+      {
+        "lanName": "Guest",
+        "vlan": 50,
+        "ip": "172.16.50.1",
+        "rx": 0,
+        "tx": 0,
+        "clientNum": 0,
+        "lanPortIpv6Config": {
+          "addr": "fe80::ceba:bdff:feaf:dd78"
+        }
+      }
+    ],
+    "needUpgrade": true,
+    "supportDsl": false,
+    "supportVirtualWan": true,
+    "supportDualSim": 0,
+    "supportBatchEdit": false,
+    "download": 9981543508,
+    "upload": 5249044488,
+    "txRate": 8192,
+    "rxRate": 16384,
+    "networkComptent": 1,
+    "temp": 40,
+    "portConfigs": [
+      {
+        "port": 1,
+        "linkSpeed": 0,
+        "duplex": 0,
+        "portCap": [
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          }
+        ],
+        "supportMirror": true,
+        "mirrorEnable": false,
+        "pvid": 0,
+        "availablePvids": [
+          0
+        ],
+        "availablePvidNames": [
+          {
+            "pvId": 0,
+            "pvName": "Default",
+            "qosTagEnable": false
+          }
+        ],
+        "portStat": {
+          "port": 1,
+          "name": "SFP WAN/LAN1",
+          "mac": "00-11-22-00-00-0F",
+          "type": 1,
+          "physicalType": 1,
+          "mode": 0,
+          "poe": false,
+          "status": 0,
+          "internetState": 0,
+          "ip": "0.0.0.0",
+          "onlineDetection": 0,
+          "speed": 1,
+          "duplex": 1,
+          "rx": 0,
+          "rxPkt": 0,
+          "rxPktRate": 0,
+          "rxRate": 0,
+          "tx": 0,
+          "txPkt": 0,
+          "txPktRate": 0,
+          "txRate": 0,
+          "proto": "dhcp",
+          "wanIpv6Comptent": 1,
+          "wanPortIpv6Config": {
+            "enable": 0,
+            "addr": "",
+            "gateway": "",
+            "priDns": "",
+            "sndDns": "",
+            "internetState": 0
+          },
+          "wanPortIpv4Config": {
+            "ip": "0.0.0.0",
+            "netmask": "0.0.0.0",
+            "gateway": "0.0.0.0",
+            "gateway2": "0.0.0.0",
+            "priDns": "0.0.0.0",
+            "sndDns": "0.0.0.0",
+            "priDns2": "0.0.0.0",
+            "sndDns2": "0.0.0.0"
+          },
+          "mirroredPorts": [],
+          "loss": 0.0,
+          "rxErrorPkts": 0,
+          "txErrorPkts": 0
+        },
+        "flowControl": false,
+        "supportFlowControl": true,
+        "status": 1,
+        "supportPortControl": true,
+        "supportLoopbackControl": false,
+        "supportPortIsolation": false,
+        "portIsolationEnable": false,
+        "supportBandWidthCtrl": false,
+        "bandWidthCtrlType": 0,
+        "bandCtrl": {
+          "egressEnable": false,
+          "egressLimit": 0,
+          "ingressEnable": false,
+          "ingressLimit": 0
+        },
+        "stormCtrl": {
+          "unknownUnicastEnable": false,
+          "unknownUnicast": 0,
+          "multicastEnable": false,
+          "multicast": 0,
+          "broadcastEnable": false,
+          "broadcast": 0,
+          "action": 0,
+          "recoverTime": 3600
+        }
+      },
+      {
+        "port": 2,
+        "linkSpeed": 0,
+        "duplex": 0,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          }
+        ],
+        "supportMirror": false,
+        "mirrorEnable": false,
+        "pvid": 0,
+        "availablePvids": [
+          0
+        ],
+        "availablePvidNames": [
+          {
+            "pvId": 0,
+            "pvName": "Default",
+            "qosTagEnable": false
+          }
+        ],
+        "portStat": {
+          "port": 2,
+          "name": "WAN2",
+          "mac": "00-11-22-00-00-0E",
+          "type": 3,
+          "physicalType": 0,
+          "mode": 0,
+          "poe": false,
+          "status": 1,
+          "internetState": 1,
+          "ip": "192.168.8.100",
+          "onlineDetection": 1,
+          "speed": 2,
+          "duplex": 2,
+          "rx": 9981543508,
+          "rxPkt": 13886693,
+          "rxPktRate": 7,
+          "rxRate": 2,
+          "tx": 5249044488,
+          "txPkt": 12738693,
+          "txPktRate": 7,
+          "txRate": 1,
+          "proto": "dhcp",
+          "wanIpv6Comptent": 1,
+          "wanPortIpv6Config": {
+            "enable": 0,
+            "addr": "",
+            "gateway": "",
+            "priDns": "",
+            "sndDns": "",
+            "internetState": 0
+          },
+          "wanPortIpv4Config": {
+            "ip": "192.168.8.100",
+            "netmask": "255.255.255.0",
+            "gateway": "192.168.8.1",
+            "gateway2": "0.0.0.0",
+            "priDns": "192.168.8.1",
+            "sndDns": "0.0.0.0",
+            "priDns2": "0.0.0.0",
+            "sndDns2": "0.0.0.0"
+          },
+          "mirroredPorts": [],
+          "healthLevel": 0,
+          "latency": 96,
+          "loss": 0.0,
+          "rxErrorPkts": 0,
+          "txErrorPkts": 0
+        },
+        "flowControl": false,
+        "supportFlowControl": true,
+        "status": 1,
+        "supportPortControl": true,
+        "supportLoopbackControl": false,
+        "supportPortIsolation": false,
+        "portIsolationEnable": false,
+        "supportBandWidthCtrl": false,
+        "bandWidthCtrlType": 0,
+        "bandCtrl": {
+          "egressEnable": false,
+          "egressLimit": 0,
+          "ingressEnable": false,
+          "ingressLimit": 0
+        },
+        "stormCtrl": {
+          "unknownUnicastEnable": false,
+          "unknownUnicast": 0,
+          "multicastEnable": false,
+          "multicast": 0,
+          "broadcastEnable": false,
+          "broadcast": 0,
+          "action": 0,
+          "recoverTime": 3600
+        }
+      },
+      {
+        "port": 3,
+        "linkSpeed": 0,
+        "duplex": 0,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          }
+        ],
+        "supportMirror": true,
+        "mirrorEnable": false,
+        "pvid": 1,
+        "availablePvids": [
+          1,
+          5,
+          10,
+          20,
+          40,
+          50
+        ],
+        "availablePvidNames": [
+          {
+            "pvId": 1,
+            "pvName": "Management"
+          },
+          {
+            "pvId": 5,
+            "pvName": "Services"
+          },
+          {
+            "pvId": 10,
+            "pvName": "Main"
+          },
+          {
+            "pvId": 20,
+            "pvName": "IoT & Security"
+          },
+          {
+            "pvId": 40,
+            "pvName": "Kids"
+          },
+          {
+            "pvId": 50,
+            "pvName": "Guest"
+          }
+        ],
+        "portStat": {
+          "port": 3,
+          "name": "WAN/LAN3",
+          "type": 1,
+          "physicalType": 0,
+          "mode": 1,
+          "poe": false,
+          "status": 1,
+          "internetState": 0,
+          "ip": "172.16.1.1",
+          "speed": 3,
+          "duplex": 2,
+          "rx": 88257391774,
+          "rxPkt": 80688070,
+          "rxPktRate": 16,
+          "rxRate": 3,
+          "tx": 92691138401,
+          "txPkt": 76885055,
+          "txPktRate": 12,
+          "txRate": 4,
+          "wanIpv6Comptent": 1,
+          "mirroredPorts": [],
+          "loss": 0.0,
+          "rxErrorPkts": 0,
+          "txErrorPkts": 0
+        },
+        "flowControl": false,
+        "supportFlowControl": true,
+        "status": 1,
+        "supportPortControl": true,
+        "supportLoopbackControl": false,
+        "supportPortIsolation": false,
+        "portIsolationEnable": false,
+        "supportBandWidthCtrl": false,
+        "bandWidthCtrlType": 0,
+        "bandCtrl": {
+          "egressEnable": false,
+          "egressLimit": 0,
+          "ingressEnable": false,
+          "ingressLimit": 0
+        },
+        "stormCtrl": {
+          "unknownUnicastEnable": false,
+          "unknownUnicast": 0,
+          "multicastEnable": false,
+          "multicast": 0,
+          "broadcastEnable": false,
+          "broadcast": 0,
+          "action": 0,
+          "recoverTime": 3600
+        }
+      },
+      {
+        "port": 4,
+        "linkSpeed": 0,
+        "duplex": 0,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          }
+        ],
+        "supportMirror": true,
+        "mirrorEnable": false,
+        "pvid": 1,
+        "availablePvids": [
+          1,
+          5,
+          10,
+          20,
+          40,
+          50
+        ],
+        "availablePvidNames": [
+          {
+            "pvId": 1,
+            "pvName": "Management"
+          },
+          {
+            "pvId": 5,
+            "pvName": "Services"
+          },
+          {
+            "pvId": 10,
+            "pvName": "Main"
+          },
+          {
+            "pvId": 20,
+            "pvName": "IoT & Security"
+          },
+          {
+            "pvId": 40,
+            "pvName": "Kids"
+          },
+          {
+            "pvId": 50,
+            "pvName": "Guest"
+          }
+        ],
+        "portStat": {
+          "port": 4,
+          "name": "WAN/LAN4",
+          "type": 1,
+          "physicalType": 0,
+          "mode": 1,
+          "poe": false,
+          "status": 0,
+          "internetState": 0,
+          "ip": "172.16.1.1",
+          "speed": 1,
+          "duplex": 1,
+          "rx": 0,
+          "rxPkt": 0,
+          "rxPktRate": 0,
+          "rxRate": 0,
+          "tx": 0,
+          "txPkt": 0,
+          "txPktRate": 0,
+          "txRate": 0,
+          "wanIpv6Comptent": 1,
+          "mirroredPorts": [],
+          "loss": 0.0,
+          "rxErrorPkts": 0,
+          "txErrorPkts": 0
+        },
+        "flowControl": false,
+        "supportFlowControl": true,
+        "status": 1,
+        "supportPortControl": true,
+        "supportLoopbackControl": false,
+        "supportPortIsolation": false,
+        "portIsolationEnable": false,
+        "supportBandWidthCtrl": false,
+        "bandWidthCtrlType": 0,
+        "bandCtrl": {
+          "egressEnable": false,
+          "egressLimit": 0,
+          "ingressEnable": false,
+          "ingressLimit": 0
+        },
+        "stormCtrl": {
+          "unknownUnicastEnable": false,
+          "unknownUnicast": 0,
+          "multicastEnable": false,
+          "multicast": 0,
+          "broadcastEnable": false,
+          "broadcast": 0,
+          "action": 0,
+          "recoverTime": 3600
+        }
+      },
+      {
+        "port": 5,
+        "linkSpeed": 0,
+        "duplex": 0,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          }
+        ],
+        "supportMirror": true,
+        "mirrorEnable": false,
+        "pvid": 1,
+        "availablePvids": [
+          1,
+          5,
+          10,
+          20,
+          40,
+          50
+        ],
+        "availablePvidNames": [
+          {
+            "pvId": 1,
+            "pvName": "Management"
+          },
+          {
+            "pvId": 5,
+            "pvName": "Services"
+          },
+          {
+            "pvId": 10,
+            "pvName": "Main"
+          },
+          {
+            "pvId": 20,
+            "pvName": "IoT & Security"
+          },
+          {
+            "pvId": 40,
+            "pvName": "Kids"
+          },
+          {
+            "pvId": 50,
+            "pvName": "Guest"
+          }
+        ],
+        "portStat": {
+          "port": 5,
+          "name": "WAN/LAN5",
+          "type": 1,
+          "physicalType": 0,
+          "mode": 1,
+          "poe": false,
+          "status": 0,
+          "internetState": 0,
+          "ip": "172.16.1.1",
+          "speed": 1,
+          "duplex": 1,
+          "rx": 0,
+          "rxPkt": 0,
+          "rxPktRate": 0,
+          "rxRate": 0,
+          "tx": 0,
+          "txPkt": 0,
+          "txPktRate": 0,
+          "txRate": 0,
+          "wanIpv6Comptent": 1,
+          "mirroredPorts": [],
+          "loss": 0.0,
+          "rxErrorPkts": 0,
+          "txErrorPkts": 0
+        },
+        "flowControl": false,
+        "supportFlowControl": true,
+        "status": 1,
+        "supportPortControl": true,
+        "supportLoopbackControl": false,
+        "supportPortIsolation": false,
+        "portIsolationEnable": false,
+        "supportBandWidthCtrl": false,
+        "bandWidthCtrlType": 0,
+        "bandCtrl": {
+          "egressEnable": false,
+          "egressLimit": 0,
+          "ingressEnable": false,
+          "ingressLimit": 0
+        },
+        "stormCtrl": {
+          "unknownUnicastEnable": false,
+          "unknownUnicast": 0,
+          "multicastEnable": false,
+          "multicast": 0,
+          "broadcastEnable": false,
+          "broadcast": 0,
+          "action": 0,
+          "recoverTime": 3600
+        }
+      },
+      {
+        "port": 6,
+        "linkSpeed": 0,
+        "duplex": 0,
+        "portCap": [
+          {
+            "linkSpeed": 2,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 2,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 1
+          },
+          {
+            "linkSpeed": 1,
+            "duplex": 2
+          },
+          {
+            "linkSpeed": 0,
+            "duplex": 0
+          },
+          {
+            "linkSpeed": 3,
+            "duplex": 2
+          }
+        ],
+        "supportMirror": true,
+        "mirrorEnable": false,
+        "pvid": 1,
+        "availablePvids": [
+          1,
+          5,
+          10,
+          20,
+          40,
+          50
+        ],
+        "availablePvidNames": [
+          {
+            "pvId": 1,
+            "pvName": "Management"
+          },
+          {
+            "pvId": 5,
+            "pvName": "Services"
+          },
+          {
+            "pvId": 10,
+            "pvName": "Main"
+          },
+          {
+            "pvId": 20,
+            "pvName": "IoT & Security"
+          },
+          {
+            "pvId": 40,
+            "pvName": "Kids"
+          },
+          {
+            "pvId": 50,
+            "pvName": "Guest"
+          }
+        ],
+        "portStat": {
+          "port": 6,
+          "name": "WAN/LAN6",
+          "type": 1,
+          "physicalType": 0,
+          "mode": 1,
+          "poe": false,
+          "status": 0,
+          "internetState": 0,
+          "ip": "172.16.1.1",
+          "speed": 1,
+          "duplex": 1,
+          "rx": 0,
+          "rxPkt": 0,
+          "rxPktRate": 0,
+          "rxRate": 0,
+          "tx": 0,
+          "txPkt": 0,
+          "txPktRate": 0,
+          "txRate": 0,
+          "wanIpv6Comptent": 1,
+          "mirroredPorts": [],
+          "loss": 0.0,
+          "rxErrorPkts": 0,
+          "txErrorPkts": 0
+        },
+        "flowControl": false,
+        "supportFlowControl": true,
+        "status": 1,
+        "supportPortControl": true,
+        "supportLoopbackControl": false,
+        "supportPortIsolation": false,
+        "portIsolationEnable": false,
+        "supportBandWidthCtrl": false,
+        "bandWidthCtrlType": 0,
+        "bandCtrl": {
+          "egressEnable": false,
+          "egressLimit": 0,
+          "ingressEnable": false,
+          "ingressLimit": 0
+        },
+        "stormCtrl": {
+          "unknownUnicastEnable": false,
+          "unknownUnicast": 0,
+          "multicastEnable": false,
+          "multicast": 0,
+          "broadcastEnable": false,
+          "broadcast": 0,
+          "action": 0,
+          "recoverTime": 3600
+        }
+      },
+      {
+        "port": 7,
+        "portStat": {
+          "port": 7,
+          "name": "USB Modem",
+          "type": 4,
+          "physicalType": -1,
+          "mode": -1,
+          "status": 0,
+          "rx": 0,
+          "rxPkt": 0,
+          "rxPktRate": 0,
+          "rxRate": 0,
+          "tx": 0,
+          "txPkt": 0,
+          "txPktRate": 0,
+          "txRate": 0,
+          "mirroredPorts": []
+        },
+        "status": 1,
+        "resource": 1
+      }
+    ],
+    "supportSpeedDuplex": true,
+    "supportMirror": true,
+    "supportPvid": true,
+    "supportWanSetPvid": true,
+    "supportSnmp": true,
+    "unsupportedPorts": [
+      7
+    ],
+    "combinedGateway": false,
+    "speeds": [
+      1,
+      2,
+      3
+    ],
+    "supportLte": false,
+    "pinSetting": {
+      "autoUnLock": false
+    },
+    "ippt": false,
+    "supportIppt": false,
+    "containNetType5G": false,
+    "multiChipGateway": false,
+    "supportFlowControl": true,
+    "supportPortControl": true,
+    "supportLoopbackControl": false,
+    "supportPortIsolation": false,
+    "supportBandWidthCtrl": false,
+    "supportStormCtrlAction": false,
+    "supportJumbo": false,
+    "downlinkList": [
+      {
+        "port": 3,
+        "name": "WAN/LAN3",
+        "mac": "00-11-22-00-00-01",
+        "deviceName": "00-11-22-00-00-01",
+        "speed": 3,
+        "duplex": 2,
+        "ip": "172.16.1.2",
+        "model": "ES220GMP",
+        "modelVersion": "1.0",
+        "type": "switch"
+      }
+    ],
+    "wirelessRouter": false,
+    "wirelessHealth": false,
+    "supportNewIpMacBinding": true,
+    "osgCap": {
+      "firewall": true,
+      "sslVpn": true,
+      "vpnUser": true,
+      "oneToOneNat": true,
+      "disableNat": true,
+      "ipMacBinding": true,
+      "qos": true,
+      "wireguard": true,
+      "dnsProxy": true,
+      "ipsecFailover": true,
+      "serviceType": true,
+      "dnsCache": true,
+      "ipsIds": true,
+      "macFilter": true,
+      "appControl": true,
+      "sim": false,
+      "clientRateLimit": true,
+      "lockToAp": true,
+      "voip": true,
+      "oltVlan": false,
+      "p2p": false,
+      "serverOpenVpnGoogleLdap": true,
+      "googleLdap": true,
+      "virtualWan": true,
+      "l2TP": true,
+      "ipsec": true,
+      "ipPortGroup": true,
+      "urlCategory": true,
+      "customAcl": false,
+      "peerEndpointDomain": true,
+      "lanDns": true,
+      "isolationSettings": true,
+      "dsl": false,
+      "ldapSsl": false,
+      "packageCaptureGateway": true,
+      "cluster": true,
+      "clusterModeOn": false,
+      "initClusterReminder": false,
+      "certProfile": false,
+      "networkCheckSupport": true,
+      "pingSupport": true,
+      "tracerouteSupport": true,
+      "dnsLoopUpSupport": true,
+      "arpTableSupport": true,
+      "packetCaptureSupport": true,
+      "terminalSupport": true,
+      "serviceIptv": true,
+      "subVpn": true,
+      "vpnStatus": true,
+      "policyRouting": true,
+      "internet": false,
+      "wireless": true,
+      "radios": false,
+      "beaconControl": false,
+      "wlans": false,
+      "networkSecurity": true,
+      "attackDefense": true,
+      "transmission": true,
+      "ddns": true,
+      "upnp": true,
+      "iptv": true,
+      "dhcpReservation": true,
+      "snmpServiceSetting": false,
+      "ssh": false,
+      "statistics": true,
+      "speedTest": true,
+      "speedTestSchedule": true,
+      "domainNoPortGroup": false,
+      "serverClientWireguard": true,
+      "supportDpi": true,
+      "vpnServer": true,
+      "vpnClient": true,
+      "siteToSiteVpn": true,
+      "dpiStat": true,
+      "supportShowServerInReservation": true,
+      "dpi": true,
+      "natTraversal": true,
+      "supportGetDhcpLeaseTime": true,
+      "clusterHsMode": false
+    },
+    "osgExist": {
+      "virtualWan": false,
+      "dnsProxy": false,
+      "lanDns": false,
+      "ipsecFailover": false,
+      "wireguard": false,
+      "sslVpn": false,
+      "googleLdap": false,
+      "ipMacBinding": false,
+      "urlCategory": false,
+      "dnsCache": false,
+      "macFilter": false,
+      "ipsIds": false,
+      "vpnUser": false,
+      "oneToOneNat": false,
+      "disableNat": false,
+      "qos": false,
+      "serviceType": false,
+      "policyRouting": false,
+      "subVpn": false,
+      "serviceIptv": true,
+      "vpnServer": false,
+      "vpnClient": false,
+      "siteToSiteVpn": false
+    }
+  },
+  "setting_ips": {
+    "enable": false,
+    "lowCategories": [
+      2,
+      3,
+      4,
+      8,
+      9
+    ],
+    "mediumCategories": [
+      1,
+      2,
+      3,
+      4,
+      7,
+      8,
+      9,
+      24
+    ],
+    "highCategories": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9,
+      14,
+      15,
+      18,
+      24
+    ],
+    "allCategories": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9,
+      14,
+      15,
+      18,
+      24
+    ],
+    "resource": 0
+  },
+  "ips_threat_management": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 10,
+    "data": []
+  },
+  "setting_attackdefense": {
+    "tcpConnEnable": false,
+    "tcpConnLimit": 10000,
+    "udpConnEnable": false,
+    "udpConnLimit": 12000,
+    "icmpConnEnable": false,
+    "icmpConnLimit": 1500,
+    "tcpSrcEnable": false,
+    "tcpSrcLimit": 4000,
+    "udpSrcEnable": false,
+    "udpSrcLimit": 6000,
+    "icmpSrcEnable": false,
+    "icmpSrcLimit": 600,
+    "tcpNoflagEnable": true,
+    "supportTcpScanReject": true,
+    "tcpScanReject": false,
+    "pingDeathEnable": true,
+    "pingLargeEnable": false,
+    "pingWanEnable": true,
+    "tcpWinnukeEnable": true,
+    "tcpFinSynEnable": true,
+    "tcpFinNoackEnable": true,
+    "ipOptionEnable": true,
+    "ipoptSecureEnable": true,
+    "ipoptLooseRouteEnable": true,
+    "ipoptStrictRouteEnable": true,
+    "ipoptRecordRouteEnable": true,
+    "ipoptStreamEnable": true,
+    "ipoptTimestampEnable": true,
+    "ipoptNoopEnable": true,
+    "resource": 0,
+    "supportPingLargeThreshold": true,
+    "supportIcmpTimestampRequest": true,
+    "icmpTimestampRequestReject": true,
+    "existPingLargeThreshold": false,
+    "existIcmpTimestampRequest": false,
+    "existTcpScanReject": false
+  },
+  "insight_rogueaps": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 10,
+    "data": []
+  },
+  "lan_dns": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 20,
+    "data": [],
+    "supportTtl": true
+  },
+  "policy_routings": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 20,
+    "data": [],
+    "supportVpnClient": true,
+    "supportMulti": true,
+    "supportVirtualWan": true,
+    "supportLocationGroupDest": true,
+    "supportDomainGroupDest": true,
+    "supportByDsLiteAndMapE": true
+  },
+  "acls_switch": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 20,
+    "data": [],
+    "resource": 1
+  },
+  "acls_eap": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 20,
+    "data": [],
+    "resource": 1
+  },
+  "vpn_stats_tunnel": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 20,
+    "data": []
+  },
+  "vpn_stats_ipsec": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 20,
+    "data": []
+  },
+  "vpn_stats_sslvpn": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 20,
+    "data": [],
+    "lockStatus": false
+  },
+  "dashboard_wireguard": [],
+  "dashboard_ipsec": [],
+  "dashboard_sslvpn": [],
+  "dashboard_openvpn_server": [],
+  "dashboard_openvpn_client": [],
+  "setting_vpns": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 10,
+    "data": [],
+    "supportVpnUserTab": true,
+    "supportCustomDns": true,
+    "supportIpRange": true,
+    "supportAccountAuth": true,
+    "supportCustomNetwork": true,
+    "supportTunnelMode": true,
+    "supportLdap": true,
+    "supportL2TP": true,
+    "supportIPsec": true,
+    "pfsCap": [
+      1,
+      2,
+      3,
+      14,
+      15
+    ],
+    "supportOpenVpnDomain": true,
+    "phase1Proposal1Cap": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "phase2Proposal2Cap": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "supportByDsLiteAndMapE": false,
+    "subnetsLimitSize": 25
+  },
+  "setting_wireguard": {
+    "totalRows": 0,
+    "currentPage": 1,
+    "currentSize": 20,
+    "data": []
+  },
+  "client_wireless_detail": {
+    "id": "650000000000000000000022",
+    "mac": "00-11-22-00-00-10",
+    "name": "00-11-22-00-00-10",
+    "vendor": "Unknown",
+    "deviceType": "Unknown",
+    "deviceCategory": "Others",
+    "osName": "Unknown",
+    "siteId": "site1",
+    "ip": "172.16.20.184",
+    "connectType": 1,
+    "connectDevType": "ap",
+    "connectedToWirelessRouter": false,
+    "wireless": true,
+    "ssid": "IoTWiFi",
+    "signalLevel": 35,
+    "signalRank": 2,
+    "wifiMode": 4,
+    "apName": "00-11-22-00-00-03",
+    "apMac": "00-11-22-00-00-03",
+    "radioId": 0,
+    "channel": 6,
+    "rxRate": 26000,
+    "txRate": 28900,
+    "powerSave": true,
+    "rssi": -76,
+    "snr": 19,
+    "stackableSwitch": false,
+    "vid": 20,
+    "activity": 454,
+    "uploadActivity": 58,
+    "trafficDown": 3533,
+    "trafficUp": 44700,
+    "uptime": 151,
+    "lastSeen": 1794570330592,
+    "authStatus": 0,
+    "blocked": false,
+    "guest": false,
+    "active": true,
+    "manager": false,
+    "ipSetting": {
+      "useFixedAddr": true,
+      "netId": "650000000000000000000005",
+      "ip": "172.16.20.184",
+      "serverType": "gateway",
+      "serverMac": "00-11-22-00-00-04"
+    },
+    "downPacket": 14,
+    "upPacket": 78,
+    "rateLimit": {
+      "enable": false,
+      "upEnable": false,
+      "upUnit": 1,
+      "upLimit": 0,
+      "downEnable": false,
+      "downUnit": 1,
+      "downLimit": 0
+    },
+    "clientLockToApSetting": {
+      "enable": false
+    },
+    "dpiStat": {
+      "totalUp": 0,
+      "totalDown": 0,
+      "applications": []
+    },
+    "support5g2": false,
+    "multiLink": [],
+    "model": "Unknown",
+    "client": true,
+    "vigi": false,
+    "poe": false,
+    "supportFixedIp": 1,
+    "authInfo": [],
+    "connectDevModel": "EAP725-Wall",
+    "connectDevModelVersion": "1.0"
+  },
+  "client_wired_detail": {
+    "id": "650000000000000000000023",
+    "mac": "00-11-22-00-00-07",
+    "name": "00-11-22-00-00-07",
+    "vendor": "Unknown",
+    "deviceType": "Unknown",
+    "deviceCategory": "Others",
+    "osName": "Unknown",
+    "siteId": "site1",
+    "connectType": 2,
+    "connectDevType": "switch",
+    "connectedToWirelessRouter": false,
+    "wireless": false,
+    "switchMac": "00-11-22-00-00-01",
+    "switchName": "00-11-22-00-00-01",
+    "stackableSwitch": false,
+    "vid": 20,
+    "networkName": "IoT & Security",
+    "port": 15,
+    "activity": 7219,
+    "uploadActivity": 4048,
+    "trafficDown": 94180494390,
+    "trafficUp": 87618500930,
+    "uptime": 1056883,
+    "lastSeen": 1794570333886,
+    "authStatus": 0,
+    "blocked": false,
+    "guest": false,
+    "active": true,
+    "manager": false,
+    "ipSetting": {
+      "useFixedAddr": false
+    },
+    "downPacket": 82464346,
+    "upPacket": 76357221,
+    "rateLimit": {
+      "enable": false,
+      "upEnable": false,
+      "upUnit": 1,
+      "upLimit": 0,
+      "downEnable": false,
+      "downUnit": 1,
+      "downLimit": 0
+    },
+    "clientLockToApSetting": {
+      "enable": false
+    },
+    "dpiStat": {
+      "totalUp": 0,
+      "totalDown": 0,
+      "applications": []
+    },
+    "standardPort": "1/0/15",
+    "connectDevSubtype": 1,
+    "model": "Unknown",
+    "client": true,
+    "vigi": false,
+    "poe": false,
+    "supportFixedIp": 1,
+    "authInfo": [],
+    "connectDevModel": "ES220GMP",
+    "connectDevModelVersion": "1.0"
+  }
+}

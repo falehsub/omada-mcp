@@ -15,24 +15,45 @@ from __future__ import annotations
 
 import copy
 import ipaddress
+import json
 import re
 import urllib.parse
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from ._helpers import (
+    ACL_TYPE_LABELS,
+    ACL_TYPE_MAP,
+    CHANNEL_WIDTH_LABELS,
+    DUPLEX_LABELS as PORT_DUPLEX_LABELS,
+    LINK_SPEED_LABELS as PORT_LINK_SPEED_LABELS,
+    TX_POWER_LEVEL_LABELS,
+    as_int,
+    collect_switch_ports_data,
+    deep_redact,
+    resolve_raw_device,
+    validate_ap_radio_change,
+)
 from .client import OmadaClient, OmadaError, SiteInfo, describe_error, redact_secrets
 
 __all__ = [
     "CLIENT_VOLATILE_KEYS",
     "WRITE_ENVELOPE_SCHEMA",
+    "assign_ap_wlan_group",
+    "create_eap_acl",
     "create_gateway_acl",
     "create_ip_group",
     "create_lan_network",
     "create_ssid",
+    "create_switch_acl",
+    "cycle_poe_port",
     "delete_dhcp_reservation",
     "delete_gateway_acl",
     "delete_ip_group",
+    "delete_lan_dns_rule",
     "delete_lan_network",
     "delete_mdns_rule",
+    "delete_policy_route",
     "delete_port_forward",
     "delete_ssid",
     "delete_static_route",
@@ -41,20 +62,29 @@ __all__ = [
     "reconnect_client",
     "release_client_fixed_ip",
     "replace_ip_group",
+    "rollback_from_snapshot",
     "set_acl_rule_status",
     "set_client_blocked",
     "set_client_fixed_ip",
+    "set_client_lock_to_ap",
+    "set_client_rate_limit",
     "set_upnp",
     "set_vlan_dhcp_pools",
     "set_vlan_isolation",
+    "start_rf_scan",
+    "update_ap_radio",
     "update_client",
     "update_device",
     "update_gateway_acl",
     "update_lan_network",
     "update_ssid",
+    "update_switch_port",
     "upsert_dhcp_reservation",
+    "upsert_lan_dns_rule",
     "upsert_mdns_rule",
+    "upsert_policy_route",
     "upsert_port_forward",
+    "upsert_port_profile",
     "upsert_static_route",
 ]
 
@@ -448,10 +478,10 @@ def _check_dhcp_pools_safety(
     for idx, entry in enumerate(pools):
         if not isinstance(entry, Mapping):
             raise OmadaError(f"pools[{idx}] must be an object with ipaddrStart and ipaddrEnd")
-        s_raw = str(entry.get("ipaddrStart") or "").strip()
-        e_raw = str(entry.get("ipaddrEnd") or "").strip()
+        s_raw = str(entry.get("ipaddrStart") or entry.get("start") or "").strip()
+        e_raw = str(entry.get("ipaddrEnd") or entry.get("end") or "").strip()
         if not s_raw or not e_raw:
-            raise OmadaError(f"pools[{idx}] must include both ipaddrStart and ipaddrEnd")
+            raise OmadaError(f"pools[{idx}] must include both ipaddrStart and ipaddrEnd (or start/end)")
         try:
             s_ip = ipaddress.IPv4Address(s_raw)
             e_ip = ipaddress.IPv4Address(e_raw)
@@ -712,12 +742,108 @@ def _fetch_groups(client: OmadaClient, site: SiteInfo) -> List[Dict[str, Any]]:
     return rows
 
 
-def _fetch_acls(client: OmadaClient, site: SiteInfo) -> Tuple[Optional[bool], List[Dict[str, Any]]]:
-    rows, meta = client.paginate(f"sites/{site.site_id}/setting/firewall/acls?type=0")
+def _parse_acl_type(acl_type: Any) -> int:
+    if isinstance(acl_type, bool):
+        raise OmadaError(f"invalid aclType {acl_type!r}")
+    if isinstance(acl_type, int) and acl_type in ACL_TYPE_LABELS:
+        return acl_type
+    raw = str(acl_type or "").strip().lower()
+    if raw in ("0", "1", "2"):
+        return int(raw)
+    if raw in ACL_TYPE_MAP:
+        return ACL_TYPE_MAP[raw]
+    raise OmadaError(
+        f"invalid aclType {acl_type!r}",
+        hint="expected 'gateway' (0), 'switch' (1), or 'eap' (2)",
+    )
+
+
+def _fetch_typed_acls_with_meta(
+    client: OmadaClient,
+    site: SiteInfo,
+    acl_type: int,
+) -> Tuple[Optional[bool], List[Dict[str, Any]]]:
+    rows, meta = client.paginate(f"sites/{site.site_id}/setting/firewall/acls?type={int(acl_type)}")
     if isinstance(meta, Mapping):
         acl_disable = meta.get("aclDisable")
         return (bool(acl_disable) if acl_disable is not None else None), rows
     return None, rows
+
+
+def _fetch_acls(client: OmadaClient, site: SiteInfo) -> Tuple[Optional[bool], List[Dict[str, Any]]]:
+    return _fetch_typed_acls_with_meta(client, site, 0)
+
+
+def _find_acl_in_list(
+    rules: Sequence[Mapping[str, Any]],
+    needle: str,
+    *,
+    label: str,
+) -> Optional[Dict[str, Any]]:
+    lower = needle.lower()
+    exact_id = [dict(r) for r in rules if str(r.get("id", "")).strip().lower() == lower]
+    if len(exact_id) == 1:
+        return exact_id[0]
+    if len(exact_id) > 1:
+        raise OmadaError(f"{label} {needle!r} matched multiple rules by ID")
+    by_name = [dict(r) for r in rules if str(r.get("name", "")).strip().lower() == lower]
+    if len(by_name) == 1:
+        return by_name[0]
+    if len(by_name) > 1:
+        ids = ", ".join(str(r.get("id") or "?") for r in by_name)
+        raise OmadaError(f"{label} {needle!r} matched multiple rules ({ids}); specify rule id")
+    return None
+
+
+def _resolve_acl_rule(
+    client: OmadaClient,
+    site: SiteInfo,
+    rule: str,
+    *,
+    acl_type: Any = None,
+) -> Tuple[int, Optional[bool], Dict[str, Any]]:
+    """Resolve an ACL rule by ID or exact name across gateway (0), switch (1), or EAP (2)."""
+    needle = str(rule or "").strip()
+    if not needle:
+        raise OmadaError("ACL rule identifier must be non-empty")
+
+    if acl_type is not None:
+        t = _parse_acl_type(acl_type)
+        label = f"{ACL_TYPE_LABELS[t]} ACL rule"
+        acl_disable, rules = _fetch_typed_acls_with_meta(client, site, t)
+        found = _find_acl_in_list(rules, needle, label=label)
+        if found is None:
+            raise OmadaError(f"no {label} matches {rule!r}")
+        found.setdefault("type", t)
+        return t, acl_disable, found
+
+    acl_disable0, rules0 = _fetch_typed_acls_with_meta(client, site, 0)
+    found0 = _find_acl_in_list(rules0, needle, label="gateway ACL rule")
+    if found0 is not None:
+        found0.setdefault("type", 0)
+        return 0, acl_disable0, found0
+
+    matches: List[Tuple[int, Optional[bool], Dict[str, Any]]] = []
+    for t in (1, 2):
+        try:
+            acl_disable_t, rules_t = _fetch_typed_acls_with_meta(client, site, t)
+        except OmadaError as exc:
+            if exc.code in (-1600, -1001, -1007):
+                continue
+            raise
+        found_t = _find_acl_in_list(rules_t, needle, label=f"{ACL_TYPE_LABELS[t]} ACL rule")
+        if found_t is not None:
+            found_t.setdefault("type", t)
+            matches.append((t, acl_disable_t, found_t))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        scopes = ", ".join(ACL_TYPE_LABELS[t] for t, _, _ in matches)
+        raise OmadaError(
+            f"ACL rule {rule!r} matched in multiple scopes ({scopes}); specify aclType",
+            hint="pass aclType='gateway', aclType='switch', or aclType='eap'",
+        )
+    raise OmadaError(f"no ACL rule matches {rule!r}")
 
 
 def _fetch_wan_networks(client: OmadaClient, site: SiteInfo) -> Dict[str, Any]:
@@ -966,7 +1092,6 @@ def set_client_fixed_ip(
     patch_body = _strip_client_volatiles(client_detail)
     patch_body["ipSetting"] = dict(desired_ip_setting)
 
-    diff = {"ipSetting": {"before": before, "after": desired_ip_setting}}
     warnings = ["effective at next DHCP lease renewal; current client IP does not change immediately"]
     if before.get("useFixedAddr") and before.get("ip") and before.get("netId"):
         rollback: Dict[str, Any] = {
@@ -984,6 +1109,16 @@ def set_client_fixed_ip(
             "arguments": {"mac": target_id, "dryRun": True},
         }
 
+    already_converged = (
+        bool(before.get("useFixedAddr"))
+        and str(before.get("netId") or "") == resolved_net_id
+        and str(before.get("ip") or "") == str(target_ip)
+    )
+    if already_converged:
+        warnings.append("no controller write needed: client fixed IP already matches target configuration")
+        diff: Dict[str, Any] = {}
+    else:
+        diff = {"ipSetting": {"before": before, "after": desired_ip_setting}}
     if dryRun:
         return _dry_run_result(
             tool_name="set_client_fixed_ip",
@@ -991,6 +1126,18 @@ def set_client_fixed_ip(
             before=before,
             after=desired_ip_setting,
             diff=diff,
+            warnings=warnings,
+            rollback=rollback,
+        )
+
+    if already_converged:
+        return _committed_result(
+            tool_name="set_client_fixed_ip",
+            target_id=target_id,
+            before=before,
+            after=before,
+            diff={},
+            snapshot=None,
             warnings=warnings,
             rollback=rollback,
         )
@@ -2178,25 +2325,14 @@ def set_acl_rule_status(
     client: OmadaClient,
     rule: str,
     status: bool,
+    aclType: Optional[Any] = None,
     dryRun: bool = True,
     confirm: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Enable or disable a single gateway ACL rule (never touches ``aclDisable``)."""
+    """Enable or disable a gateway, switch, or EAP ACL rule (never touches ``aclDisable``)."""
     site = _site(client)
-    acl_disable, rules = _fetch_acls(client, site)
-    needle = str(rule or "").strip()
-    by_id = [r for r in rules if str(r.get("id")) == needle]
-    if by_id:
-        target_rule = dict(by_id[0])
-    else:
-        by_name = [r for r in rules if str(r.get("name", "")).strip().lower() == needle.lower()]
-        if len(by_name) == 1:
-            target_rule = dict(by_name[0])
-        elif len(by_name) > 1:
-            ids = ", ".join(str(r.get("id")) for r in by_name)
-            raise OmadaError(f"ACL rule {rule!r} matched multiple rules ({ids}); specify rule id")
-        else:
-            raise OmadaError(f"no gateway ACL rule matches {rule!r}")
+    resolved_type, acl_disable, target_rule = _resolve_acl_rule(client, site, rule, acl_type=aclType)
+    type_label = ACL_TYPE_LABELS[resolved_type]
 
     target_id = str(target_rule["id"])
     _require_confirm("set_acl_rule_status", target_id, dryRun, confirm)
@@ -2205,6 +2341,11 @@ def set_acl_rule_status(
     if desired_status and int(target_rule.get("policy", 1)) == 0:
         networks = _fetch_lan_collection(client, site)
         groups = _fetch_groups(client, site)
+        direction = (
+            target_rule.get("direction") or {}
+            if resolved_type == 0
+            else {"lanToLan": True, "lanToWan": False, "wanInIds": [], "vpnInIds": []}
+        )
         _check_acl_safety(
             client,
             policy=0,
@@ -2213,7 +2354,7 @@ def set_acl_rule_status(
             source_ids=[str(x) for x in (target_rule.get("sourceIds") or [])],
             dest_type=int(target_rule.get("destinationType", -1)),
             dest_ids=[str(x) for x in (target_rule.get("destinationIds") or [])],
-            direction=target_rule.get("direction") or {},
+            direction=direction,
             networks=networks,
             groups=groups,
         )
@@ -2221,6 +2362,7 @@ def set_acl_rule_status(
     before_summary = {
         "id": target_id,
         "name": target_rule.get("name"),
+        "aclType": type_label,
         "status": bool(target_rule.get("status")),
         "policy": target_rule.get("policy"),
     }
@@ -2230,10 +2372,10 @@ def set_acl_rule_status(
     warnings = [_ACL_DISPATCH_NOTES]
     if acl_disable is not None:
         warnings.append(f"observed controller aclDisable={acl_disable!r} (advisory only)")
-    rollback = {
-        "tool": "set_acl_rule_status",
-        "arguments": {"rule": target_id, "status": bool(target_rule.get("status")), "dryRun": True},
-    }
+    rb_args: Dict[str, Any] = {"rule": target_id, "status": bool(target_rule.get("status")), "dryRun": True}
+    if resolved_type != 0:
+        rb_args["aclType"] = type_label
+    rollback = {"tool": "set_acl_rule_status", "arguments": rb_args}
 
     if dryRun:
         return _dry_run_result(
@@ -2246,12 +2388,12 @@ def set_acl_rule_status(
             rollback=rollback,
         )
 
-    endpoint = f"sites/{site.site_id}/setting/firewall/acls/{target_id}?type=0"
+    endpoint = f"sites/{site.site_id}/setting/firewall/acls/{target_id}?type={resolved_type}"
     patch_body = copy.deepcopy(target_rule)
     patch_body["status"] = desired_status
 
     def _read_back() -> Optional[Dict[str, Any]]:
-        _, live_rules = _fetch_acls(client, site)
+        _, live_rules = _fetch_typed_acls_with_meta(client, site, resolved_type)
         return next((dict(r) for r in live_rules if str(r.get("id")) == target_id), None)
 
     def _verify(_before: Any, after_rule: Any) -> Tuple[bool, Optional[str]]:
@@ -2261,7 +2403,7 @@ def set_acl_rule_status(
             return False, f"ACL rule status expected {desired_status}, got {after_rule.get('status')!r}"
         drifts = _diff_mappings(target_rule, after_rule, ignore_keys=["status"])
         if drifts:
-            return False, "unexpected field drift on ACL rule after PATCH: " + ", ".join(drifts)
+            return False, "unexpected field drift on ACL rule after PUT: " + ", ".join(drifts)
         return True, None
 
     def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
@@ -2276,6 +2418,7 @@ def set_acl_rule_status(
         fresh_before = {
             "id": target_id,
             "name": fresh.get("name"),
+            "aclType": type_label,
             "status": bool(fresh.get("status")),
             "policy": fresh.get("policy"),
         }
@@ -2288,7 +2431,7 @@ def set_acl_rule_status(
         tool_name="set_acl_rule_status",
         target=target_id,
         before=before_summary,
-        snapshot_payload=target_rule,
+        snapshot_payload={**target_rule, "type": target_rule.get("type", resolved_type)},
         read_back=_read_back,
         verify_fn=_verify,
         reauth_prepare=_reauth_prepare,
@@ -2298,6 +2441,7 @@ def set_acl_rule_status(
     after_summary = {
         "id": target_id,
         "name": after_rule.get("name"),
+        "aclType": type_label,
         "status": bool(after_rule.get("status")),
         "policy": after_rule.get("policy"),
     }
@@ -3235,24 +3379,39 @@ def update_gateway_acl(
     protocols: Optional[List[int]] = None,
     biDirectional: Optional[bool] = None,
     syslog: Optional[bool] = None,
+    aclType: Optional[Any] = None,
     dryRun: bool = True,
     confirm: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Modify fields of an existing gateway ACL rule (``PUT setting/firewall/acls/{id}?type=0``)."""
+    """Modify fields of an existing gateway, switch, or EAP ACL rule (``PUT setting/firewall/acls/{id}?type=0|1|2``)."""
     if all(
         v is None
         for v in (name, status, policy, source, destination, direction, protocols, biDirectional, syslog)
     ):
-        raise OmadaError("specify at least one field to update on the gateway ACL rule")
+        raise OmadaError("specify at least one field to update on the ACL rule")
 
     site = _site(client)
-    acl_disable, rules = _fetch_acls(client, site)
-    target_rule = _resolve_by_id_or_name(rules, rule, label="gateway ACL rule")
+    resolved_type, acl_disable, target_rule = _resolve_acl_rule(client, site, rule, acl_type=aclType)
+    if resolved_type != 0 and direction is not None:
+        raise OmadaError(
+            "direction flags apply only to gateway ACLs (aclType='gateway')",
+            hint="omit direction when updating a switch or EAP ACL rule",
+        )
     target_id = str(target_rule["id"])
     _require_confirm("update_gateway_acl", target_id, dryRun, confirm)
 
     networks = _fetch_lan_collection(client, site)
     groups = _fetch_groups(client, site)
+
+    def _resolve_endpoint_for_scope(spec: Dict[str, Any], *, label: str) -> Tuple[int, List[str]]:
+        if resolved_type == 0:
+            return _resolve_acl_endpoint(spec, label=label, networks=networks, groups=groups)
+        kind = str(spec.get("type") or "").strip().lower()
+        if resolved_type == 1 and kind == "ssid":
+            raise OmadaError(f"switch ACL {label}.type does not support 'ssid' (EAP ACLs only)")
+        return _resolve_extended_acl_endpoint(
+            client, site, spec, label=label, networks=networks, groups=groups,
+        )
 
     patch_body = copy.deepcopy(target_rule)
     changed_keys: List[str] = []
@@ -3269,12 +3428,12 @@ def update_gateway_acl(
         patch_body["policy"] = _parse_policy(policy)
         changed_keys.append("policy")
     if source is not None:
-        src_type, src_ids = _resolve_acl_endpoint(source, label="source", networks=networks, groups=groups)
+        src_type, src_ids = _resolve_endpoint_for_scope(source, label="source")
         patch_body["sourceType"] = src_type
         patch_body["sourceIds"] = src_ids
         changed_keys.extend(["sourceType", "sourceIds"])
     if destination is not None:
-        dst_type, dst_ids = _resolve_acl_endpoint(destination, label="destination", networks=networks, groups=groups)
+        dst_type, dst_ids = _resolve_endpoint_for_scope(destination, label="destination")
         patch_body["destinationType"] = dst_type
         patch_body["destinationIds"] = dst_ids
         changed_keys.extend(["destinationType", "destinationIds"])
@@ -3293,9 +3452,14 @@ def update_gateway_acl(
         patch_body["syslog"] = bool(syslog)
         changed_keys.append("syslog")
 
-    eff_dir = patch_body.get("direction") or {}
+    eff_dir = (
+        (patch_body.get("direction") or {})
+        if resolved_type == 0
+        else {"lanToLan": True, "lanToWan": False, "wanInIds": [], "vpnInIds": []}
+    )
     if (
-        eff_dir.get("lanToWan")
+        resolved_type == 0
+        and eff_dir.get("lanToWan")
         and not eff_dir.get("lanToLan")
         and not eff_dir.get("wanInIds")
         and not eff_dir.get("vpnInIds")
@@ -3336,10 +3500,11 @@ def update_gateway_acl(
             rollback=None,
         )
 
-    endpoint = f"sites/{site.site_id}/setting/firewall/acls/{target_id}?type=0"
+    endpoint = f"sites/{site.site_id}/setting/firewall/acls/{target_id}?type={resolved_type}"
+    snap_payload = {**target_rule, "type": target_rule.get("type", resolved_type)}
 
     def _read_back() -> Optional[Dict[str, Any]]:
-        _, live_rules = _fetch_acls(client, site)
+        _, live_rules = _fetch_typed_acls_with_meta(client, site, resolved_type)
         return next((dict(r) for r in live_rules if str(r.get("id")) == target_id), None)
 
     def _verify(_before: Any, after_rule: Any) -> Tuple[bool, Optional[str]]:
@@ -3375,7 +3540,7 @@ def update_gateway_acl(
         tool_name="update_gateway_acl",
         target=target_id,
         before=target_rule,
-        snapshot_payload=target_rule,
+        snapshot_payload=snap_payload,
         read_back=_read_back,
         verify_fn=_verify,
         reauth_prepare=_reauth_prepare,
@@ -3396,13 +3561,13 @@ def update_gateway_acl(
 def delete_gateway_acl(
     client: OmadaClient,
     rule: str,
+    aclType: Optional[Any] = None,
     dryRun: bool = True,
     confirm: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Delete a gateway ACL rule (``DELETE setting/firewall/acls/{id}?type=0``)."""
+    """Delete a gateway, switch, or EAP ACL rule (``DELETE setting/firewall/acls/{id}?type=0|1|2``)."""
     site = _site(client)
-    acl_disable, rules = _fetch_acls(client, site)
-    target_rule = _resolve_by_id_or_name(rules, rule, label="gateway ACL rule")
+    resolved_type, acl_disable, target_rule = _resolve_acl_rule(client, site, rule, acl_type=aclType)
     target_id = str(target_rule["id"])
     warnings = [_ACL_DISPATCH_NOTES]
     if acl_disable is not None:
@@ -3411,10 +3576,10 @@ def delete_gateway_acl(
         client,
         tool_name="delete_gateway_acl",
         target_id=target_id,
-        endpoint=f"sites/{site.site_id}/setting/firewall/acls/{target_id}?type=0",
+        endpoint=f"sites/{site.site_id}/setting/firewall/acls/{target_id}?type={resolved_type}",
         before=target_rule,
-        snapshot_payload=target_rule,
-        fetch_all=lambda: _fetch_acls(client, site)[1],
+        snapshot_payload={**target_rule, "type": target_rule.get("type", resolved_type)},
+        fetch_all=lambda: _fetch_typed_acls(client, site, resolved_type),
         match_fn=lambda row: str(row.get("id")) == target_id,
         rollback=None,
         warnings=warnings,
@@ -4376,9 +4541,69 @@ def delete_mdns_rule(
     )
 
 
+def _resolve_upnp_targets(
+    client: OmadaClient,
+    site: SiteInfo,
+    before_obj: Mapping[str, Any],
+    *,
+    wan_port_ids: Optional[Sequence[str]] = None,
+    network_ids: Optional[Sequence[str]] = None,
+) -> Tuple[List[str], List[str]]:
+    """Resolve non-empty ``wanPortIds`` and ``networkIds`` required when UPnP is enabled on v6.2+."""
+    if wan_port_ids is not None:
+        resolved_wan = [str(p).strip() for p in wan_port_ids if str(p).strip()]
+    else:
+        existing_wan = before_obj.get("wanPortIds")
+        if isinstance(existing_wan, Sequence) and not isinstance(existing_wan, (str, bytes)) and existing_wan:
+            resolved_wan = [str(p).strip() for p in existing_wan if str(p).strip()]
+        else:
+            wan = _fetch_wan_networks(client, site)
+            raw_uuids = wan.get("portUuids")
+            if isinstance(raw_uuids, Sequence) and not isinstance(raw_uuids, (str, bytes)) and raw_uuids:
+                resolved_wan = [str(p).strip() for p in raw_uuids if str(p).strip()]
+            else:
+                port_settings = (wan.get("osgPortInfo") or {}).get("wanLanPortSettings") or []
+                resolved_wan = [
+                    str(p["portUuid"]).strip()
+                    for p in port_settings
+                    if isinstance(p, Mapping) and p.get("portUuid") and p.get("mode") == 0
+                ]
+    if not resolved_wan:
+        raise OmadaError(
+            "enabling UPnP requires at least one WAN port ID (wanPortIds)",
+            code=-1001,
+            hint="Ensure a WAN interface is configured or pass wanPortIds explicitly.",
+        )
+
+    if network_ids is not None:
+        ifaces = _fetch_lan_interfaces(client, site)
+        resolved_nets: List[str] = []
+        for item in network_ids:
+            matched = _resolve_lan_network(ifaces, vlan=item)
+            nid = str(matched.get("id") or "").strip()
+            if nid and nid not in resolved_nets:
+                resolved_nets.append(nid)
+    else:
+        existing_nets = before_obj.get("networkIds")
+        if isinstance(existing_nets, Sequence) and not isinstance(existing_nets, (str, bytes)) and existing_nets:
+            resolved_nets = [str(n).strip() for n in existing_nets if str(n).strip()]
+        else:
+            ifaces = _fetch_lan_interfaces(client, site)
+            resolved_nets = [str(n["id"]).strip() for n in ifaces if n.get("id")]
+    if not resolved_nets:
+        raise OmadaError(
+            "enabling UPnP requires at least one LAN interface ID (networkIds)",
+            code=-1001,
+            hint="Create a routed LAN interface or pass networkIds explicitly.",
+        )
+    return resolved_wan, resolved_nets
+
+
 def set_upnp(
     client: OmadaClient,
     enable: bool,
+    wanPortIds: Optional[List[str]] = None,
+    networkIds: Optional[List[str]] = None,
     dryRun: bool = True,
     confirm: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -4389,11 +4614,38 @@ def set_upnp(
     before_raw = client.api_result(f"sites/{site.site_id}/setting/upnp")
     before_obj = dict(before_raw) if isinstance(before_raw, Mapping) else {"enable": False}
     desired = bool(enable)
-    diff = {"enable": {"before": bool(before_obj.get("enable", False)), "after": desired}}
-    after_preview = {**before_obj, "enable": desired}
+    warnings: List[str] = []
+    if desired:
+        resolved_wan, resolved_nets = _resolve_upnp_targets(
+            client, site, before_obj, wan_port_ids=wanPortIds, network_ids=networkIds,
+        )
+        put_payload: Dict[str, Any] = {
+            "enable": True,
+            "wanPortIds": resolved_wan,
+            "networkIds": resolved_nets,
+        }
+        devices = _fetch_devices(client, site)
+        if not any(str(d.get("type") or "").lower() == "gateway" for d in devices):
+            warnings.append("no adopted gateway device found in site; live activation returns -33001")
+        diff: Dict[str, Any] = {
+            "enable": {"before": bool(before_obj.get("enable", False)), "after": True},
+            "wanPortIds": {"before": before_obj.get("wanPortIds") or [], "after": resolved_wan},
+            "networkIds": {"before": before_obj.get("networkIds") or [], "after": resolved_nets},
+        }
+    else:
+        put_payload = {"enable": False}
+        diff = {"enable": {"before": bool(before_obj.get("enable", False)), "after": False}}
+
+    after_preview = {**before_obj, **put_payload}
+    rb_args: Dict[str, Any] = {"enable": bool(before_obj.get("enable", False)), "dryRun": True}
+    if before_obj.get("enable"):
+        if isinstance(before_obj.get("wanPortIds"), list) and before_obj.get("wanPortIds"):
+            rb_args["wanPortIds"] = list(before_obj["wanPortIds"])
+        if isinstance(before_obj.get("networkIds"), list) and before_obj.get("networkIds"):
+            rb_args["networkIds"] = list(before_obj["networkIds"])
     rollback = {
         "tool": "set_upnp",
-        "arguments": {"enable": bool(before_obj.get("enable", False)), "dryRun": True},
+        "arguments": rb_args,
     }
     if dryRun:
         return _dry_run_result(
@@ -4402,7 +4654,7 @@ def set_upnp(
             before=before_obj,
             after=after_preview,
             diff=diff,
-            warnings=[],
+            warnings=warnings,
             rollback=rollback,
         )
 
@@ -4417,17 +4669,22 @@ def set_upnp(
             return False, "UPnP read-back failed"
         if bool(after_now.get("enable")) != desired:
             return False, f"UPnP enable expected {desired!r}, got {after_now.get('enable')!r}"
+        if desired:
+            if isinstance(after_now.get("wanPortIds"), list) and set(map(str, after_now["wanPortIds"])) != set(put_payload["wanPortIds"]):
+                return False, f"UPnP wanPortIds mismatch on read-back: {after_now.get('wanPortIds')!r}"
+            if isinstance(after_now.get("networkIds"), list) and set(map(str, after_now["networkIds"])) != set(put_payload["networkIds"]):
+                return False, f"UPnP networkIds mismatch on read-back: {after_now.get('networkIds')!r}"
         return True, None
 
     def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
         live = _read_back()
         ok, _ = _verify(before_obj, live)
-        return ok, {"enable": desired}, live
+        return ok, dict(put_payload), live
 
     write_res = client.write(
         endpoint,
         method="PUT",
-        data={"enable": desired},
+        data=put_payload,
         tool_name="set_upnp",
         target=target_id,
         before=before_obj,
@@ -4435,7 +4692,7 @@ def set_upnp(
         read_back=_read_back,
         verify_fn=_verify,
         reauth_prepare=_reauth_prepare,
-        fields_changed=["enable"],
+        fields_changed=sorted(put_payload.keys()),
     )
     return _committed_result(
         tool_name="set_upnp",
@@ -4444,7 +4701,7 @@ def set_upnp(
         after=write_res["after"],
         diff=diff,
         snapshot=write_res["snapshot"],
-        warnings=[],
+        warnings=warnings,
         rollback=rollback,
     )
 
@@ -4921,4 +5178,2776 @@ def reboot_device(
         snapshot=write_res["snapshot"],
         warnings=warnings,
         rollback=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Milestone 2: Switch ports, AP radios/WLANs, Policy Routes, LAN DNS, ACLs,
+# Client Wi-Fi controls, and Snapshot Rollback
+# ---------------------------------------------------------------------------
+
+_LINK_SPEED_TO_CODE: Dict[str, int] = {
+    "auto": 0,
+    "0": 0,
+    "10m": 1,
+    "10mbps": 1,
+    "10": 1,
+    "1": 1,
+    "100m": 2,
+    "100mbps": 2,
+    "100": 2,
+    "2": 2,
+    "1g": 3,
+    "1000m": 3,
+    "1gbps": 3,
+    "3": 3,
+    "2.5g": 4,
+    "2500m": 4,
+    "4": 4,
+    "10g": 5,
+    "10000m": 5,
+    "5": 5,
+    "5g": 6,
+    "6": 6,
+    "25g": 7,
+    "7": 7,
+    "100g": 8,
+    "8": 8,
+}
+
+_DUPLEX_TO_CODE: Dict[str, int] = {
+    "auto": 0,
+    "0": 0,
+    "half": 1,
+    "1": 1,
+    "full": 2,
+    "2": 2,
+}
+
+_PORT_PROFILE_POE_TO_CODE: Dict[str, int] = {
+    "off": 0,
+    "disable": 0,
+    "disabled": 0,
+    "0": 0,
+    "on": 1,
+    "enable": 1,
+    "enabled": 1,
+    "1": 1,
+    "keep": 2,
+    "keep_settings": 2,
+    "2": 2,
+}
+
+_SWITCH_ACL_BINDING_MAP: Dict[str, int] = {
+    "all_ports": 0,
+    "0": 0,
+    "custom_ports": 1,
+    "1": 1,
+    "all_vlans": 2,
+    "all_switches": 2,
+    "2": 2,
+    "custom_vlans": 3,
+    "custom_switches": 3,
+    "vlan": 3,
+    "3": 3,
+}
+
+_LAN_DNS_TYPE_MAP: Dict[str, int] = {
+    "ip": 0,
+    "a": 0,
+    "aaaa": 0,
+    "0": 0,
+    "cname": 1,
+    "1": 1,
+    "forward": 2,
+    "fwd": 2,
+    "2": 2,
+}
+
+_BAND_TO_RADIO_ID: Dict[str, int] = {
+    "2g": 0,
+    "5g": 1,
+    "5g1": 1,
+    "5g2": 2,
+    "6g": 3,
+}
+
+_NON_REVERSIBLE_SNAPSHOT_TOOLS = frozenset({
+    "reboot_device",
+    "reconnect_client",
+    "cycle_poe_port",
+    "start_rf_scan",
+})
+
+
+def _fetch_lan_profiles(client: OmadaClient, site: SiteInfo) -> List[Dict[str, Any]]:
+    rows, _ = client.paginate(f"sites/{site.site_id}/setting/lan/profiles")
+    return rows
+
+
+def _fetch_policy_routes(client: OmadaClient, site: SiteInfo) -> List[Dict[str, Any]]:
+    rows, _ = client.paginate(f"sites/{site.site_id}/setting/transmission/policyRoutings")
+    return rows
+
+
+def _fetch_lan_dns_rules(client: OmadaClient, site: SiteInfo) -> List[Dict[str, Any]]:
+    try:
+        rows, _ = client.paginate(f"sites/{site.site_id}/setting/lan/dns")
+        return rows
+    except OmadaError as exc:
+        if exc.code in (-41011, -1600, -1007) or "HTTP 404" in str(exc):
+            raise OmadaError(
+                "Local LAN DNS is not supported by this controller or site hardware",
+                code=exc.code,
+                hint="Local LAN DNS (setting/lan/dns) requires Omada Controller v5.14+ / v6.x with a supported gateway.",
+            ) from exc
+        raise
+
+
+def _fetch_typed_acls(client: OmadaClient, site: SiteInfo, acl_type: int) -> List[Dict[str, Any]]:
+    _, rows = _fetch_typed_acls_with_meta(client, site, acl_type)
+    return rows
+
+
+def _fetch_rate_limit_profiles(client: OmadaClient, site: SiteInfo) -> List[Dict[str, Any]]:
+    return _unwrap_rows(client.api_result(f"sites/{site.site_id}/setting/profiles/rateLimits"))
+
+
+def _require_gateway(client: OmadaClient, site: SiteInfo, feature: str) -> List[Dict[str, Any]]:
+    devs = _fetch_devices(client, site)
+    gws = [d for d in devs if str(d.get("type") or "").lower() == "gateway"]
+    if not gws:
+        raise OmadaError(
+            f"{feature} requires an adopted Omada gateway in site {site.name!r}",
+            code=-1007,
+            hint="No gateway device was found in this site.",
+        )
+    return gws
+
+
+def _parse_code_map(value: Any, mapping: Mapping[str, int], *, label: str) -> int:
+    if isinstance(value, bool):
+        raise OmadaError(f"invalid {label}: {value!r}")
+    if isinstance(value, int) and str(value) in mapping:
+        return mapping[str(value)]
+    key = str(value or "").strip().lower()
+    if key in mapping:
+        return mapping[key]
+    raise OmadaError(f"invalid {label}: {value!r}", hint=f"valid values: {', '.join(sorted(k for k in mapping if not k.isdigit()))}")
+
+
+def _field_diff(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    keys: Sequence[str],
+) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for k in keys:
+        bv = before.get(k)
+        av = after.get(k)
+        if bv != av:
+            out[str(k)] = {"before": copy.deepcopy(bv), "after": copy.deepcopy(av)}
+    return out
+
+
+def _switch_port_summary(port_obj: Mapping[str, Any], info_obj: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    speed_code = as_int(port_obj.get("linkSpeed"), 0)
+    duplex_code = as_int(port_obj.get("duplex"), 0)
+    summary: Dict[str, Any] = {
+        "port": as_int(port_obj.get("port"), 0),
+        "name": str(port_obj.get("name") or f"Port{port_obj.get('port', '')}"),
+        "disable": bool(port_obj.get("disable", False)),
+        "operation": str(port_obj.get("operation") or "switching"),
+        "profileId": str(port_obj.get("profileId") or ""),
+        "profileName": str(port_obj.get("profileName") or ""),
+        "profileOverrideEnable": bool(port_obj.get("profileOverrideEnable", False)),
+        "poe": port_obj.get("poe"),
+        "linkSpeed": PORT_LINK_SPEED_LABELS.get(speed_code, str(speed_code)),
+        "duplex": PORT_DUPLEX_LABELS.get(duplex_code, str(duplex_code)),
+        "nativeNetworkId": port_obj.get("nativeNetworkId"),
+        "tagNetworkIds": list(port_obj.get("tagNetworkIds") or []),
+        "untagNetworkIds": list(port_obj.get("untagNetworkIds") or []),
+        "portIsolationEnable": bool(port_obj.get("portIsolationEnable", False)),
+        "lldpMedEnable": bool(port_obj.get("lldpMedEnable", False)),
+        "spanningTreeEnable": bool(port_obj.get("spanningTreeEnable", False)),
+    }
+    if info_obj:
+        summary["isUplink"] = bool(info_obj.get("isUplink"))
+        summary["isLagMember"] = bool(info_obj.get("isLagMember"))
+        summary["carriesController"] = bool(info_obj.get("carriesController"))
+    return summary
+
+
+def _build_switch_port_patch(
+    base_port: Mapping[str, Any],
+    *,
+    name: Optional[str] = None,
+    profile_id: Optional[str] = None,
+    profile_override_enable: Optional[bool] = None,
+    poe: Optional[int] = None,
+    link_speed: Optional[int] = None,
+    duplex: Optional[int] = None,
+    native_network_id: Optional[str] = None,
+    tagged_network_ids: Optional[Sequence[str]] = None,
+    untagged_network_ids: Optional[Sequence[str]] = None,
+    port_isolation_enable: Optional[bool] = None,
+    lldp_med_enable: Optional[bool] = None,
+    spanning_tree_enable: Optional[bool] = None,
+    legacy_disable: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Construct an Omada ``editPortModel``-compliant payload for ``switches/{MAC}/ports/{port}``."""
+    override_enabled = (
+        bool(profile_override_enable)
+        if profile_override_enable is not None
+        else bool(base_port.get("profileOverrideEnable", False))
+    )
+    body: Dict[str, Any] = {
+        "name": str(base_port.get("name") or "") if name is None else str(name),
+        "profileId": str(base_port.get("profileId") or "") if profile_id is None else str(profile_id),
+        "profileOverrideEnable": override_enabled,
+        "profileVlanOverrideEnable": bool(base_port.get("profileVlanOverrideEnable", True)),
+        "dot1pPriority": as_int(base_port.get("dot1pPriority"), 0),
+        "trustMode": as_int(base_port.get("trustMode"), 0),
+        "linkSpeed": as_int(base_port.get("linkSpeed"), 0) if link_speed is None else int(link_speed),
+        "duplex": as_int(base_port.get("duplex"), 0) if duplex is None else int(duplex),
+    }
+    if legacy_disable is not None:
+        body["disable"] = bool(legacy_disable)
+    if base_port.get("nativeNetworkId") is not None or native_network_id is not None:
+        body["nativeNetworkId"] = (
+            str(base_port.get("nativeNetworkId") or "")
+            if native_network_id is None
+            else (str(native_network_id) if native_network_id else None)
+        )
+    vlan_custom = (
+        tagged_network_ids is not None
+        or untagged_network_ids is not None
+        or native_network_id is not None
+    )
+    if vlan_custom:
+        body["networkTagsSetting"] = 2
+        if tagged_network_ids is not None:
+            body["tagNetworkIds"] = [str(x) for x in tagged_network_ids]
+        elif base_port.get("tagNetworkIds") is not None:
+            body["tagNetworkIds"] = list(base_port.get("tagNetworkIds") or [])
+        if untagged_network_ids is not None:
+            body["untagNetworkIds"] = [str(x) for x in untagged_network_ids]
+        elif base_port.get("untagNetworkIds") is not None:
+            body["untagNetworkIds"] = list(base_port.get("untagNetworkIds") or [])
+    elif "networkTagsSetting" in base_port:
+        body["networkTagsSetting"] = base_port.get("networkTagsSetting")
+
+    # Omada UI editPortModel only sends override-controlled fields when profileOverrideEnable=True.
+    if override_enabled:
+        body["operation"] = str(base_port.get("operation") or "switching")
+        if poe is not None:
+            body["poe"] = int(poe)
+        elif base_port.get("poe") is not None:
+            body["poe"] = base_port.get("poe")
+        if port_isolation_enable is not None:
+            body["portIsolationEnable"] = bool(port_isolation_enable)
+        elif "portIsolationEnable" in base_port:
+            body["portIsolationEnable"] = bool(base_port.get("portIsolationEnable", False))
+        if lldp_med_enable is not None:
+            body["lldpMedEnable"] = bool(lldp_med_enable)
+        elif "lldpMedEnable" in base_port:
+            body["lldpMedEnable"] = bool(base_port.get("lldpMedEnable", True))
+        if bool(body.get("lldpMedEnable")) and "topoNotifyEnable" in base_port:
+            body["topoNotifyEnable"] = bool(base_port.get("topoNotifyEnable", False))
+        if spanning_tree_enable is not None:
+            body["spanningTreeEnable"] = bool(spanning_tree_enable)
+        elif "spanningTreeEnable" in base_port:
+            body["spanningTreeEnable"] = bool(base_port.get("spanningTreeEnable", False))
+        for opt_k in ("bandWidthCtrlType", "flowControlEnable", "eeeEnable", "fastLeaveEnable", "loopbackDetectEnable", "dot1x"):
+            if opt_k in base_port and base_port[opt_k] is not None:
+                body[opt_k] = base_port[opt_k]
+    return body
+
+
+def update_switch_port(
+    client: OmadaClient,
+    deviceMac: str,
+    port: int,
+    enabled: Optional[bool] = None,
+    name: Optional[str] = None,
+    profileId: Optional[str] = None,
+    profileName: Optional[str] = None,
+    profileOverrideEnable: Optional[bool] = None,
+    poeEnabled: Optional[bool] = None,
+    linkSpeed: Optional[Any] = None,
+    duplex: Optional[Any] = None,
+    nativeNetworkId: Optional[str] = None,
+    taggedNetworkIds: Optional[List[str]] = None,
+    untaggedNetworkIds: Optional[List[str]] = None,
+    portIsolationEnable: Optional[bool] = None,
+    lldpMedEnable: Optional[bool] = None,
+    spanningTreeEnable: Optional[bool] = None,
+    allowUplinkMutation: bool = False,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Update switch port profile, enablement, PoE mode, speed/duplex, or overrides."""
+    if not isinstance(port, int) or isinstance(port, bool) or port <= 0:
+        raise OmadaError(f"port must be a positive integer, got {port!r}")
+    site = _site(client)
+    sw_dev = resolve_raw_device(client, site, deviceMac, expected_type="switch")
+    norm_mac = _normalize_mac(str(sw_dev.get("mac") or deviceMac))
+    dev_mac = _omada_mac(norm_mac)
+    target_id = f"{norm_mac}:{port}"
+    _require_confirm("update_switch_port", target_id, dryRun, confirm)
+
+    ports_data = collect_switch_ports_data(client, site, sw_dev, include_cable_test=False)
+    port_info = next((p for p in ports_data.get("ports") or [] if as_int(p.get("port"), 0) == port), None)
+    if port_info is None:
+        raise OmadaError(f"port {port} was not found on switch {sw_dev.get('name') or norm_mac} ({norm_mac})")
+
+    def _fetch_raw_port() -> Dict[str, Any]:
+        try:
+            detail = client.api_result(f"sites/{site.site_id}/switches/{dev_mac}/ports/{port}")
+            if isinstance(detail, Mapping) and detail.get("port") is not None:
+                return dict(detail)
+        except OmadaError:
+            pass
+        rows = _unwrap_rows(client.api_result(f"sites/{site.site_id}/switches/{dev_mac}/ports"))
+        found = next((dict(r) for r in rows if as_int(r.get("port"), 0) == port), None)
+        if found is None:
+            raise OmadaError(f"raw port {port} disappeared from switch {norm_mac}")
+        return found
+
+    raw_port = _fetch_raw_port()
+    profiles = _fetch_lan_profiles(client, site)
+    disable_prof = next((p for p in profiles if as_int(p.get("type"), -1) == 1 or str(p.get("name") or "").strip().lower() == "disable"), None)
+    all_prof = next((p for p in profiles if as_int(p.get("type"), -1) == 0 or str(p.get("name") or "").strip().lower() == "all"), None)
+
+    target_profile_id: Optional[str] = None
+    target_profile_name: Optional[str] = None
+    if profileId is not None or profileName is not None:
+        if profileId and profileName:
+            p_by_id = _resolve_by_id_or_name(profiles, str(profileId), label="port profile")
+            p_by_name = _resolve_by_id_or_name(profiles, str(profileName), label="port profile")
+            if str(p_by_id.get("id")) != str(p_by_name.get("id")):
+                raise OmadaError(f"conflicting profileId={profileId!r} and profileName={profileName!r}")
+            prof = p_by_id
+        else:
+            prof = _resolve_by_id_or_name(
+                profiles,
+                str(profileId if profileId is not None else profileName),
+                label="port profile",
+            )
+        target_profile_id = str(prof.get("id") or "")
+        target_profile_name = str(prof.get("name") or "")
+    elif enabled is False:
+        if disable_prof is None or not disable_prof.get("id"):
+            raise OmadaError(
+                "built-in Disable port profile (type=1) was not found on this controller",
+                hint="Pass an explicit profileId/profileName or ensure default switch profiles exist.",
+            )
+        target_profile_id = str(disable_prof["id"])
+        target_profile_name = str(disable_prof.get("name") or "Disable")
+    elif enabled is True:
+        cur_pid = str(raw_port.get("profileId") or "")
+        is_currently_disabled = bool(raw_port.get("disable")) or (
+            disable_prof is not None and cur_pid == str(disable_prof.get("id") or "")
+        )
+        if is_currently_disabled:
+            if all_prof is None or not all_prof.get("id"):
+                raise OmadaError(
+                    "port is disabled and no profileId/profileName was specified to re-enable it",
+                    hint="Supply profileName (e.g. 'All') or profileId.",
+                )
+            target_profile_id = str(all_prof["id"])
+            target_profile_name = str(all_prof.get("name") or "All")
+
+    disabling_by_profile = disable_prof is not None and target_profile_id == str(disable_prof.get("id") or "")
+    is_disabling = (enabled is False) or disabling_by_profile
+    mutating_profile_or_vlan = (
+        target_profile_id is not None and target_profile_id != str(raw_port.get("profileId") or "")
+    ) or any(v is not None for v in (nativeNetworkId, taggedNetworkIds, untaggedNetworkIds, portIsolationEnable))
+
+    is_uplink = bool(port_info.get("isUplink"))
+    is_lag = bool(port_info.get("isLagMember")) or str(raw_port.get("operation") or "").lower() == "aggregating"
+    carries_ctrl = bool(port_info.get("carriesController"))
+
+    warnings: List[str] = []
+    guard_reasons: List[str] = []
+    if is_uplink:
+        guard_reasons.append("detected switch uplink port")
+    if is_lag:
+        guard_reasons.append(f"LAG member port (lagId={port_info.get('lagId')})")
+    if carries_ctrl:
+        guard_reasons.append("carries controller/MCP host traffic")
+
+    if (is_disabling or mutating_profile_or_vlan) and guard_reasons:
+        msg = f"Refusing port disable/profile/VLAN change on {norm_mac} port {port}: " + "; ".join(guard_reasons)
+        if not allowUplinkMutation:
+            raise OmadaError(
+                msg,
+                hint="Pass allowUplinkMutation=True only with an out-of-band management path if this change is intentional.",
+            )
+        warnings.append(f"ANTI-STRANDING GUARD BYPASSED (allowUplinkMutation=True): {'; '.join(guard_reasons)}.")
+
+    override_fields_set = any(v is not None for v in (poeEnabled, portIsolationEnable, lldpMedEnable, spanningTreeEnable))
+    if override_fields_set:
+        if profileOverrideEnable is False:
+            raise OmadaError(
+                "cannot disable profileOverrideEnable while modifying poeEnabled/portIsolationEnable/lldpMedEnable/spanningTreeEnable",
+                hint="Omit profileOverrideEnable or set profileOverrideEnable=True.",
+            )
+        effective_override = True
+    else:
+        effective_override = profileOverrideEnable
+
+    poe_code: Optional[int] = None
+    if poeEnabled is not None:
+        if not bool(port_info.get("poeSupported")) and poeEnabled:
+            raise OmadaError(f"port {port} on switch {norm_mac} does not support PoE")
+        poe_code = 1 if poeEnabled else 0
+
+    downlinks = [d for d in (port_info.get("downlinkDevices") or []) if isinstance(d, Mapping)]
+    powered_downlinks = [
+        f"{d.get('name') or d.get('mac')} ({d.get('type') or 'device'})"
+        for d in downlinks
+        if str(d.get("type") or "").lower() in ("ap", "switch")
+    ]
+    if poeEnabled is False or is_disabling:
+        if carries_ctrl and not allowUplinkMutation:
+            raise OmadaError(
+                f"Refusing to remove PoE or disable port {port} on {norm_mac}: port carries controller/MCP host traffic",
+                hint="Pass allowUplinkMutation=True if overriding intentionally.",
+            )
+        if powered_downlinks:
+            warnings.append(
+                f"Disabling/removing PoE on port {port} affects connected adopted device(s): {', '.join(powered_downlinks)}."
+            )
+
+    speed_code = _parse_code_map(linkSpeed, _LINK_SPEED_TO_CODE, label="linkSpeed") if linkSpeed is not None else None
+    duplex_code = _parse_code_map(duplex, _DUPLEX_TO_CODE, label="duplex") if duplex is not None else None
+
+    if not any(
+        v is not None
+        for v in (
+            enabled,
+            name,
+            target_profile_id,
+            profileOverrideEnable,
+            poe_code,
+            speed_code,
+            duplex_code,
+            nativeNetworkId,
+            taggedNetworkIds,
+            untaggedNetworkIds,
+            portIsolationEnable,
+            lldpMedEnable,
+            spanningTreeEnable,
+        )
+    ):
+        raise OmadaError("specify at least one switch port attribute to update")
+
+    body = _build_switch_port_patch(
+        raw_port,
+        name=name,
+        profile_id=target_profile_id,
+        profile_override_enable=effective_override,
+        poe=poe_code,
+        link_speed=speed_code,
+        duplex=duplex_code,
+        native_network_id=nativeNetworkId,
+        tagged_network_ids=taggedNetworkIds,
+        untagged_network_ids=untaggedNetworkIds,
+        port_isolation_enable=portIsolationEnable,
+        lldp_med_enable=lldpMedEnable,
+        spanning_tree_enable=spanningTreeEnable,
+    )
+
+    before_summary = _switch_port_summary(raw_port, port_info)
+    after_preview_raw = {**raw_port, **body}
+    if target_profile_name:
+        after_preview_raw["profileName"] = target_profile_name
+    if disabling_by_profile:
+        after_preview_raw["disable"] = True
+    elif enabled is True:
+        after_preview_raw["disable"] = False
+    after_summary = _switch_port_summary(after_preview_raw, port_info)
+    diff = _field_diff(before_summary, after_summary, tuple(before_summary.keys()))
+    if not diff:
+        warnings.append("Requested switch port state matches current controller configuration.")
+
+    rollback = {
+        "tool": "update_switch_port",
+        "arguments": {
+            "deviceMac": norm_mac,
+            "port": port,
+            "name": raw_port.get("name"),
+            "profileId": raw_port.get("profileId"),
+            "profileOverrideEnable": bool(raw_port.get("profileOverrideEnable", False)),
+            "linkSpeed": raw_port.get("linkSpeed", 0),
+            "duplex": raw_port.get("duplex", 0),
+            "allowUplinkMutation": allowUplinkMutation,
+            "dryRun": True,
+        },
+    }
+    if dryRun:
+        return _dry_run_result(
+            tool_name="update_switch_port",
+            target_id=target_id,
+            before=before_summary,
+            after=after_summary,
+            diff=diff,
+            warnings=warnings,
+            rollback=rollback,
+        )
+
+    endpoint = f"sites/{site.site_id}/switches/{dev_mac}/ports/{port}"
+
+    def _read_back() -> Dict[str, Any]:
+        return _switch_port_summary(_fetch_raw_port(), port_info)
+
+    def _verify(_before: Any, after_now: Any) -> Tuple[bool, Optional[str]]:
+        if not isinstance(after_now, Mapping):
+            return False, "switch port read-back did not return an object"
+        if name is not None and str(after_now.get("name")) != str(name):
+            return False, f"port name expected {name!r}, got {after_now.get('name')!r}"
+        if target_profile_id is not None and str(after_now.get("profileId")) != target_profile_id:
+            return False, f"profileId expected {target_profile_id!r}, got {after_now.get('profileId')!r}"
+        if effective_override is not None and bool(after_now.get("profileOverrideEnable")) != bool(effective_override):
+            return False, f"profileOverrideEnable expected {effective_override!r}"
+        if poe_code is not None and body.get("profileOverrideEnable") and as_int(after_now.get("poe"), -1) != poe_code:
+            return False, f"poe expected {poe_code!r}, got {after_now.get('poe')!r}"
+        if speed_code is not None:
+            exp_s = PORT_LINK_SPEED_LABELS.get(speed_code, str(speed_code))
+            if str(after_now.get("linkSpeed")) != exp_s:
+                return False, f"linkSpeed expected {exp_s!r}, got {after_now.get('linkSpeed')!r}"
+        return True, None
+
+    def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
+        live = _read_back()
+        ok, _ = _verify(before_summary, live)
+        return ok, body, live
+
+    write_res = client.write(
+        endpoint,
+        method="PATCH",
+        data=body,
+        tool_name="update_switch_port",
+        target=target_id,
+        before=before_summary,
+        snapshot_payload=raw_port,
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=sorted(diff.keys()),
+    )
+    return _committed_result(
+        tool_name="update_switch_port",
+        target_id=target_id,
+        before=write_res["before"],
+        after=write_res["after"],
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=warnings,
+        rollback=rollback,
+    )
+
+
+def cycle_poe_port(
+    client: OmadaClient,
+    deviceMac: str,
+    port: int,
+    allowUplinkMutation: bool = False,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Momentarily power-cycle PoE on a switch port (``POST cmd/switches/{MAC}/ports/{port}/restart``)."""
+    if not isinstance(port, int) or isinstance(port, bool) or port <= 0:
+        raise OmadaError(f"port must be a positive integer, got {port!r}")
+    site = _site(client)
+    sw_dev = resolve_raw_device(client, site, deviceMac, expected_type="switch")
+    norm_mac = _normalize_mac(str(sw_dev.get("mac") or deviceMac))
+    dev_mac = _omada_mac(norm_mac)
+    target_id = f"{norm_mac}:{port}"
+    _require_confirm("cycle_poe_port", target_id, dryRun, confirm)
+
+    ports_data = collect_switch_ports_data(client, site, sw_dev, include_cable_test=False)
+    port_info = next((p for p in ports_data.get("ports") or [] if as_int(p.get("port"), 0) == port), None)
+    if port_info is None:
+        raise OmadaError(f"port {port} was not found on switch {norm_mac}")
+    if not bool(port_info.get("poeSupported")):
+        raise OmadaError(
+            f"port {port} on switch {norm_mac} does not support PoE",
+            hint="Select a PoE-capable port.",
+        )
+
+    warnings: List[str] = []
+    guard_reasons: List[str] = []
+    if port_info.get("carriesController"):
+        guard_reasons.append("carries controller/MCP host traffic")
+    if port_info.get("isUplink"):
+        guard_reasons.append("detected switch uplink port")
+    if port_info.get("isLagMember"):
+        guard_reasons.append(f"LAG member port (lagId={port_info.get('lagId')})")
+    if guard_reasons:
+        msg = f"Refusing to PoE-cycle port {port} on {norm_mac}: " + "; ".join(guard_reasons)
+        if not allowUplinkMutation:
+            raise OmadaError(
+                msg,
+                hint="Pass allowUplinkMutation=True only during an out-of-band maintenance window.",
+            )
+        warnings.append(f"ANTI-STRANDING GUARD BYPASSED (allowUplinkMutation=True): {'; '.join(guard_reasons)}.")
+    downlinks = [d for d in (port_info.get("downlinkDevices") or []) if isinstance(d, Mapping)]
+    adopted_targets = [
+        f"{d.get('name') or d.get('mac')} ({d.get('type') or 'device'})"
+        for d in downlinks
+        if str(d.get("type") or "").lower() in ("ap", "switch")
+    ]
+    if adopted_targets:
+        warnings.append(
+            f"WARNING: PoE cycle will briefly power off connected adopted device(s): {', '.join(adopted_targets)}."
+        )
+    if as_int(port_info.get("poeMode"), 1) == 0:
+        warnings.append("Port PoE mode is currently off (poeMode=0); cycling may have no effect.")
+
+    before = {
+        "mac": norm_mac,
+        "port": port,
+        "name": port_info.get("name"),
+        "poeMode": port_info.get("poeMode"),
+        "poeDelivering": port_info.get("poeDelivering"),
+        "poePowerW": port_info.get("poePowerW"),
+        "downlinkDevices": downlinks,
+    }
+    diff = {"poeCycle": {"before": False, "after": True}}
+    if dryRun:
+        return _dry_run_result(
+            tool_name="cycle_poe_port",
+            target_id=target_id,
+            before=before,
+            after={**before, "poeCycleTriggered": True},
+            diff=diff,
+            warnings=warnings,
+            rollback=None,
+        )
+
+    write_res = client.write(
+        f"sites/{site.site_id}/cmd/switches/{dev_mac}/ports/{port}/restart",
+        method="POST",
+        data={},
+        tool_name="cycle_poe_port",
+        target=target_id,
+        before=before,
+        snapshot_payload=port_info,
+        fields_changed=["poeCycle"],
+    )
+    return _committed_result(
+        tool_name="cycle_poe_port",
+        target_id=target_id,
+        before=write_res["before"],
+        after={**before, "poeCycleTriggered": True},
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=warnings,
+        rollback=None,
+    )
+
+
+def upsert_port_profile(
+    client: OmadaClient,
+    name: str,
+    profileId: Optional[str] = None,
+    poeMode: Optional[Any] = None,
+    nativeNetworkId: Optional[str] = None,
+    nativeNetworkName: Optional[str] = None,
+    taggedNetworkIds: Optional[List[str]] = None,
+    untaggedNetworkIds: Optional[List[str]] = None,
+    portIsolationEnable: Optional[bool] = None,
+    lldpMedEnable: Optional[bool] = None,
+    spanningTreeEnable: Optional[bool] = None,
+    loopbackDetectEnable: Optional[bool] = None,
+    flowControlEnable: Optional[bool] = None,
+    eeeEnable: Optional[bool] = None,
+    dot1x: Optional[int] = None,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create or update a switch port profile (``setting/lan/profiles``)."""
+    prof_name = str(name or "").strip()
+    if not prof_name:
+        raise OmadaError("port profile name must be non-empty")
+    site = _site(client)
+    profiles = _fetch_lan_profiles(client, site)
+
+    existing: Optional[Dict[str, Any]] = None
+    if profileId:
+        existing = _resolve_by_id_or_name(profiles, str(profileId), label="port profile")
+    else:
+        matches = [dict(p) for p in profiles if str(p.get("name") or "").strip() == prof_name]
+        if matches:
+            existing = matches[0]
+
+    is_update = existing is not None
+    if is_update and bool(existing.get("prohibitModify")):
+        raise OmadaError(
+            f"port profile {existing.get('name')!r} is protected (prohibitModify=true) and cannot be modified",
+            hint="Create a custom port profile instead of modifying built-in protected profiles.",
+        )
+
+    target_id = str(existing.get("id")) if is_update and existing.get("id") else prof_name
+    _require_confirm("upsert_port_profile", target_id, dryRun, confirm)
+
+    resolved_native_id = nativeNetworkId
+    if nativeNetworkName is not None and nativeNetworkId is None:
+        nets = _fetch_lan_collection(client, site)
+        net = _resolve_lan_network(nets, vlan=nativeNetworkName)
+        resolved_native_id = str(net.get("id") or "")
+
+    poe_code: Optional[int] = None
+    if poeMode is not None:
+        poe_code = _parse_code_map(poeMode, _PORT_PROFILE_POE_TO_CODE, label="poeMode")
+
+    def _summarize_prof(p: Mapping[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": str(p.get("id") or ""),
+            "name": str(p.get("name") or ""),
+            "poe": p.get("poe"),
+            "nativeNetworkId": p.get("nativeNetworkId"),
+            "tagNetworkIds": list(p.get("tagNetworkIds") or []),
+            "untagNetworkIds": list(p.get("untagNetworkIds") or []),
+            "portIsolationEnable": bool(p.get("portIsolationEnable", False)),
+            "lldpMedEnable": bool(p.get("lldpMedEnable", True)),
+            "spanningTreeEnable": bool(p.get("spanningTreeEnable", True)),
+            "loopbackDetectEnable": bool(p.get("loopbackDetectEnable", False)),
+            "flowControlEnable": bool(p.get("flowControlEnable", False)),
+            "eeeEnable": bool(p.get("eeeEnable", False)),
+            "dot1x": p.get("dot1x", 2),
+        }
+
+    base: Dict[str, Any] = copy.deepcopy(existing) if existing is not None else {
+        "name": prof_name,
+        "poe": 2,
+        "vlanConfigEnable": False,
+        "networkTagsSetting": 2,
+        "nativeNetworkId": None,
+        "tagNetworkIds": [],
+        "untagNetworkIds": [],
+        "voiceNetworkEnable": False,
+        "voiceNetworkId": None,
+        "voiceDscpEnable": False,
+        "dot1x": 2,
+        "portIsolationEnable": False,
+        "lldpMedEnable": True,
+        "topoNotifyEnable": False,
+        "bandWidthCtrlType": 0,
+        "spanningTreeEnable": True,
+        "loopbackDetectEnable": False,
+        "loopbackDetectVlanBasedEnable": False,
+        "flowControlEnable": False,
+        "eeeEnable": False,
+        "fastLeaveEnable": False,
+        "dot1pPriority": 0,
+        "trustMode": 0,
+    }
+    base["name"] = prof_name
+    if poe_code is not None:
+        base["poe"] = poe_code
+    if resolved_native_id is not None:
+        base["nativeNetworkId"] = resolved_native_id or None
+    if taggedNetworkIds is not None:
+        base["tagNetworkIds"] = [str(x) for x in taggedNetworkIds]
+        base["networkTagsSetting"] = 2
+    if untaggedNetworkIds is not None:
+        base["untagNetworkIds"] = [str(x) for x in untaggedNetworkIds]
+        base["networkTagsSetting"] = 2
+    if portIsolationEnable is not None:
+        base["portIsolationEnable"] = bool(portIsolationEnable)
+    if lldpMedEnable is not None:
+        base["lldpMedEnable"] = bool(lldpMedEnable)
+    if spanningTreeEnable is not None:
+        base["spanningTreeEnable"] = bool(spanningTreeEnable)
+        if spanningTreeEnable:
+            base["loopbackDetectEnable"] = False
+    if loopbackDetectEnable is not None:
+        base["loopbackDetectEnable"] = bool(loopbackDetectEnable)
+        if loopbackDetectEnable:
+            base["spanningTreeEnable"] = False
+    if flowControlEnable is not None:
+        base["flowControlEnable"] = bool(flowControlEnable)
+    if eeeEnable is not None:
+        base["eeeEnable"] = bool(eeeEnable)
+    if dot1x is not None:
+        base["dot1x"] = int(dot1x)
+
+    # Strip server-assigned keys on PATCH/POST
+    wire_body = copy.deepcopy(base)
+    for k in ("id", "site", "flag", "prohibitModify", "type", "resource", "networkConflict", "supportESEnable"):
+        wire_body.pop(k, None)
+
+    before_summary = _summarize_prof(existing) if existing is not None else None
+    after_preview = _summarize_prof(base)
+    diff = (
+        _field_diff(before_summary, after_preview, tuple(after_preview.keys()))
+        if before_summary is not None
+        else {"profile": {"before": None, "after": after_preview}}
+    )
+
+    if dryRun:
+        return _dry_run_result(
+            tool_name="upsert_port_profile",
+            target_id=target_id,
+            before=before_summary,
+            after=after_preview,
+            diff=diff,
+            warnings=[],
+            rollback=None,
+        )
+
+    method = "PATCH" if is_update else "POST"
+    endpoint = f"sites/{site.site_id}/setting/lan/profiles/{existing['id']}" if is_update else f"sites/{site.site_id}/setting/lan/profiles"
+
+    def _read_back() -> Optional[Dict[str, Any]]:
+        rows = _fetch_lan_profiles(client, site)
+        found = None
+        if is_update:
+            found = next((r for r in rows if str(r.get("id")) == str(existing["id"])), None)
+        if found is None:
+            found = next((r for r in rows if str(r.get("name")) == prof_name), None)
+        return _summarize_prof(found) if found else None
+
+    def _verify(_before: Any, after_now: Any) -> Tuple[bool, Optional[str]]:
+        if not isinstance(after_now, Mapping):
+            return False, f"port profile {prof_name!r} missing on read-back"
+        if str(after_now.get("name")) != prof_name:
+            return False, f"profile name expected {prof_name!r}, got {after_now.get('name')!r}"
+        if poe_code is not None and as_int(after_now.get("poe"), -1) != poe_code:
+            return False, f"profile poe expected {poe_code!r}, got {after_now.get('poe')!r}"
+        return True, None
+
+    def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
+        live = _read_back()
+        ok, _ = _verify(before_summary, live)
+        return ok, (wire_body if is_update else None), live
+
+    snapshot_payload = (
+        {"action": "update", "profile": existing}
+        if is_update
+        else {"action": "create", "name": prof_name, "existingIds": [str(p.get("id")) for p in profiles if p.get("id")]}
+    )
+    write_res = client.write(
+        endpoint,
+        method=method,
+        data=wire_body,
+        tool_name="upsert_port_profile",
+        target=target_id,
+        before=before_summary,
+        snapshot_payload=snapshot_payload,
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=sorted(diff.keys()),
+    )
+    return _committed_result(
+        tool_name="upsert_port_profile",
+        target_id=target_id,
+        before=write_res["before"],
+        after=write_res["after"],
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=[],
+        rollback=None,
+    )
+
+
+def update_ap_radio(
+    client: OmadaClient,
+    deviceMac: str,
+    band: str,
+    enabled: Optional[bool] = None,
+    channel: Optional[Any] = None,
+    channelWidth: Optional[str] = None,
+    txPowerLevel: Optional[Any] = None,
+    txPower: Optional[int] = None,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Update one AP radio band (``PUT eaps/{MAC}/config/radios``) preserving sibling bands."""
+    band_norm = str(band or "").strip().lower()
+    if band_norm == "5g1":
+        band_norm = "5g"
+    site = _site(client)
+    ap_stub = resolve_raw_device(client, site, deviceMac, expected_type="ap")
+    norm_mac = _normalize_mac(str(ap_stub.get("mac") or deviceMac))
+    dev_mac = _omada_mac(norm_mac)
+    target_id = f"{norm_mac}:{band_norm}"
+    _require_confirm("update_ap_radio", target_id, dryRun, confirm)
+
+    def _fetch_ap() -> Dict[str, Any]:
+        raw = client.api_result(f"sites/{site.site_id}/eaps/{dev_mac}")
+        if not isinstance(raw, Mapping):
+            raise OmadaError(f"failed to fetch AP detail for {norm_mac}")
+        return dict(raw)
+
+    ap_detail = _fetch_ap()
+    if txPower is not None and txPowerLevel is None:
+        txPowerLevel = "custom"
+    rs_key, target_wire_channel, validated, warnings = validate_ap_radio_change(
+        client,
+        site,
+        ap_detail,
+        band_norm,
+        channel=channel,
+        channel_width=channelWidth,
+        tx_power_level=txPowerLevel,
+        tx_power=txPower,
+    )
+
+    if not any(v is not None for v in (enabled, channel, channelWidth, txPowerLevel, txPower)):
+        raise OmadaError("specify at least one radio attribute to update (enabled, channel, channelWidth, txPowerLevel, txPower)")
+
+    if bool(ap_detail.get("wirelessLinked")):
+        warnings.append("AP is wirelessly meshed (wirelessLinked=true); radio/channel changes may disrupt mesh uplink.")
+
+    all_rs_keys = [
+        k for k in ("radioSetting2g", "radioSetting5g", "radioSetting5g1", "radioSetting5g2", "radioSetting6g")
+        if isinstance(ap_detail.get(k), Mapping)
+    ]
+    if rs_key not in all_rs_keys:
+        all_rs_keys.append(rs_key)
+
+    sibling_before = {k: copy.deepcopy(dict(ap_detail[k])) for k in all_rs_keys if k != rs_key}
+    new_rs = copy.deepcopy(dict(ap_detail.get(rs_key) or {}))
+    if enabled is not None:
+        new_rs["radioEnable"] = bool(enabled)
+        if not bool(enabled):
+            other_enabled = any(
+                bool(dict(ap_detail[k]).get("radioEnable", True))
+                for k in all_rs_keys
+                if k != rs_key
+            )
+            if not other_enabled:
+                warnings.append("WARNING: Disabling this radio leaves no enabled Wi-Fi radios on this AP.")
+    if channel is not None:
+        new_rs["channel"] = target_wire_channel
+        if target_wire_channel == "0":
+            new_rs["freq"] = 0
+    if channelWidth is not None:
+        new_rs["channelWidth"] = validated["channelWidthCode"]
+    if txPowerLevel is not None:
+        new_rs["txPowerLevel"] = validated["txPowerLevel"]
+        if validated["txPowerLevel"] != 3:
+            new_rs.pop("txPower", None)
+    if txPower is not None:
+        new_rs["txPowerLevel"] = 3
+        new_rs["txPower"] = int(txPower)
+
+    put_body: Dict[str, Any] = {rs_key: new_rs}
+    for sk, sval in sibling_before.items():
+        put_body[sk] = sval
+
+    def _radio_view(rs: Mapping[str, Any]) -> Dict[str, Any]:
+        wcode = str(rs.get("channelWidth") or "")
+        plvl = rs.get("txPowerLevel")
+        return {
+            "radioEnable": bool(rs.get("radioEnable", True)),
+            "channel": rs.get("channel"),
+            "channelWidth": CHANNEL_WIDTH_LABELS.get(wcode, wcode),
+            "channelWidthCode": wcode,
+            "txPowerLevel": TX_POWER_LEVEL_LABELS.get(as_int(plvl, -1), plvl),
+            "txPower": rs.get("txPower"),
+        }
+
+    before_view = _radio_view(ap_detail.get(rs_key) or {})
+    after_view = _radio_view(new_rs)
+    diff = _field_diff(before_view, after_view, tuple(before_view.keys()))
+    rollback = {
+        "tool": "update_ap_radio",
+        "arguments": {
+            "deviceMac": norm_mac,
+            "band": band_norm,
+            "enabled": before_view["radioEnable"],
+            "channel": before_view["channel"],
+            "channelWidth": before_view["channelWidthCode"] or "auto",
+            "txPowerLevel": as_int((ap_detail.get(rs_key) or {}).get("txPowerLevel"), 4),
+            "dryRun": True,
+        },
+    }
+    if dryRun:
+        return _dry_run_result(
+            tool_name="update_ap_radio",
+            target_id=target_id,
+            before=before_view,
+            after=after_view,
+            diff=diff,
+            warnings=warnings,
+            rollback=rollback,
+        )
+
+    endpoint = f"sites/{site.site_id}/eaps/{dev_mac}/config/radios"
+
+    def _read_back() -> Dict[str, Any]:
+        now = _fetch_ap()
+        return {
+            "target": _radio_view(now.get(rs_key) or {}),
+            "siblings": {sk: _radio_view(now.get(sk) or {}) for sk in sibling_before},
+        }
+
+    def _verify(_before: Any, after_now: Any) -> Tuple[bool, Optional[str]]:
+        if not isinstance(after_now, Mapping):
+            return False, "AP radio read-back failed"
+        tgt = after_now.get("target") or {}
+        if enabled is not None and bool(tgt.get("radioEnable")) != bool(enabled):
+            return False, f"{rs_key}.radioEnable expected {enabled!r}, got {tgt.get('radioEnable')!r}"
+        if channel is not None and str(tgt.get("channel")) != str(target_wire_channel):
+            return False, f"{rs_key}.channel expected {target_wire_channel!r}, got {tgt.get('channel')!r}"
+        if channelWidth is not None and str(tgt.get("channelWidthCode")) != str(validated["channelWidthCode"]):
+            return False, f"{rs_key}.channelWidth expected {validated['channelWidthCode']!r}, got {tgt.get('channelWidthCode')!r}"
+        # Verify sibling bands were not altered or wiped.
+        sib_now = after_now.get("siblings") or {}
+        for sk, sb_raw in sibling_before.items():
+            if _radio_view(sb_raw) != sib_now.get(sk):
+                return False, f"sibling radio {sk} unexpectedly changed during {rs_key} update"
+        return True, None
+
+    def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
+        live = _read_back()
+        ok, _ = _verify(before_view, live)
+        return ok, put_body, live
+
+    write_res = client.write(
+        endpoint,
+        method="PUT",
+        data=put_body,
+        tool_name="update_ap_radio",
+        target=target_id,
+        before=before_view,
+        snapshot_payload=ap_detail,
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=sorted(diff.keys()),
+    )
+    after_target = (write_res["after"] or {}).get("target") if isinstance(write_res["after"], Mapping) else write_res["after"]
+    return _committed_result(
+        tool_name="update_ap_radio",
+        target_id=target_id,
+        before=write_res["before"],
+        after=after_target,
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=warnings,
+        rollback=rollback,
+    )
+
+
+def start_rf_scan(
+    client: OmadaClient,
+    deviceMac: str,
+    bands: Optional[List[str]] = None,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Start an AP RF interference scan (``POST cmd/eaps/{MAC}/tools/rfScan``)."""
+    site = _site(client)
+    ap_stub = resolve_raw_device(client, site, deviceMac, expected_type="ap")
+    norm_mac = _normalize_mac(str(ap_stub.get("mac") or deviceMac))
+    dev_mac = _omada_mac(norm_mac)
+    _require_confirm("start_rf_scan", norm_mac, dryRun, confirm)
+
+    ap_detail = client.api_result(f"sites/{site.site_id}/eaps/{dev_mac}")
+    ap_map = dict(ap_detail) if isinstance(ap_detail, Mapping) else dict(ap_stub)
+    if ap_map.get("supportRFScan") is False:
+        raise OmadaError(
+            f"AP {ap_map.get('name') or norm_mac} ({norm_mac}) does not support RF scanning",
+        )
+
+    radio_ids: Optional[List[int]] = None
+    if bands is not None:
+        radio_ids = []
+        for b in bands:
+            bn = str(b or "").strip().lower()
+            if bn not in _BAND_TO_RADIO_ID:
+                raise OmadaError(f"invalid band {b!r}", hint="valid bands: 2g, 5g, 5g2, 6g")
+            rid = _BAND_TO_RADIO_ID[bn]
+            if rid not in radio_ids:
+                radio_ids.append(rid)
+
+    warnings = [
+        "WARNING: Starting an RF scan temporarily disconnects Wi-Fi clients on scanned radio(s) for ~15-60 seconds."
+    ]
+    if bool(ap_map.get("wirelessLinked")):
+        warnings.append("WARNING: AP has a wireless mesh uplink; RF scanning can drop downstream mesh hops.")
+
+    dev_cap = ap_map.get("devCap") if isinstance(ap_map.get("devCap"), Mapping) else {}
+    payload: Dict[str, Any] = {}
+    if radio_ids is not None and dev_cap.get("supportSingleBandRFScan", True):
+        payload["radioIdList"] = radio_ids
+
+    before_rf = {}
+    try:
+        rf_raw = client.api_result(f"sites/{site.site_id}/eaps/{dev_mac}/tools/rfScan")
+        if isinstance(rf_raw, Mapping):
+            before_rf = dict(rf_raw)
+    except OmadaError:
+        pass
+
+    before = {"mac": norm_mac, "name": ap_map.get("name"), "status": before_rf.get("status"), "time": before_rf.get("time")}
+    diff = {"rfScanTriggered": {"before": False, "after": True}}
+    if dryRun:
+        return _dry_run_result(
+            tool_name="start_rf_scan",
+            target_id=norm_mac,
+            before=before,
+            after={**before, "rfScanTriggered": True, "radioIdList": payload.get("radioIdList")},
+            diff=diff,
+            warnings=warnings,
+            rollback=None,
+        )
+
+    write_res = client.write(
+        f"sites/{site.site_id}/cmd/eaps/{dev_mac}/tools/rfScan",
+        method="POST",
+        data=payload,
+        tool_name="start_rf_scan",
+        target=norm_mac,
+        before=before,
+        snapshot_payload={"ap": ap_map, "rfScan": before_rf},
+        fields_changed=["rfScan"],
+    )
+    return _committed_result(
+        tool_name="start_rf_scan",
+        target_id=norm_mac,
+        before=write_res["before"],
+        after={**before, "rfScanTriggered": True},
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=warnings,
+        rollback=None,
+    )
+
+
+def assign_ap_wlan_group(
+    client: OmadaClient,
+    deviceMac: str,
+    wlanGroup: str,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Assign an AP to a WLAN group (``PUT eaps/{MAC}/config/wlans``) preserving overrides."""
+    site = _site(client)
+    ap_stub = resolve_raw_device(client, site, deviceMac, expected_type="ap")
+    norm_mac = _normalize_mac(str(ap_stub.get("mac") or deviceMac))
+    dev_mac = _omada_mac(norm_mac)
+    _require_confirm("assign_ap_wlan_group", norm_mac, dryRun, confirm)
+
+    groups = _fetch_wlan_groups(client, site)
+    target_grp = _resolve_wlan_group(groups, wlanGroup)
+    target_wlan_id = str(target_grp.get("id") or "")
+    if not target_wlan_id:
+        raise OmadaError(f"resolved WLAN group {wlanGroup!r} has no id")
+
+    def _fetch_ap() -> Dict[str, Any]:
+        raw = client.api_result(f"sites/{site.site_id}/eaps/{dev_mac}")
+        if not isinstance(raw, Mapping):
+            raise OmadaError(f"failed to fetch AP detail for {norm_mac}")
+        return dict(raw)
+
+    ap_detail = _fetch_ap()
+    before_wlan_id = str(ap_detail.get("wlanId") or "")
+    grp_by_id = {str(g.get("id") or ""): str(g.get("name") or "") for g in groups}
+
+    overrides = copy.deepcopy(list(ap_detail.get("ssidOverrides") or []))
+    for ov in overrides:
+        if isinstance(ov, dict):
+            ov.pop("psk", None)
+            if ap_detail.get("supportVlanPool"):
+                ov.pop("vlanId", None)
+                ov.setdefault("vlanPoolIds", "1")
+            else:
+                ov.pop("vlanPoolIds", None)
+                ov.setdefault("vlanId", 1)
+
+    body = {"wlanId": target_wlan_id, "ssidOverrides": overrides}
+    before_summary = {"mac": norm_mac, "wlanId": before_wlan_id, "wlanGroupName": grp_by_id.get(before_wlan_id, "")}
+    after_summary = {"mac": norm_mac, "wlanId": target_wlan_id, "wlanGroupName": str(target_grp.get("name") or "")}
+    diff = _field_diff(before_summary, after_summary, ("wlanId", "wlanGroupName"))
+    rollback = {
+        "tool": "assign_ap_wlan_group",
+        "arguments": {"deviceMac": norm_mac, "wlanGroup": before_wlan_id or grp_by_id.get(before_wlan_id, "Default"), "dryRun": True},
+    }
+    if dryRun:
+        return _dry_run_result(
+            tool_name="assign_ap_wlan_group",
+            target_id=norm_mac,
+            before=before_summary,
+            after=after_summary,
+            diff=diff,
+            warnings=[],
+            rollback=rollback,
+        )
+
+    endpoint = f"sites/{site.site_id}/eaps/{dev_mac}/config/wlans"
+
+    def _read_back() -> Dict[str, Any]:
+        now = _fetch_ap()
+        wid = str(now.get("wlanId") or "")
+        return {"mac": norm_mac, "wlanId": wid, "wlanGroupName": grp_by_id.get(wid, "")}
+
+    def _verify(_before: Any, after_now: Any) -> Tuple[bool, Optional[str]]:
+        if not isinstance(after_now, Mapping) or str(after_now.get("wlanId")) != target_wlan_id:
+            return False, f"AP wlanId expected {target_wlan_id!r}, got {after_now.get('wlanId')!r}"
+        return True, None
+
+    def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
+        live = _read_back()
+        ok, _ = _verify(before_summary, live)
+        return ok, body, live
+
+    write_res = client.write(
+        endpoint,
+        method="PUT",
+        data=body,
+        tool_name="assign_ap_wlan_group",
+        target=norm_mac,
+        before=before_summary,
+        snapshot_payload=ap_detail,
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=["wlanId"],
+    )
+    return _committed_result(
+        tool_name="assign_ap_wlan_group",
+        target_id=norm_mac,
+        before=write_res["before"],
+        after=write_res["after"],
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=[],
+        rollback=rollback,
+    )
+
+
+def upsert_policy_route(
+    client: OmadaClient,
+    name: str,
+    routeId: Optional[str] = None,
+    status: bool = True,
+    protocols: Optional[List[int]] = None,
+    sourceType: int = 0,
+    sourceIds: Optional[List[str]] = None,
+    destinationType: int = 1,
+    destinationIds: Optional[List[str]] = None,
+    interfaceIds: Optional[List[str]] = None,
+    backupInterface: bool = True,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create or update a gateway policy-based route (``setting/transmission/policyRoutings``)."""
+    rule_name = str(name or "").strip()
+    if not rule_name:
+        raise OmadaError("policy route name must be non-empty")
+    site = _site(client)
+    _require_gateway(client, site, "Policy routing")
+
+    existing_rules = _fetch_policy_routes(client, site)
+    existing: Optional[Dict[str, Any]] = None
+    if routeId:
+        existing = _resolve_by_id_or_name(existing_rules, str(routeId), label="policy route")
+    else:
+        matches = [dict(r) for r in existing_rules if str(r.get("name") or "").strip() == rule_name]
+        if matches:
+            existing = matches[0]
+    is_update = existing is not None
+    target_id = str(existing["id"]) if is_update and existing.get("id") else rule_name
+    _require_confirm("upsert_policy_route", target_id, dryRun, confirm)
+
+    resolved_src = [str(x) for x in (sourceIds if sourceIds is not None else (existing.get("sourceIds") or [] if existing else []))]
+    resolved_dst = [str(x) for x in (destinationIds if destinationIds is not None else (existing.get("destinationIds") or [] if existing else []))]
+    if not resolved_src:
+        raise OmadaError("sourceIds must contain at least one source network or group ID")
+    if not resolved_dst:
+        raise OmadaError("destinationIds must contain at least one destination group or network ID")
+
+    # Resolve WAN port names or UUIDs against wan/networks
+    wan_info = _fetch_wan_networks(client, site)
+    wan_ports = _unwrap_rows(wan_info.get("wanPortSettings") or wan_info.get("wanPorts") or wan_info.get("portList") or [])
+    wan_by_name = {
+        str(w.get("portName") or w.get("name") or "").strip().lower(): str(w.get("portUuid") or w.get("id") or "")
+        for w in wan_ports if (w.get("portUuid") or w.get("id"))
+    }
+    raw_ifaces: List[str] = []
+    if interfaceIds is not None:
+        raw_ifaces = [wan_by_name.get(str(x).strip().lower(), str(x).strip()) for x in interfaceIds if str(x).strip()]
+    elif existing:
+        if existing.get("interfaceId"):
+            raw_ifaces = [str(existing["interfaceId"])]
+        else:
+            raw_ifaces = [str(x) for x in (existing.get("wanPortIds") or [])]
+    if not raw_ifaces:
+        raise OmadaError("interfaceIds must specify at least one WAN port UUID or name")
+
+    body: Dict[str, Any] = {
+        "name": rule_name,
+        "status": bool(status),
+        "protocols": [int(p) for p in (protocols if protocols is not None else (existing.get("protocols") or [256] if existing else [256]))],
+        "sourceType": int(sourceType),
+        "sourceIds": resolved_src,
+        "destinationType": int(destinationType),
+        "destinationIds": resolved_dst,
+        "backupInterface": bool(backupInterface),
+    }
+    if len(raw_ifaces) > 1:
+        body["interfaceType"] = 4
+        body["wanPortIds"] = raw_ifaces
+    else:
+        body["interfaceType"] = 0
+        body["interfaceId"] = raw_ifaces[0]
+
+    before_summary = copy.deepcopy(existing) if existing else None
+    diff = (
+        _field_diff(before_summary, body, tuple(body.keys()))
+        if before_summary
+        else {"route": {"before": None, "after": body}}
+    )
+    if dryRun:
+        return _dry_run_result(
+            tool_name="upsert_policy_route",
+            target_id=target_id,
+            before=before_summary,
+            after=body,
+            diff=diff,
+            warnings=[],
+            rollback=None,
+        )
+
+    method = "PUT" if is_update else "POST"
+    endpoint = f"sites/{site.site_id}/setting/transmission/policyRoutings/{existing['id']}" if is_update else f"sites/{site.site_id}/setting/transmission/policyRoutings"
+
+    def _read_back() -> Optional[Dict[str, Any]]:
+        rows = _fetch_policy_routes(client, site)
+        if is_update:
+            found = next((r for r in rows if str(r.get("id")) == str(existing["id"])), None)
+            if found:
+                return found
+        return next((r for r in rows if str(r.get("name")) == rule_name), None)
+
+    def _verify(_before: Any, after_now: Any) -> Tuple[bool, Optional[str]]:
+        if not isinstance(after_now, Mapping):
+            return False, f"policy route {rule_name!r} missing on read-back"
+        if str(after_now.get("name")) != rule_name:
+            return False, f"policy route name expected {rule_name!r}, got {after_now.get('name')!r}"
+        if bool(after_now.get("status")) != bool(status):
+            return False, f"policy route status expected {status!r}"
+        return True, None
+
+    def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
+        live = _read_back()
+        ok, _ = _verify(before_summary, live)
+        return ok, (body if is_update else None), live
+
+    snap = (
+        {"action": "update", "rule": existing}
+        if is_update
+        else {"action": "create", "name": rule_name, "existingIds": [str(r.get("id")) for r in existing_rules if r.get("id")]}
+    )
+    write_res = client.write(
+        endpoint,
+        method=method,
+        data=body,
+        tool_name="upsert_policy_route",
+        target=target_id,
+        before=before_summary,
+        snapshot_payload=snap,
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=sorted(diff.keys()),
+    )
+    return _committed_result(
+        tool_name="upsert_policy_route",
+        target_id=target_id,
+        before=write_res["before"],
+        after=write_res["after"],
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=[],
+        rollback=None,
+    )
+
+
+def delete_policy_route(
+    client: OmadaClient,
+    routeId: str,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Delete a gateway policy route by ID or unique name."""
+    site = _site(client)
+    _require_gateway(client, site, "Policy routing")
+    rules = _fetch_policy_routes(client, site)
+    target = _resolve_by_id_or_name(rules, str(routeId), label="policy route")
+    rid = str(target["id"])
+    return _delete_entity(
+        client,
+        tool_name="delete_policy_route",
+        target_id=rid,
+        endpoint=f"sites/{site.site_id}/setting/transmission/policyRoutings/{rid}",
+        before=target,
+        snapshot_payload=target,
+        fetch_all=lambda: _fetch_policy_routes(client, site),
+        match_fn=lambda row: str(row.get("id")) == rid,
+        rollback=None,
+        warnings=[],
+        dry_run=dryRun,
+        confirm=confirm,
+        label="policyRoute",
+    )
+
+
+def upsert_lan_dns_rule(
+    client: OmadaClient,
+    name: str,
+    domain: str,
+    ruleType: Any = "ip",
+    ruleId: Optional[str] = None,
+    enable: bool = True,
+    ipAddresses: Optional[List[str]] = None,
+    ipv6Addresses: Optional[List[str]] = None,
+    cname: Optional[str] = None,
+    dnsServers: Optional[List[str]] = None,
+    lanNetworkIds: Optional[List[str]] = None,
+    aliases: Optional[List[str]] = None,
+    customTtl: bool = False,
+    ttl: int = 3600,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create or update a Local LAN DNS rule (``POST/PATCH setting/lan/dns``)."""
+    rule_name = str(name or "").strip()
+    dom = str(domain or "").strip()
+    if not rule_name:
+        raise OmadaError("LAN DNS rule name must be non-empty")
+    if not dom:
+        raise OmadaError("LAN DNS domain must be non-empty")
+    type_code = _parse_code_map(ruleType, _LAN_DNS_TYPE_MAP, label="ruleType")
+
+    site = _site(client)
+    existing_rules = _fetch_lan_dns_rules(client, site)
+    existing: Optional[Dict[str, Any]] = None
+    if ruleId:
+        existing = _resolve_by_id_or_name(existing_rules, str(ruleId), label="LAN DNS rule")
+    else:
+        matches = [dict(r) for r in existing_rules if str(r.get("name") or "").strip() == rule_name]
+        if matches:
+            existing = matches[0]
+    is_update = existing is not None
+    target_id = str(existing["id"]) if is_update and existing.get("id") else rule_name
+    _require_confirm("upsert_lan_dns_rule", target_id, dryRun, confirm)
+
+    warnings: List[str] = []
+    if type_code in (0, 1):
+        if lanNetworkIds is not None:
+            resolved_nets = [str(x) for x in lanNetworkIds if str(x).strip()]
+        elif existing and existing.get("lanNetworkIds"):
+            resolved_nets = [str(x) for x in existing["lanNetworkIds"]]
+        else:
+            resolved_nets = [str(n["id"]) for n in _fetch_lan_interfaces(client, site) if n.get("id")]
+            if resolved_nets:
+                warnings.append(f"lanNetworkIds omitted; defaulting to all {len(resolved_nets)} site LAN interface(s).")
+        if not resolved_nets:
+            raise OmadaError("lanNetworkIds must be non-empty for LAN DNS IP/CNAME rules")
+    else:
+        resolved_nets = []
+
+    body: Dict[str, Any] = {
+        "name": rule_name,
+        "enable": bool(enable),
+        "domain": dom,
+        "aliases": [str(a).strip() for a in (aliases if aliases is not None else (existing.get("aliases") or [] if existing else [])) if str(a).strip()],
+        "type": type_code,
+        "customTtl": bool(customTtl),
+    }
+    if customTtl:
+        if not isinstance(ttl, int) or isinstance(ttl, bool) or ttl < 1 or ttl > 86400:
+            raise OmadaError("ttl must be an integer between 1 and 86400 seconds")
+        body["ttl"] = ttl
+
+    if type_code == 0:
+        v4 = [str(_parse_ipv4(ip, "ipAddress")) for ip in (ipAddresses if ipAddresses is not None else (existing.get("ipAddresses") or [] if existing else []))]
+        v6 = [str(ipaddress.IPv6Address(str(x).strip())) for x in (ipv6Addresses if ipv6Addresses is not None else (existing.get("ipv6Addresses") or [] if existing else []))]
+        if not v4 and not v6:
+            raise OmadaError("type='ip' requires at least one valid IPv4 (ipAddresses) or IPv6 (ipv6Addresses) address")
+        if v4:
+            body["ipAddresses"] = v4
+        if v6:
+            body["ipv6Addresses"] = v6
+        body["lanNetworkIds"] = resolved_nets
+    elif type_code == 1:
+        cn = str(cname if cname is not None else (existing.get("cname") or "" if existing else "")).strip()
+        if not cn:
+            raise OmadaError("type='cname' requires a non-empty cname target")
+        body["cname"] = cn
+        body["lanNetworkIds"] = resolved_nets
+    else:
+        servers = [str(_parse_ipv4(s, "dnsServer")) for s in (dnsServers if dnsServers is not None else (existing.get("dnsServers") or [] if existing else []))]
+        if not servers:
+            raise OmadaError("type='forward' requires at least one dnsServer IPv4 address")
+        body["dnsServers"] = servers
+
+    before_summary = copy.deepcopy(existing) if existing else None
+    diff = (
+        _field_diff(before_summary, body, tuple(body.keys()))
+        if before_summary
+        else {"rule": {"before": None, "after": body}}
+    )
+    if dryRun:
+        return _dry_run_result(
+            tool_name="upsert_lan_dns_rule",
+            target_id=target_id,
+            before=before_summary,
+            after=body,
+            diff=diff,
+            warnings=warnings,
+            rollback=None,
+        )
+
+    method = "PATCH" if is_update else "POST"
+    endpoint = f"sites/{site.site_id}/setting/lan/dns/{existing['id']}" if is_update else f"sites/{site.site_id}/setting/lan/dns"
+
+    def _read_back() -> Optional[Dict[str, Any]]:
+        rows = _fetch_lan_dns_rules(client, site)
+        if is_update:
+            found = next((r for r in rows if str(r.get("id")) == str(existing["id"])), None)
+            if found:
+                return found
+        return next((r for r in rows if str(r.get("name")) == rule_name), None)
+
+    def _verify(_before: Any, after_now: Any) -> Tuple[bool, Optional[str]]:
+        if not isinstance(after_now, Mapping):
+            return False, f"LAN DNS rule {rule_name!r} missing on read-back"
+        if str(after_now.get("name")) != rule_name or str(after_now.get("domain")) != dom:
+            return False, f"LAN DNS rule {rule_name!r} fields did not match intent on read-back"
+        if bool(after_now.get("enable")) != bool(enable):
+            return False, f"LAN DNS enable expected {enable!r}, got {after_now.get('enable')!r}"
+        return True, None
+
+    def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
+        live = _read_back()
+        ok, _ = _verify(before_summary, live)
+        return ok, (body if is_update else None), live
+
+    snap = (
+        {"action": "update", "rule": existing}
+        if is_update
+        else {"action": "create", "name": rule_name, "existingIds": [str(r.get("id")) for r in existing_rules if r.get("id")]}
+    )
+    write_res = client.write(
+        endpoint,
+        method=method,
+        data=body,
+        tool_name="upsert_lan_dns_rule",
+        target=target_id,
+        before=before_summary,
+        snapshot_payload=snap,
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=sorted(diff.keys()),
+    )
+    return _committed_result(
+        tool_name="upsert_lan_dns_rule",
+        target_id=target_id,
+        before=write_res["before"],
+        after=write_res["after"],
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=warnings,
+        rollback=None,
+    )
+
+
+def delete_lan_dns_rule(
+    client: OmadaClient,
+    ruleId: str,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Delete a Local LAN DNS rule by ID or unique name."""
+    site = _site(client)
+    rules = _fetch_lan_dns_rules(client, site)
+    target = _resolve_by_id_or_name(rules, str(ruleId), label="LAN DNS rule")
+    rid = str(target["id"])
+    return _delete_entity(
+        client,
+        tool_name="delete_lan_dns_rule",
+        target_id=rid,
+        endpoint=f"sites/{site.site_id}/setting/lan/dns/{rid}",
+        before=target,
+        snapshot_payload=target,
+        fetch_all=lambda: _fetch_lan_dns_rules(client, site),
+        match_fn=lambda row: str(row.get("id")) == rid,
+        rollback=None,
+        warnings=[],
+        dry_run=dryRun,
+        confirm=confirm,
+        label="lanDnsRule",
+    )
+
+
+def _resolve_extended_acl_endpoint(
+    client: OmadaClient,
+    site: SiteInfo,
+    spec: Mapping[str, Any],
+    *,
+    label: str,
+    networks: Sequence[Mapping[str, Any]],
+    groups: Sequence[Mapping[str, Any]],
+) -> Tuple[int, List[str]]:
+    if not isinstance(spec, Mapping):
+        raise OmadaError(f"{label} must be an object with 'type' and 'ids'")
+    kind = str(spec.get("type") or "").strip().lower()
+    raw_ids = spec.get("ids")
+    if not isinstance(raw_ids, Sequence) or isinstance(raw_ids, (str, bytes)) or not raw_ids:
+        raise OmadaError(f"{label}.ids must be a non-empty list")
+    if kind in ("network", "ip_group", "port_group", "ip_port_group"):
+        mapped = {**spec, "type": "port_group" if kind == "ip_port_group" else kind}
+        return _resolve_acl_endpoint(mapped, label=label, networks=networks, groups=groups)
+    if kind == "mac_group":
+        mac_groups = [g for g in groups if str(g.get("type")) in ("2", "3", "mac") or "macList" in g]
+        pool = mac_groups or list(groups)
+        by_id = {_group_id(g): _group_id(g) for g in pool if _group_id(g)}
+        by_name = {str(g.get("name") or "").strip(): _group_id(g) for g in pool if g.get("name") and _group_id(g)}
+        out = [by_id.get(str(x).strip()) or by_name.get(str(x).strip()) or "" for x in raw_ids]
+        if any(not v for v in out):
+            raise OmadaError(f"{label} contains unknown mac_group(s): {raw_ids!r}")
+        return 3, out
+    if kind == "ssid":
+        wgroups = _fetch_wlan_groups(client, site)
+        all_ssids: List[Dict[str, Any]] = []
+        for wg in wgroups:
+            wid = str(wg.get("id") or "")
+            if wid:
+                all_ssids.extend(_fetch_ssids(client, site, wid))
+        by_id = {str(s.get("id") or ""): str(s.get("id") or "") for s in all_ssids if s.get("id")}
+        by_name = {str(s.get("name") or "").strip(): str(s.get("id") or "") for s in all_ssids if s.get("name") and s.get("id")}
+        out = [by_id.get(str(x).strip()) or by_name.get(str(x).strip()) or "" for x in raw_ids]
+        if any(not v for v in out):
+            raise OmadaError(f"{label} contains unknown SSID(s): {raw_ids!r}")
+        return 4, out
+    raise OmadaError(f"unsupported {label}.type {kind!r}; expected network, ip_group, port_group, mac_group, or ssid")
+
+
+def _create_scoped_acl(
+    client: OmadaClient,
+    *,
+    tool_name: str,
+    acl_type: int,
+    name: str,
+    policy: Any,
+    source: Dict[str, Any],
+    destination: Dict[str, Any],
+    status: bool = True,
+    protocols: Optional[List[int]] = None,
+    bi_directional: bool = False,
+    syslog: bool = False,
+    binding_type: Optional[Any] = None,
+    custom_acl_ports: Optional[Sequence[Any]] = None,
+    network_id: Optional[str] = None,
+    ether_type: Optional[str] = None,
+    dry_run: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    rule_name = str(name or "").strip()
+    if not rule_name:
+        raise OmadaError("ACL rule name must be non-empty")
+    policy_int = _parse_policy(policy)
+    norm_protocols = [int(p) for p in (protocols if protocols is not None else [256])]
+    if not norm_protocols:
+        raise OmadaError("protocols must be non-empty (e.g. [256])")
+    _require_confirm(tool_name, rule_name, dry_run, confirm)
+
+    site = _site(client)
+    existing = _fetch_typed_acls(client, site, acl_type)
+    if any(str(r.get("name") or "").strip() == rule_name for r in existing):
+        raise OmadaError(
+            f"{'switch' if acl_type == 1 else 'EAP'} ACL {rule_name!r} already exists",
+            hint="Use a unique name or update/toggle the existing ACL rule.",
+        )
+
+    networks = _fetch_lan_collection(client, site)
+    groups = _fetch_groups(client, site)
+    src_type, src_ids = _resolve_extended_acl_endpoint(client, site, source, label="source", networks=networks, groups=groups)
+    dst_type, dst_ids = _resolve_extended_acl_endpoint(client, site, destination, label="destination", networks=networks, groups=groups)
+
+    warnings: List[str] = [_ACL_DISPATCH_NOTES]
+    _check_acl_safety(
+        client,
+        policy=policy_int,
+        status=bool(status),
+        source_type=src_type,
+        source_ids=src_ids,
+        dest_type=dst_type,
+        dest_ids=dst_ids,
+        direction={"lanToLan": True, "lanToWan": False, "wanInIds": [], "vpnInIds": []},
+        networks=networks,
+        groups=groups,
+    )
+
+    body: Dict[str, Any] = {
+        "name": rule_name,
+        "status": bool(status),
+        "policy": policy_int,
+        "protocols": norm_protocols,
+        "sourceType": src_type,
+        "sourceIds": src_ids,
+        "destinationType": dst_type,
+        "destinationIds": dst_ids,
+        "type": int(acl_type),
+        "biDirectional": bool(bi_directional),
+        "syslog": bool(syslog),
+    }
+
+    if acl_type == 1:
+        btype = _parse_code_map(
+            "all_ports" if binding_type is None else binding_type,
+            _SWITCH_ACL_BINDING_MAP,
+            label="bindingType",
+        )
+        body["bindingType"] = btype
+        body["customAclPorts"] = list(custom_acl_ports or [])
+        body["customAclOsws"] = []
+        body["customAclDevices"] = []
+        body["customAclStacks"] = []
+        if btype == 1 and not body["customAclPorts"]:
+            raise OmadaError("bindingType='custom_ports' requires non-empty customAclPorts")
+        if btype in (2, 3):
+            if network_id:
+                net = _resolve_lan_network(networks, vlan=network_id)
+                body["networkId"] = str(net.get("id") or network_id)
+        if ether_type:
+            body["etherType"] = {"enable": True, "value": str(ether_type).strip()}
+        else:
+            body["etherType"] = {"enable": False}
+
+    diff = {"rule": {"before": None, "after": body}}
+    if dry_run:
+        return _dry_run_result(
+            tool_name=tool_name,
+            target_id=rule_name,
+            before=None,
+            after=body,
+            diff=diff,
+            warnings=warnings,
+            rollback=None,
+        )
+
+    endpoint = f"sites/{site.site_id}/setting/firewall/acls?type={acl_type}"
+
+    def _read_back() -> List[Dict[str, Any]]:
+        return _fetch_typed_acls(client, site, acl_type)
+
+    def _verify(_before: Any, after_rules: Any) -> Tuple[bool, Optional[str]]:
+        if not isinstance(after_rules, list):
+            return False, "ACL read-back did not return a list"
+        found = next((r for r in after_rules if str(r.get("name")) == rule_name), None)
+        if found is None:
+            return False, f"created ACL {rule_name!r} missing on read-back"
+        if int(found.get("policy", -1)) != policy_int or bool(found.get("status")) != bool(status):
+            return False, f"created ACL {rule_name!r} read-back did not match policy/status"
+        return True, None
+
+    def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
+        rules_now = _read_back()
+        ok, _ = _verify(None, rules_now)
+        return ok, None, None
+
+    write_res = client.write(
+        endpoint,
+        method="POST",
+        data=body,
+        tool_name=tool_name,
+        target=rule_name,
+        before=None,
+        snapshot_payload={"type": acl_type, "existingAcls": existing},
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=["name", "policy", "status", "sourceIds", "destinationIds"],
+    )
+    created = next((r for r in write_res["after"] if str(r.get("name")) == rule_name), body)
+    return _committed_result(
+        tool_name=tool_name,
+        target_id=rule_name,
+        before=None,
+        after=created,
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=warnings,
+        rollback=None,
+    )
+
+
+def create_switch_acl(
+    client: OmadaClient,
+    name: str,
+    policy: Any,
+    source: Dict[str, Any],
+    destination: Dict[str, Any],
+    bindingType: Any = "all_ports",
+    customAclPorts: Optional[List[Any]] = None,
+    networkId: Optional[str] = None,
+    status: bool = True,
+    protocols: Optional[List[int]] = None,
+    biDirectional: bool = False,
+    etherType: Optional[str] = None,
+    syslog: bool = False,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a Switch ACL rule (``POST setting/firewall/acls?type=1``)."""
+    return _create_scoped_acl(
+        client,
+        tool_name="create_switch_acl",
+        acl_type=1,
+        name=name,
+        policy=policy,
+        source=source,
+        destination=destination,
+        status=status,
+        protocols=protocols,
+        bi_directional=biDirectional,
+        syslog=syslog,
+        binding_type=bindingType,
+        custom_acl_ports=customAclPorts,
+        network_id=networkId,
+        ether_type=etherType,
+        dry_run=dryRun,
+        confirm=confirm,
+    )
+
+
+def create_eap_acl(
+    client: OmadaClient,
+    name: str,
+    policy: Any,
+    source: Dict[str, Any],
+    destination: Dict[str, Any],
+    status: bool = True,
+    protocols: Optional[List[int]] = None,
+    syslog: bool = False,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create an EAP (wireless) ACL rule (``POST setting/firewall/acls?type=2``)."""
+    return _create_scoped_acl(
+        client,
+        tool_name="create_eap_acl",
+        acl_type=2,
+        name=name,
+        policy=policy,
+        source=source,
+        destination=destination,
+        status=status,
+        protocols=protocols,
+        bi_directional=False,
+        syslog=syslog,
+        dry_run=dryRun,
+        confirm=confirm,
+    )
+
+
+def _client_lock_wire_aps(lock_setting: Mapping[str, Any]) -> List[str]:
+    out: List[str] = []
+    for item in lock_setting.get("aps") or []:
+        if isinstance(item, Mapping) and item.get("mac"):
+            out.append(_omada_mac(str(item["mac"])))
+        elif isinstance(item, str) and item.strip():
+            out.append(_omada_mac(item))
+    return out
+
+
+def set_client_lock_to_ap(
+    client: OmadaClient,
+    clientMac: str,
+    enabled: bool,
+    apMacs: Optional[List[str]] = None,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Lock or unlock a wireless client to specific AP(s) via stripped client RMW."""
+    norm_mac = _normalize_mac(clientMac)
+    if len(norm_mac.replace(":", "")) != 12:
+        raise OmadaError(f"invalid clientMac {clientMac!r}")
+    _require_confirm("set_client_lock_to_ap", norm_mac, dryRun, confirm)
+
+    site = _site(client)
+    wire_client_mac = _omada_mac(norm_mac)
+    raw_client = _lookup_client_record(client, site, norm_mac, wire_client_mac)
+
+    warnings: List[str] = []
+    if not raw_client.get("wireless", True) and str(raw_client.get("connectType") or "").lower() == "wired":
+        warnings.append("Client is currently wired; Lock-to-AP applies only when connecting over Wi-Fi.")
+
+    desired_aps: List[str] = []
+    if enabled:
+        if not apMacs:
+            raise OmadaError("apMacs must be a non-empty list of AP MAC addresses or names when enabled=True")
+        ap_candidates: List[Dict[str, Any]] = []
+        try:
+            ap_candidates = _unwrap_rows(client.api_result(f"sites/{site.site_id}/lockToAp/aps"))
+        except OmadaError:
+            pass
+        if not ap_candidates:
+            ap_candidates = [d for d in _fetch_devices(client, site) if str(d.get("type") or "").lower() == "ap"]
+        for needle in apMacs:
+            n_str = str(needle or "").strip()
+            n_mac = _normalize_mac(n_str)
+            matched = next(
+                (
+                    d for d in ap_candidates
+                    if _normalize_mac(str(d.get("mac") or "")) == n_mac
+                    or str(d.get("name") or "").strip().lower() == n_str.lower()
+                ),
+                None,
+            )
+            if matched is None:
+                raise OmadaError(f"target AP {needle!r} was not found in site {site.name!r}")
+            if matched.get("supportLockToAp") is False:
+                raise OmadaError(f"AP {matched.get('name') or matched.get('mac')} does not support Lock-to-AP")
+            desired_aps.append(_omada_mac(str(matched.get("mac") or n_mac)))
+        lock_payload: Dict[str, Any] = {"enable": True, "aps": desired_aps}
+    else:
+        lock_payload = {"enable": False}
+
+    before_lock = raw_client.get("clientLockToApSetting") if isinstance(raw_client.get("clientLockToApSetting"), Mapping) else {"enable": False}
+    before_view = {
+        "mac": norm_mac,
+        "name": raw_client.get("name") or "",
+        "enable": bool(before_lock.get("enable", False)),
+        "aps": _client_lock_wire_aps(before_lock),
+    }
+    after_view = {
+        "mac": norm_mac,
+        "name": raw_client.get("name") or "",
+        "enable": bool(enabled),
+        "aps": desired_aps,
+    }
+    diff = _field_diff(before_view, after_view, ("enable", "aps"))
+
+    patch_body = _strip_client_volatiles(raw_client)
+    patch_body["clientLockToApSetting"] = lock_payload
+
+    rollback = {
+        "tool": "set_client_lock_to_ap",
+        "arguments": {
+            "clientMac": norm_mac,
+            "enabled": before_view["enable"],
+            **({"apMacs": before_view["aps"]} if before_view["enable"] and before_view["aps"] else {}),
+            "dryRun": True,
+        },
+    }
+    if dryRun:
+        return _dry_run_result(
+            tool_name="set_client_lock_to_ap",
+            target_id=norm_mac,
+            before=before_view,
+            after=after_view,
+            diff=diff,
+            warnings=warnings,
+            rollback=rollback,
+        )
+
+    endpoint = f"sites/{site.site_id}/clients/{wire_client_mac}"
+
+    def _read_back() -> Dict[str, Any]:
+        c_now = _lookup_client_record(client, site, norm_mac, wire_client_mac)
+        lk = c_now.get("clientLockToApSetting") if isinstance(c_now.get("clientLockToApSetting"), Mapping) else {}
+        return {
+            "mac": norm_mac,
+            "name": c_now.get("name") or "",
+            "enable": bool(lk.get("enable", False)),
+            "aps": _client_lock_wire_aps(lk),
+        }
+
+    def _verify(_before: Any, after_now: Any) -> Tuple[bool, Optional[str]]:
+        if not isinstance(after_now, Mapping):
+            return False, "client lock-to-AP read-back failed"
+        if bool(after_now.get("enable")) != bool(enabled):
+            return False, f"clientLockToApSetting.enable expected {enabled!r}, got {after_now.get('enable')!r}"
+        if enabled and sorted(after_now.get("aps") or []) != sorted(desired_aps):
+            return False, f"locked APs expected {desired_aps!r}, got {after_now.get('aps')!r}"
+        return True, None
+
+    def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
+        live = _read_back()
+        ok, _ = _verify(before_view, live)
+        return ok, patch_body, live
+
+    write_res = client.write(
+        endpoint,
+        method="PATCH",
+        data=patch_body,
+        tool_name="set_client_lock_to_ap",
+        target=norm_mac,
+        before=before_view,
+        snapshot_payload=raw_client,
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=["clientLockToApSetting"],
+    )
+    return _committed_result(
+        tool_name="set_client_lock_to_ap",
+        target_id=norm_mac,
+        before=write_res["before"],
+        after=write_res["after"],
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=warnings,
+        rollback=rollback,
+    )
+
+
+def set_client_rate_limit(
+    client: OmadaClient,
+    clientMac: str,
+    enabled: bool,
+    rateLimitProfileId: Optional[str] = None,
+    rateLimitProfileName: Optional[str] = None,
+    downLimitKbps: Optional[int] = None,
+    upLimitKbps: Optional[int] = None,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Configure or disable a client rate limit via stripped client RMW."""
+    norm_mac = _normalize_mac(clientMac)
+    if len(norm_mac.replace(":", "")) != 12:
+        raise OmadaError(f"invalid clientMac {clientMac!r}")
+    _require_confirm("set_client_rate_limit", norm_mac, dryRun, confirm)
+
+    site = _site(client)
+    wire_client_mac = _omada_mac(norm_mac)
+    raw_client = _lookup_client_record(client, site, norm_mac, wire_client_mac)
+
+    rate_payload: Dict[str, Any]
+    if not enabled:
+        rate_payload = {"enable": False}
+    elif rateLimitProfileId is not None or rateLimitProfileName is not None:
+        profiles = _fetch_rate_limit_profiles(client, site)
+        if rateLimitProfileId and rateLimitProfileName:
+            p_id = _resolve_by_id_or_name(profiles, str(rateLimitProfileId), label="rate limit profile")
+            p_name = _resolve_by_id_or_name(profiles, str(rateLimitProfileName), label="rate limit profile")
+            if str(p_id.get("id")) != str(p_name.get("id")):
+                raise OmadaError(f"conflicting rateLimitProfileId={rateLimitProfileId!r} and rateLimitProfileName={rateLimitProfileName!r}")
+            prof = p_id
+        else:
+            prof = _resolve_by_id_or_name(
+                profiles,
+                str(rateLimitProfileId if rateLimitProfileId is not None else rateLimitProfileName),
+                label="rate limit profile",
+            )
+        rate_payload = {"enable": True, "rateLimitId": str(prof["id"])}
+    else:
+        if downLimitKbps is None and upLimitKbps is None:
+            raise OmadaError(
+                "when enabled=True, provide rateLimitProfileId/Name or at least one of downLimitKbps/upLimitKbps"
+            )
+        rate_payload = {
+            "enable": True,
+            "downEnable": downLimitKbps is not None and downLimitKbps > 0,
+            "downLimit": int(downLimitKbps) if downLimitKbps else 0,
+            "downUnit": 1,
+            "upEnable": upLimitKbps is not None and upLimitKbps > 0,
+            "upLimit": int(upLimitKbps) if upLimitKbps else 0,
+            "upUnit": 1,
+        }
+        if not rate_payload["downEnable"] and not rate_payload["upEnable"]:
+            raise OmadaError("downLimitKbps and/or upLimitKbps must be > 0 when enabling custom rate limits")
+
+    before_rl = dict(raw_client.get("rateLimit") or {"enable": False})
+    before_view = {"mac": norm_mac, "rateLimit": before_rl}
+    after_view = {"mac": norm_mac, "rateLimit": rate_payload}
+    diff = {"rateLimit": {"before": before_rl, "after": rate_payload}}
+
+    patch_body = _strip_client_volatiles(raw_client)
+    # Normalize any nested lock setting into clean wire shape if present
+    if isinstance(patch_body.get("clientLockToApSetting"), Mapping):
+        lk = dict(patch_body["clientLockToApSetting"])
+        if lk.get("enable"):
+            lk["aps"] = _client_lock_wire_aps(lk)
+        patch_body["clientLockToApSetting"] = lk
+    patch_body["rateLimit"] = rate_payload
+
+    rollback = {
+        "tool": "set_client_rate_limit",
+        "arguments": {
+            "clientMac": norm_mac,
+            "enabled": bool(before_rl.get("enable", False)),
+            **({"rateLimitProfileId": str(before_rl["rateLimitId"])} if before_rl.get("rateLimitId") else {}),
+            **({"downLimitKbps": int(before_rl["downLimit"])} if before_rl.get("downEnable") and before_rl.get("downLimit") else {}),
+            **({"upLimitKbps": int(before_rl["upLimit"])} if before_rl.get("upEnable") and before_rl.get("upLimit") else {}),
+            "dryRun": True,
+        },
+    }
+    if dryRun:
+        return _dry_run_result(
+            tool_name="set_client_rate_limit",
+            target_id=norm_mac,
+            before=before_view,
+            after=after_view,
+            diff=diff,
+            warnings=[],
+            rollback=rollback,
+        )
+
+    endpoint = f"sites/{site.site_id}/clients/{wire_client_mac}"
+
+    def _read_back() -> Dict[str, Any]:
+        c_now = _lookup_client_record(client, site, norm_mac, wire_client_mac)
+        return {"mac": norm_mac, "rateLimit": dict(c_now.get("rateLimit") or {"enable": False})}
+
+    def _verify(_before: Any, after_now: Any) -> Tuple[bool, Optional[str]]:
+        if not isinstance(after_now, Mapping):
+            return False, "client rate-limit read-back failed"
+        rl = after_now.get("rateLimit") or {}
+        if bool(rl.get("enable")) != bool(enabled):
+            return False, f"rateLimit.enable expected {enabled!r}, got {rl.get('enable')!r}"
+        if enabled:
+            if "rateLimitId" in rate_payload and str(rl.get("rateLimitId") or "") != rate_payload["rateLimitId"]:
+                return False, f"rateLimitId expected {rate_payload['rateLimitId']!r}"
+            if downLimitKbps is not None and as_int(rl.get("downLimit"), -1) != int(downLimitKbps):
+                return False, f"downLimit expected {downLimitKbps}, got {rl.get('downLimit')}"
+        return True, None
+
+    def _reauth_prepare() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
+        live = _read_back()
+        ok, _ = _verify(before_view, live)
+        return ok, patch_body, live
+
+    write_res = client.write(
+        endpoint,
+        method="PATCH",
+        data=patch_body,
+        tool_name="set_client_rate_limit",
+        target=norm_mac,
+        before=before_view,
+        snapshot_payload=raw_client,
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=["rateLimit"],
+    )
+    return _committed_result(
+        tool_name="set_client_rate_limit",
+        target_id=norm_mac,
+        before=write_res["before"],
+        after=write_res["after"],
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=[],
+        rollback=rollback,
+    )
+
+
+def _resolve_snapshot_file(client: OmadaClient, snapshot_id: str) -> Path:
+    sid = str(snapshot_id or "").strip()
+    if not sid or "/" in sid or "\\" in sid or ".." in sid or "\x00" in sid or not sid.endswith(".json"):
+        raise OmadaError(
+            f"invalid snapshotId {snapshot_id!r}",
+            hint="snapshotId must be a .json filename directly inside OMADA_SNAPSHOT_DIR.",
+        )
+    snap_root = client._snapshot_dir()
+    if not snap_root.exists():
+        raise OmadaError(f"snapshot directory does not exist: {snap_root}")
+    root_resolved = snap_root.resolve(strict=True)
+    candidate = snap_root / sid
+    if not candidate.exists():
+        raise OmadaError(f"snapshot file not found: {sid}")
+    if candidate.is_symlink():
+        raise OmadaError(f"refusing symlinked snapshot file: {sid}")
+    resolved = candidate.resolve(strict=True)
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError as exc:
+        raise OmadaError(f"snapshotId {sid!r} resolves outside OMADA_SNAPSHOT_DIR") from exc
+    if not resolved.is_file():
+        raise OmadaError(f"snapshot target is not a regular file: {sid}")
+    return resolved
+
+
+def rollback_from_snapshot(
+    client: OmadaClient,
+    snapshotId: str,
+    dryRun: bool = True,
+    confirm: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Restore pre-mutation state from a saved snapshot in ``OMADA_SNAPSHOT_DIR``."""
+    snap_path = _resolve_snapshot_file(client, snapshotId)
+    sid = snap_path.name
+    _require_confirm("rollback_from_snapshot", sid, dryRun, confirm)
+
+    try:
+        envelope = json.loads(snap_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OmadaError(f"failed to parse snapshot {sid!r}: {exc}") from exc
+    if not isinstance(envelope, Mapping) or "tool" not in envelope or "data" not in envelope:
+        raise OmadaError(f"snapshot {sid!r} is missing required 'tool' or 'data' fields")
+
+    orig_tool = str(envelope["tool"] or "")
+    orig_target = str(envelope.get("target") or "")
+    snap_data = envelope.get("data")
+
+    if orig_tool in _NON_REVERSIBLE_SNAPSHOT_TOOLS:
+        raise OmadaError(
+            f"snapshot {sid!r} was captured by non-reversible action {orig_tool!r} and cannot be rolled back",
+        )
+
+    site = _site(client)
+    warnings: List[str] = [f"Rolling back snapshot {sid} created by {orig_tool} (target={orig_target})."]
+
+    def _run_restore(
+        *,
+        method: str,
+        endpoint: str,
+        payload: Any,
+        live_before: Any,
+        restore_preview: Any,
+        read_back_fn: Callable[[], Any],
+        verify_fn: Callable[[Any, Any], Tuple[bool, Optional[str]]],
+    ) -> Dict[str, Any]:
+        diff = _field_diff(
+            live_before if isinstance(live_before, Mapping) else {"state": live_before},
+            restore_preview if isinstance(restore_preview, Mapping) else {"state": restore_preview},
+            tuple((restore_preview if isinstance(restore_preview, Mapping) else {"state": None}).keys()),
+        )
+        if dryRun:
+            return _dry_run_result(
+                tool_name="rollback_from_snapshot",
+                target_id=sid,
+                before=deep_redact(live_before),
+                after=deep_redact(restore_preview),
+                diff=deep_redact(diff),
+                warnings=warnings,
+                rollback=None,
+            )
+
+        def _reauth_prep() -> Tuple[bool, Optional[Dict[str, Any]], Any]:
+            now = read_back_fn()
+            ok, _ = verify_fn(live_before, now)
+            return ok, (payload if method != "POST" else None), now
+
+        write_res = client.write(
+            endpoint,
+            method=method,
+            data=payload,
+            tool_name="rollback_from_snapshot",
+            target=sid,
+            before=live_before,
+            snapshot_payload={"rolledBackSnapshot": sid, "liveBefore": live_before},
+            read_back=read_back_fn,
+            verify_fn=verify_fn,
+            reauth_prepare=_reauth_prep,
+            fields_changed=[f"rollback:{orig_tool}"],
+        )
+        return _committed_result(
+            tool_name="rollback_from_snapshot",
+            target_id=sid,
+            before=deep_redact(write_res["before"]),
+            after=deep_redact(write_res["after"]),
+            diff=deep_redact(diff),
+            snapshot=write_res["snapshot"],
+            warnings=warnings,
+            rollback=None,
+        )
+
+    # ---- Dispatch table by originating tool ----
+    if orig_tool == "set_upnp" and isinstance(snap_data, Mapping):
+        desired = bool(snap_data.get("enable", False))
+        ep = f"sites/{site.site_id}/setting/upnp"
+        live = client.api_result(ep)
+        live_obj = dict(live) if isinstance(live, Mapping) else {"enable": False}
+        if desired:
+            rb_wan, rb_nets = _resolve_upnp_targets(
+                client,
+                site,
+                snap_data,
+                wan_port_ids=snap_data.get("wanPortIds") if isinstance(snap_data.get("wanPortIds"), list) else None,
+                network_ids=snap_data.get("networkIds") if isinstance(snap_data.get("networkIds"), list) else None,
+            )
+            payload: Dict[str, Any] = {"enable": True, "wanPortIds": rb_wan, "networkIds": rb_nets}
+        else:
+            payload = {"enable": False}
+        return _run_restore(
+            method="PUT",
+            endpoint=ep,
+            payload=payload,
+            live_before=live_obj,
+            restore_preview={**live_obj, **payload},
+            read_back_fn=lambda: dict(client.api_result(ep) or {}),
+            verify_fn=lambda _b, a: (bool(a.get("enable")) == desired, f"enable expected {desired!r}"),
+        )
+
+    if orig_tool in ("set_client_fixed_ip", "release_client_fixed_ip", "update_client", "set_client_lock_to_ap", "set_client_rate_limit") and isinstance(snap_data, Mapping):
+        norm_mac = _normalize_mac(orig_target or str(snap_data.get("mac") or ""))
+        wire_mac = _omada_mac(norm_mac)
+        live = _lookup_client_record(client, site, norm_mac, wire_mac)
+        body = _strip_client_volatiles(snap_data)
+        if orig_tool == "set_client_rate_limit" and "rateLimit" in snap_data:
+            body["rateLimit"] = copy.deepcopy(snap_data["rateLimit"])
+        if isinstance(body.get("clientLockToApSetting"), Mapping):
+            lk = dict(body["clientLockToApSetting"])
+            if lk.get("enable"):
+                lk["aps"] = _client_lock_wire_aps(lk)
+            body["clientLockToApSetting"] = lk
+        ep = f"sites/{site.site_id}/clients/{wire_mac}"
+        return _run_restore(
+            method="PATCH",
+            endpoint=ep,
+            payload=body,
+            live_before=_strip_client_volatiles(live),
+            restore_preview=body,
+            read_back_fn=lambda: _lookup_client_record(client, site, norm_mac, wire_mac),
+            verify_fn=lambda _b, a: (
+                bool(a)
+                and (orig_tool != "set_client_lock_to_ap" or bool((a.get("clientLockToApSetting") or {}).get("enable")) == bool((snap_data.get("clientLockToApSetting") or {}).get("enable"))),
+                "restored client state verification failed",
+            ),
+        )
+
+    if orig_tool == "set_client_blocked" and isinstance(snap_data, Mapping):
+        norm_mac = _normalize_mac(orig_target or str(snap_data.get("mac") or ""))
+        wire_mac = _omada_mac(norm_mac)
+        was_blocked = bool(snap_data.get("blocked", snap_data.get("block", False)))
+        live = _lookup_client_record(client, site, norm_mac, wire_mac)
+        ep = f"sites/{site.site_id}/cmd/clients/{wire_mac}/{'block' if was_blocked else 'unblock'}"
+        return _run_restore(
+            method="POST",
+            endpoint=ep,
+            payload={},
+            live_before={"blocked": bool(live.get("blocked", live.get("block", False)))},
+            restore_preview={"blocked": was_blocked},
+            read_back_fn=lambda: {"blocked": bool(_lookup_client_record(client, site, norm_mac, wire_mac).get("blocked", False))},
+            verify_fn=lambda _b, a: (bool(a.get("blocked")) == was_blocked, f"blocked expected {was_blocked!r}"),
+        )
+
+    if orig_tool == "update_device" and isinstance(snap_data, Mapping):
+        dev = resolve_raw_device(client, site, orig_target or str(snap_data.get("mac") or ""))
+        wire_mac = _omada_mac(str(dev.get("mac") or orig_target))
+        dtype = str(dev.get("type") or snap_data.get("type") or "").lower()
+        seg = "gateways" if dtype == "gateway" else ("switches" if dtype == "switch" else "eaps")
+        ep = f"sites/{site.site_id}/{seg}/{wire_mac}"
+        body = {k: snap_data[k] for k in ("name", "ledSetting") if k in snap_data}
+        if not body:
+            body = {"name": snap_data.get("name", dev.get("name"))}
+        live_detail = dict(client.api_result(ep) or {})
+        return _run_restore(
+            method="PATCH",
+            endpoint=ep,
+            payload=body,
+            live_before={k: live_detail.get(k) for k in body},
+            restore_preview=body,
+            read_back_fn=lambda: dict(client.api_result(ep) or {}),
+            verify_fn=lambda _b, a: ("name" not in body or a.get("name") == body["name"], "device name mismatch"),
+        )
+
+    if orig_tool == "update_switch_port" and isinstance(snap_data, Mapping):
+        parts = orig_target.rsplit(":", 1)
+        if len(parts) != 2:
+            raise OmadaError(f"cannot parse switch MAC and port from target {orig_target!r}")
+        norm_mac, port_str = parts[0], parts[1]
+        port_num = int(port_str)
+        wire_mac = _omada_mac(norm_mac)
+        ep = f"sites/{site.site_id}/switches/{wire_mac}/ports/{port_num}"
+        live_rows = _unwrap_rows(client.api_result(f"sites/{site.site_id}/switches/{wire_mac}/ports"))
+        live_port = next((r for r in live_rows if as_int(r.get("port"), 0) == port_num), {})
+        body = _build_switch_port_patch(snap_data)
+        return _run_restore(
+            method="PATCH",
+            endpoint=ep,
+            payload=body,
+            live_before=_switch_port_summary(live_port),
+            restore_preview=_switch_port_summary(snap_data),
+            read_back_fn=lambda: _switch_port_summary(
+                next(r for r in _unwrap_rows(client.api_result(f"sites/{site.site_id}/switches/{wire_mac}/ports")) if as_int(r.get("port"), 0) == port_num)
+            ),
+            verify_fn=lambda _b, a: (
+                str(a.get("profileId")) == str(snap_data.get("profileId") or "") and str(a.get("name")) == str(snap_data.get("name") or ""),
+                "switch port read-back did not match snapshot",
+            ),
+        )
+
+    if orig_tool == "update_ap_radio" and isinstance(snap_data, Mapping):
+        mac_part = orig_target.rsplit(":", 1)[0]
+        wire_mac = _omada_mac(mac_part)
+        ep = f"sites/{site.site_id}/eaps/{wire_mac}/config/radios"
+        rs_keys = [k for k in ("radioSetting2g", "radioSetting5g", "radioSetting5g1", "radioSetting5g2", "radioSetting6g") if isinstance(snap_data.get(k), Mapping)]
+        body = {k: copy.deepcopy(dict(snap_data[k])) for k in rs_keys}
+        live_ap = dict(client.api_result(f"sites/{site.site_id}/eaps/{wire_mac}") or {})
+        live_view = {k: live_ap.get(k) for k in rs_keys}
+        return _run_restore(
+            method="PUT",
+            endpoint=ep,
+            payload=body,
+            live_before=live_view,
+            restore_preview=body,
+            read_back_fn=lambda: {k: dict(client.api_result(f"sites/{site.site_id}/eaps/{wire_mac}") or {}).get(k) for k in rs_keys},
+            verify_fn=lambda _b, a: (
+                all((a.get(k) or {}).get("channel") == body[k].get("channel") for k in rs_keys),
+                "AP radio channels did not match snapshot after rollback",
+            ),
+        )
+
+    if orig_tool == "assign_ap_wlan_group" and isinstance(snap_data, Mapping):
+        wire_mac = _omada_mac(orig_target)
+        ep = f"sites/{site.site_id}/eaps/{wire_mac}/config/wlans"
+        body = {"wlanId": str(snap_data.get("wlanId") or ""), "ssidOverrides": list(snap_data.get("ssidOverrides") or [])}
+        live_ap = dict(client.api_result(f"sites/{site.site_id}/eaps/{wire_mac}") or {})
+        return _run_restore(
+            method="PUT",
+            endpoint=ep,
+            payload=body,
+            live_before={"wlanId": live_ap.get("wlanId")},
+            restore_preview={"wlanId": body["wlanId"]},
+            read_back_fn=lambda: dict(client.api_result(f"sites/{site.site_id}/eaps/{wire_mac}") or {}),
+            verify_fn=lambda _b, a: (str(a.get("wlanId") or "") == body["wlanId"], "AP wlanId did not match snapshot"),
+        )
+
+    # Collections: LAN networks, ACLs, Port Profiles, Policy Routes, LAN DNS, DHCP, Port Forward, Static Routes, mDNS, IP Groups, Client settings
+    if orig_tool in ("update_lan_network", "set_vlan_isolation", "set_vlan_dhcp_pools") and isinstance(snap_data, Mapping):
+        lan_obj = snap_data.get("interface") if isinstance(snap_data.get("interface"), Mapping) else snap_data
+        nid = str(lan_obj.get("id") or "")
+        if nid:
+            body, _ = _ensure_lan_patch_body(lan_obj)
+            live = next((n for n in _fetch_lan_collection(client, site) if str(n.get("id")) == nid), {})
+            return _run_restore(
+                method="PATCH",
+                endpoint=f"sites/{site.site_id}/setting/lan/networks/{nid}",
+                payload=body,
+                live_before=live,
+                restore_preview=lan_obj,
+                read_back_fn=lambda: next((n for n in _fetch_lan_collection(client, site) if str(n.get("id")) == nid), {}),
+                verify_fn=lambda _b, a: (bool(a) and str(a.get("id")) == nid, f"LAN network {nid} rollback verification failed"),
+            )
+
+    if orig_tool == "create_lan_network" and isinstance(snap_data, Mapping):
+        existing_ids = {str(r.get("id")) for r in (snap_data.get("existingNetworks") or []) if isinstance(r, Mapping) and r.get("id")}
+        rows = _fetch_lan_collection(client, site)
+        target = next((r for r in rows if str(r.get("name")) == orig_target and str(r.get("id")) not in existing_ids), None)
+        if target is None or not target.get("id"):
+            raise OmadaError(f"cannot locate created LAN network {orig_target!r} to delete on rollback")
+        nid = str(target["id"])
+        return _run_restore(
+            method="DELETE",
+            endpoint=f"sites/{site.site_id}/setting/lan/networks/{nid}",
+            payload=None,
+            live_before=target,
+            restore_preview=None,
+            read_back_fn=lambda: _fetch_lan_collection(client, site),
+            verify_fn=lambda _b, a: (all(str(r.get("id")) != nid for r in a), f"LAN network {nid} still present"),
+        )
+
+    if orig_tool == "delete_lan_network" and isinstance(snap_data, Mapping):
+        body = {k: copy.deepcopy(v) for k, v in snap_data.items() if k not in ("id", "site", "resource", "default")}
+        rows = _fetch_lan_collection(client, site)
+        live = next((r for r in rows if str(r.get("name")) == str(snap_data.get("name"))), None)
+        if live is not None:
+            raise OmadaError(f"LAN network {snap_data.get('name')!r} already exists on controller")
+        return _run_restore(
+            method="POST",
+            endpoint=f"sites/{site.site_id}/setting/lan/networks",
+            payload=body,
+            live_before=None,
+            restore_preview=snap_data,
+            read_back_fn=lambda: next((r for r in _fetch_lan_collection(client, site) if str(r.get("name")) == str(snap_data.get("name"))), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == str(snap_data.get("name")), "recreated LAN network missing on read-back"),
+        )
+
+    if orig_tool in ("upsert_dhcp_reservation", "delete_dhcp_reservation") and isinstance(snap_data, Mapping):
+        if "existingReservations" in snap_data:
+            wire_mac = _omada_mac(orig_target)
+            norm_mac = _normalize_mac(wire_mac)
+            rows = _fetch_dhcp_reservations(client, site)
+            target = next((r for r in rows if _normalize_mac(r.get("mac", "")) == norm_mac), None)
+            if target is None:
+                raise OmadaError(f"cannot locate created DHCP reservation {norm_mac!r} to delete on rollback")
+            del_mac = urllib.parse.quote(str(target["mac"]), safe="")
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/service/dhcp/{del_mac}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_dhcp_reservations(client, site),
+                verify_fn=lambda _b, a: (all(_normalize_mac(r.get("mac", "")) != norm_mac for r in a), f"DHCP reservation {norm_mac} still present"),
+            )
+        norm_mac = _normalize_mac(str(snap_data.get("mac") or orig_target))
+        rows = _fetch_dhcp_reservations(client, site)
+        live = next((r for r in rows if _normalize_mac(r.get("mac", "")) == norm_mac), None)
+        body = {k: copy.deepcopy(v) for k, v in snap_data.items() if k not in ("id", "site", "resource")}
+        method = "PUT" if live is not None else "POST"
+        mac_q = urllib.parse.quote(str(live["mac"]), safe="") if live is not None else ""
+        ep = f"sites/{site.site_id}/setting/service/dhcp/{mac_q}" if method == "PUT" else f"sites/{site.site_id}/setting/service/dhcp"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=snap_data,
+            read_back_fn=lambda: next((r for r in _fetch_dhcp_reservations(client, site) if _normalize_mac(r.get("mac", "")) == norm_mac), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("ip")) == str(snap_data.get("ip")), "DHCP reservation rollback verification failed"),
+        )
+
+    if orig_tool in ("upsert_port_forward", "delete_port_forward") and isinstance(snap_data, Mapping):
+        if "existingPortForwards" in snap_data:
+            existing_ids = {str(r.get("id")) for r in (snap_data.get("existingPortForwards") or []) if isinstance(r, Mapping) and r.get("id")}
+            rows = _fetch_port_forwards(client, site)
+            target = next((r for r in rows if (str(r.get("name")) == orig_target or str(r.get("id")) == orig_target) and str(r.get("id")) not in existing_ids), None)
+            if target is None or not target.get("id"):
+                raise OmadaError(f"cannot locate created port forward {orig_target!r} to delete on rollback")
+            rid = str(target["id"])
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/transmission/portForwardings/{rid}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_port_forwards(client, site),
+                verify_fn=lambda _b, a: (all(str(r.get("id")) != rid for r in a), f"port forward {rid} still present"),
+            )
+        rid = str(snap_data.get("id") or "")
+        rows = _fetch_port_forwards(client, site)
+        live = next((r for r in rows if str(r.get("id")) == rid), None)
+        body = {k: copy.deepcopy(v) for k, v in snap_data.items() if k not in ("id", "site", "resource")}
+        method = "PUT" if live is not None else "POST"
+        ep = f"sites/{site.site_id}/setting/transmission/portForwardings/{rid}" if method == "PUT" else f"sites/{site.site_id}/setting/transmission/portForwardings"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=snap_data,
+            read_back_fn=lambda: next((r for r in _fetch_port_forwards(client, site) if str(r.get("name")) == str(snap_data.get("name"))), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == str(snap_data.get("name")), "port forward rollback verification failed"),
+        )
+
+    if orig_tool in ("upsert_static_route", "delete_static_route") and isinstance(snap_data, Mapping):
+        if "existingStaticRoutes" in snap_data:
+            existing_ids = {str(r.get("id")) for r in (snap_data.get("existingStaticRoutes") or []) if isinstance(r, Mapping) and r.get("id")}
+            rows = _fetch_static_routes(client, site)
+            target = next((r for r in rows if (str(r.get("name")) == orig_target or str(r.get("id")) == orig_target) and str(r.get("id")) not in existing_ids), None)
+            if target is None or not target.get("id"):
+                raise OmadaError(f"cannot locate created static route {orig_target!r} to delete on rollback")
+            rid = str(target["id"])
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/transmission/staticRoutings/{rid}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_static_routes(client, site),
+                verify_fn=lambda _b, a: (all(str(r.get("id")) != rid for r in a), f"static route {rid} still present"),
+            )
+        rid = str(snap_data.get("id") or "")
+        rows = _fetch_static_routes(client, site)
+        live = next((r for r in rows if str(r.get("id")) == rid), None)
+        body = {k: copy.deepcopy(v) for k, v in snap_data.items() if k not in ("id", "site", "resource")}
+        method = "PUT" if live is not None else "POST"
+        ep = f"sites/{site.site_id}/setting/transmission/staticRoutings/{rid}" if method == "PUT" else f"sites/{site.site_id}/setting/transmission/staticRoutings"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=snap_data,
+            read_back_fn=lambda: next((r for r in _fetch_static_routes(client, site) if str(r.get("name")) == str(snap_data.get("name"))), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == str(snap_data.get("name")), "static route rollback verification failed"),
+        )
+
+    if orig_tool in ("upsert_mdns_rule", "delete_mdns_rule") and isinstance(snap_data, Mapping):
+        if "existingMdnsRules" in snap_data:
+            existing_ids = {str(r.get("id")) for r in (snap_data.get("existingMdnsRules") or []) if isinstance(r, Mapping) and r.get("id")}
+            rows = _fetch_mdns_rules(client, site)
+            target = next((r for r in rows if (str(r.get("name")) == orig_target or str(r.get("id")) == orig_target) and str(r.get("id")) not in existing_ids), None)
+            if target is None or not target.get("id"):
+                raise OmadaError(f"cannot locate created mDNS rule {orig_target!r} to delete on rollback")
+            rid = str(target["id"])
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/service/mdns/{rid}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_mdns_rules(client, site),
+                verify_fn=lambda _b, a: (all(str(r.get("id")) != rid for r in a), f"mDNS rule {rid} still present"),
+            )
+        rid = str(snap_data.get("id") or "")
+        rows = _fetch_mdns_rules(client, site)
+        live = next((r for r in rows if str(r.get("id")) == rid), None)
+        body = {k: copy.deepcopy(v) for k, v in snap_data.items() if k not in ("id", "site", "resource")}
+        method = "PUT" if live is not None else "POST"
+        ep = f"sites/{site.site_id}/setting/service/mdns/{rid}" if method == "PUT" else f"sites/{site.site_id}/setting/service/mdns"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=snap_data,
+            read_back_fn=lambda: next((r for r in _fetch_mdns_rules(client, site) if str(r.get("name")) == str(snap_data.get("name"))), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == str(snap_data.get("name")), "mDNS rule rollback verification failed"),
+        )
+
+    if orig_tool == "create_ip_group" and isinstance(snap_data, Mapping) and "existingIpGroups" in snap_data:
+        existing_ids = {str(r.get("groupId") or r.get("id")) for r in (snap_data.get("existingIpGroups") or []) if isinstance(r, Mapping)}
+        rows = _fetch_groups(client, site)
+        target = next((r for r in rows if str(r.get("name")) == orig_target and str(r.get("groupId") or r.get("id")) not in existing_ids), None)
+        if target is None:
+            raise OmadaError(f"cannot locate created IP group {orig_target!r} to delete on rollback")
+        gid = str(target.get("groupId") or target.get("id") or "")
+        return _run_restore(
+            method="DELETE",
+            endpoint=f"sites/{site.site_id}/setting/profiles/groups/0/{gid}",
+            payload=None,
+            live_before=target,
+            restore_preview=None,
+            read_back_fn=lambda: _fetch_groups(client, site),
+            verify_fn=lambda _b, a: (all(str(r.get("groupId") or r.get("id") or "") != gid for r in a), f"IP group {gid} still present"),
+        )
+
+    if orig_tool == "upsert_port_profile" and isinstance(snap_data, Mapping):
+        if snap_data.get("action") == "create":
+            existing_ids = set(snap_data.get("existingIds") or [])
+            rows = _fetch_lan_profiles(client, site)
+            target = next((r for r in rows if str(r.get("name")) == snap_data.get("name") and str(r.get("id")) not in existing_ids), None)
+            if target is None:
+                raise OmadaError(f"cannot locate newly created port profile {snap_data.get('name')!r} to delete on rollback")
+            pid = str(target["id"])
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/lan/profiles/{pid}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_lan_profiles(client, site),
+                verify_fn=lambda _b, a: (all(str(r.get("id")) != pid for r in a), f"port profile {pid} still exists"),
+            )
+        prof = snap_data.get("profile") if isinstance(snap_data.get("profile"), Mapping) else snap_data
+        pid = str(prof["id"])
+        wire_body = {k: copy.deepcopy(v) for k, v in prof.items() if k not in ("id", "site", "flag", "prohibitModify", "type", "resource", "networkConflict", "supportESEnable")}
+        live = next((r for r in _fetch_lan_profiles(client, site) if str(r.get("id")) == pid), {})
+        return _run_restore(
+            method="PATCH",
+            endpoint=f"sites/{site.site_id}/setting/lan/profiles/{pid}",
+            payload=wire_body,
+            live_before=live,
+            restore_preview=prof,
+            read_back_fn=lambda: next((r for r in _fetch_lan_profiles(client, site) if str(r.get("id")) == pid), {}),
+            verify_fn=lambda _b, a: (bool(a) and str(a.get("name")) == str(prof.get("name")), "port profile rollback mismatch"),
+        )
+
+    if orig_tool in ("upsert_policy_route", "delete_policy_route") and isinstance(snap_data, Mapping):
+        if snap_data.get("action") == "create":
+            existing_ids = set(snap_data.get("existingIds") or [])
+            rows = _fetch_policy_routes(client, site)
+            target = next((r for r in rows if str(r.get("name")) == snap_data.get("name") and str(r.get("id")) not in existing_ids), None)
+            if target is None:
+                raise OmadaError(f"cannot locate created policy route {snap_data.get('name')!r} to delete on rollback")
+            rid = str(target["id"])
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/transmission/policyRoutings/{rid}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_policy_routes(client, site),
+                verify_fn=lambda _b, a: (all(str(r.get("id")) != rid for r in a), f"policy route {rid} still present"),
+            )
+        rule = snap_data.get("rule") if isinstance(snap_data.get("rule"), Mapping) else snap_data
+        rid = str(rule.get("id") or "")
+        body = {k: copy.deepcopy(v) for k, v in rule.items() if k not in ("id", "site", "resource")}
+        rows = _fetch_policy_routes(client, site)
+        live = next((r for r in rows if str(r.get("id")) == rid), None)
+        method = "PUT" if live is not None else "POST"
+        ep = f"sites/{site.site_id}/setting/transmission/policyRoutings/{rid}" if method == "PUT" else f"sites/{site.site_id}/setting/transmission/policyRoutings"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=rule,
+            read_back_fn=lambda: next((r for r in _fetch_policy_routes(client, site) if str(r.get("name")) == str(rule.get("name"))), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == str(rule.get("name")), "policy route rollback verification failed"),
+        )
+
+    if orig_tool in ("upsert_lan_dns_rule", "delete_lan_dns_rule") and isinstance(snap_data, Mapping):
+        if snap_data.get("action") == "create":
+            existing_ids = set(snap_data.get("existingIds") or [])
+            rows = _fetch_lan_dns_rules(client, site)
+            target = next((r for r in rows if str(r.get("name")) == snap_data.get("name") and str(r.get("id")) not in existing_ids), None)
+            if target is None:
+                raise OmadaError(f"cannot locate created LAN DNS rule {snap_data.get('name')!r} to delete on rollback")
+            did = str(target["id"])
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/lan/dns/{did}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_lan_dns_rules(client, site),
+                verify_fn=lambda _b, a: (all(str(r.get("id")) != did for r in a), f"LAN DNS rule {did} still present"),
+            )
+        rule = snap_data.get("rule") if isinstance(snap_data.get("rule"), Mapping) else snap_data
+        did = str(rule.get("id") or "")
+        body = {k: copy.deepcopy(v) for k, v in rule.items() if k not in ("id", "site", "resource")}
+        rows = _fetch_lan_dns_rules(client, site)
+        live = next((r for r in rows if str(r.get("id")) == did), None)
+        method = "PATCH" if live is not None else "POST"
+        ep = f"sites/{site.site_id}/setting/lan/dns/{did}" if method == "PATCH" else f"sites/{site.site_id}/setting/lan/dns"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=rule,
+            read_back_fn=lambda: next((r for r in _fetch_lan_dns_rules(client, site) if str(r.get("name")) == str(rule.get("name"))), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == str(rule.get("name")), "LAN DNS rollback verification failed"),
+        )
+
+    if orig_tool in ("create_gateway_acl", "create_switch_acl", "create_eap_acl") and isinstance(snap_data, Mapping):
+        acl_type = int(snap_data.get("type", 1 if orig_tool == "create_switch_acl" else (2 if orig_tool == "create_eap_acl" else 0)))
+        existing_ids = {str(r.get("id")) for r in (snap_data.get("existingAcls") or []) if isinstance(r, Mapping) and r.get("id")}
+        rows = _fetch_typed_acls(client, site, acl_type)
+        target = next((r for r in rows if str(r.get("name")) == orig_target and str(r.get("id")) not in existing_ids), None)
+        if target is None:
+            target = next((r for r in rows if str(r.get("name")) == orig_target), None)
+        if target is None or not target.get("id"):
+            raise OmadaError(f"cannot locate created ACL {orig_target!r} (type={acl_type}) to delete on rollback")
+        aid = str(target["id"])
+        return _run_restore(
+            method="DELETE",
+            endpoint=f"sites/{site.site_id}/setting/firewall/acls/{aid}?type={acl_type}",
+            payload=None,
+            live_before=target,
+            restore_preview=None,
+            read_back_fn=lambda: _fetch_typed_acls(client, site, acl_type),
+            verify_fn=lambda _b, a: (all(str(r.get("id")) != aid for r in a), f"ACL {aid} still present"),
+        )
+
+    if orig_tool in ("update_gateway_acl", "set_acl_rule_status", "delete_gateway_acl") and isinstance(snap_data, Mapping):
+        acl_type = int(snap_data.get("type", 0))
+        aid = str(snap_data.get("id") or "")
+        rows = _fetch_typed_acls(client, site, acl_type)
+        live = next((r for r in rows if str(r.get("id")) == aid), None)
+        body = {k: copy.deepcopy(v) for k, v in snap_data.items() if k not in ("id", "site", "index", "resource")}
+        method = "PUT" if live is not None and aid else "POST"
+        ep = f"sites/{site.site_id}/setting/firewall/acls/{aid}?type={acl_type}" if method == "PUT" else f"sites/{site.site_id}/setting/firewall/acls?type={acl_type}"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=snap_data,
+            read_back_fn=lambda: next((r for r in _fetch_typed_acls(client, site, acl_type) if str(r.get("name")) == str(snap_data.get("name"))), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == str(snap_data.get("name")), "ACL rollback verification failed"),
+        )
+
+    raise OmadaError(
+        f"snapshot {sid!r} from tool {orig_tool!r} does not have an automatic rollback handler for its stored payload shape",
+        hint="Inspect the snapshot JSON in OMADA_SNAPSHOT_DIR and apply the recorded before state with the corresponding config tool.",
     )

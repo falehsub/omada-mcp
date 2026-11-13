@@ -88,6 +88,21 @@ WRITE_TOOL_NAMES: Tuple[str, ...] = (
     "update_client",
     "update_device",
     "reboot_device",
+    "rollback_from_snapshot",
+    "update_switch_port",
+    "cycle_poe_port",
+    "upsert_port_profile",
+    "update_ap_radio",
+    "start_rf_scan",
+    "assign_ap_wlan_group",
+    "upsert_policy_route",
+    "delete_policy_route",
+    "upsert_lan_dns_rule",
+    "delete_lan_dns_rule",
+    "create_switch_acl",
+    "create_eap_acl",
+    "set_client_lock_to_ap",
+    "set_client_rate_limit",
 )
 
 _READ_ONLY_TOOL_NAMES = frozenset({
@@ -111,6 +126,19 @@ _READ_ONLY_TOOL_NAMES = frozenset({
     "network_audit",
     "explain_error",
     "get_config_snapshot",
+    "get_switch_ports",
+    "get_ap_radios",
+    "get_rf_scan",
+    "get_wan_status",
+    "list_vpn_tunnels",
+    "get_topology",
+    "get_security_status",
+    "diagnose_client",
+    "diagnose_wan",
+    "list_port_profiles",
+    "list_wlan_groups",
+    "list_policy_routes",
+    "list_lan_dns_rules",
 })
 
 _TRUE = {"1", "true", "yes", "on", "y", "t"}
@@ -149,7 +177,7 @@ class Config:
     verify_ssl: bool = True
     strict_x509: bool = True
     tls_server_name: Optional[str] = None
-    read_only: bool = False
+    read_only: bool = True
     write_tools: Tuple[str, ...] = ()
     snapshot_dir: Optional[Path] = None
     snapshot_origin: str = "default"
@@ -158,6 +186,9 @@ class Config:
     use_system_proxy: bool = False
     timeout: float = DEFAULT_TIMEOUT
     min_interval: float = DEFAULT_MIN_INTERVAL
+    schema_mode: str = "slim"
+    tool_categories: Tuple[str, ...] = ()
+    compact_output: bool = True
     env_file: Optional[Path] = None
     env_origin: str = "environment"
     sources: Dict[str, str] = field(default_factory=dict)
@@ -276,6 +307,48 @@ def default_snapshot_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
                 return Path(local_app) / "omada-mcp" / "snapshots"
         return Path("/nonexistent-xdg-state-home") / "omada-mcp" / "snapshots"
     return Path.home() / ".local" / "state" / "omada-mcp" / "snapshots"
+
+
+VALID_SCHEMA_MODES: Tuple[str, ...] = ("slim", "full")
+VALID_TOOL_CATEGORIES: Tuple[str, ...] = (
+    "core", "diagnostics", "switch", "wifi", "routing", "security", "rollback",
+)
+
+
+def parse_schema_mode(raw: Optional[str]) -> str:
+    """Parse ``OMADA_SCHEMA_MODE`` (``slim`` [default] or ``full``)."""
+    text = (raw or "").strip().lower()
+    if not text:
+        return "slim"
+    if text in VALID_SCHEMA_MODES:
+        return text
+    raise ConfigError(
+        f"OMADA_SCHEMA_MODE={raw!r} must be 'slim' or 'full'",
+        hint="use OMADA_SCHEMA_MODE=slim (default) or OMADA_SCHEMA_MODE=full",
+        key="OMADA_SCHEMA_MODE",
+    )
+
+
+def parse_tool_categories(raw: Optional[str]) -> Tuple[str, ...]:
+    """Parse ``OMADA_TOOL_CATEGORIES`` comma-separated filter list."""
+    if not raw or not str(raw).strip():
+        return ()
+    seen: set[str] = set()
+    parsed: List[str] = []
+    for part in str(raw).split(","):
+        item = part.strip().lower()
+        if not item:
+            continue
+        if item not in VALID_TOOL_CATEGORIES:
+            raise ConfigError(
+                f"OMADA_TOOL_CATEGORIES contains unknown category {item!r}",
+                hint=f"valid categories: {', '.join(VALID_TOOL_CATEGORIES)}",
+                key="OMADA_TOOL_CATEGORIES",
+            )
+        if item not in seen:
+            seen.add(item)
+            parsed.append(item)
+    return tuple(parsed)
 
 
 def parse_bool(raw: object, key: str, default: bool = False) -> bool:
@@ -576,7 +649,7 @@ def load_config(
         verify_ssl=parse_bool(values.get("OMADA_VERIFY_SSL"), "OMADA_VERIFY_SSL", True),
         strict_x509=parse_bool(values.get("OMADA_STRICT_X509"), "OMADA_STRICT_X509", True),
         tls_server_name=tls_server_name,
-        read_only=parse_bool(values.get("OMADA_READ_ONLY"), "OMADA_READ_ONLY", False),
+        read_only=parse_bool(values.get("OMADA_READ_ONLY"), "OMADA_READ_ONLY", True),
         write_tools=write_tools,
         snapshot_dir=snapshot_dir,
         snapshot_origin=snapshot_origin,
@@ -586,6 +659,10 @@ def load_config(
                                     "OMADA_USE_SYSTEM_PROXY", False),
         timeout=timeout,
         min_interval=min_interval,
+        schema_mode=parse_schema_mode(values.get("OMADA_SCHEMA_MODE")),
+        tool_categories=parse_tool_categories(values.get("OMADA_TOOL_CATEGORIES")),
+        compact_output=parse_bool(values.get("OMADA_COMPACT_OUTPUT"),
+                                  "OMADA_COMPACT_OUTPUT", True),
         env_file=env_file,
         env_origin=env_origin,
         sources=sources,
