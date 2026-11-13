@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-11-13
+
+Live-controller client & audit fixes verified on Omada `v6.2.10.17` and
+Docker `v6.2.14.11` (**160 passing tests**).
+
+### Fixed
+
+- **`list_clients` / `list_wifi_clients` blank wireless fields (`_fetch_client_rows`)**:
+  Prefer `sites/{id}/clients?filters.active=true` (carrying `ssid`, `ip`,
+  `apName`, and `signalLevel`) with automatic fallback to `insight/clients` on
+  `OmadaError` so Viewer accounts keep working while Admin accounts no longer see
+  blank Wi-Fi columns on Omada `6.2.10.x`.
+- **`search_clients` `vlan` and `ssid` filtering**:
+  Added validated `vlan` (`0-4094`, rejecting booleans and non-integers) and
+  case-insensitive `ssid` arguments matching the documented schema, composable
+  with `query`, `active`, `wireless`, and `guest`.
+- **`network_audit` health predicate (`_findings_healthy`)**:
+  Unified `_network_audit` and `_network_audit_enriched` on a single
+  `_findings_healthy(findings)` rule so warnings keep `healthy: false` across
+  both paths.
+
 ## [1.2.0] - 2026-11-13
 
 79-tool release (33 read-only diagnostics/discovery + 46 opt-in write, rollback,
