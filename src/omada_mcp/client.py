@@ -59,7 +59,48 @@ __all__ = [
     "classify_controller_family",
     "describe_error",
     "explain_error_code",
+    "fetch_paginated",
+    "redact_secrets",
 ]
+
+_SECRET_FIELD_NAMES = frozenset({
+    "securityKey",
+    "password",
+    "passphrase",
+    "psk",
+    "radiusSecret",
+    "acctSecret",
+    "secretKey",
+    "privateKey",
+})
+
+
+def redact_secrets(value: Any) -> Any:
+    """Recursively mask sensitive credential/PSK fields before snapshots or output."""
+    if isinstance(value, Mapping):
+        cleaned: Dict[str, Any] = {}
+        for k, v in value.items():
+            if str(k) in _SECRET_FIELD_NAMES and v not in (None, ""):
+                cleaned[k] = "***REDACTED***"
+            else:
+                cleaned[k] = redact_secrets(v)
+        return cleaned
+    if isinstance(value, list):
+        return [redact_secrets(item) for item in value]
+    if isinstance(value, tuple):
+        return [redact_secrets(item) for item in value]
+    return value
+
+
+def fetch_paginated(
+    client: "OmadaClient",
+    endpoint: str,
+    *,
+    page_size: int = 100,
+    max_pages: int = 50,
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Collect all rows across paginated Omada Web API v2 endpoints."""
+    return client.paginate(endpoint, page_size=page_size, max_pages=max_pages)
 
 #: Delay used when the controller signals a burst block (``errorCode -1600``).
 BURST_BACKOFF_SECONDS = 0.8
@@ -171,6 +212,32 @@ ERROR_CATALOG: Dict[int, Dict[str, Any]] = {
             "Expired or evicted server-side session token/cookie on subsequent API calls.",
         ],
     },
+    -33001: {
+        "title": "No gateways adopted in site",
+        "meaning": ("This setting or service requires an adopted Omada gateway (router) in the "
+                    "target site, and none is currently adopted."),
+        "fix": ("Adopt an Omada gateway (e.g. ER605/ER7206/ER8411) on this site before "
+                "configuring UPnP or gateway-only services."),
+        "ambiguous": False,
+        "causes": ["Calling a gateway-only endpoint such as setting/upnp on a gatewayless site."],
+    },
+    -33239: {
+        "title": "SSID limit reached or duplicate SSID name",
+        "meaning": ("The controller rejected creating or updating the SSID because the name "
+                    "already exists in the WLAN group or the maximum SSID count was reached."),
+        "fix": "Choose a distinct SSID name within the WLAN group or remove an unused SSID first.",
+        "ambiguous": False,
+        "causes": ["Duplicate SSID name in the same WLAN group or per-radio SSID limit exceeded."],
+    },
+    -33515: {
+        "title": "LAN interface ports missing",
+        "meaning": ("Creating an interface (routed) LAN network requires at least one gateway "
+                    "LAN port in interfaceIds."),
+        "fix": ("Supply interfaceIds (from setting/wan/networks osgPortInfo.wanLanPortSettings "
+                "where mode=1) or create a pure VLAN network with purpose='vlan'."),
+        "ambiguous": False,
+        "causes": ["POST setting/lan/networks with purpose='interface' and empty interfaceIds."],
+    },
     -33598: {
         "title": "Device does not support Network Isolation",
         "meaning": ("The controller refused enabling VLAN network isolation because no adopting/capable "
@@ -214,6 +281,59 @@ ERROR_CATALOG: Dict[int, Dict[str, Any]] = {
                 "16-entry limit."),
         "ambiguous": False,
         "causes": ["Attempting to create or replace an IP profile group with more than 16 entries."],
+    },
+    -34522: {
+        "title": "DHCP reservation or IP-MAC conflict",
+        "meaning": ("The requested static DHCP IP or MAC conflicts with an existing reservation "
+                    "or IP-MAC binding entry."),
+        "fix": ("Choose an unused IP/MAC or update the existing DHCP reservation record "
+                "instead of creating a duplicate."),
+        "ambiguous": False,
+        "causes": ["Duplicate MAC or IP across setting/service/dhcp or IP-MAC bindings."],
+    },
+    -39005: {
+        "title": "Device is disconnected or not ready",
+        "meaning": ("The controller refused the command because the target device is disconnected "
+                    "or pending adoption."),
+        "fix": "Ensure the device is connected (statusCategory=1) before running LED/locate or reboot.",
+        "ambiguous": False,
+        "causes": ["Calling cmd/devices/{MAC}/locate or device config on an offline device."],
+    },
+    -39006: {
+        "title": "Device does not exist",
+        "meaning": "No managed device matches the specified MAC address on this site.",
+        "fix": "Resolve the device MAC via list_devices first (do not pass a client MAC).",
+        "ambiguous": False,
+        "causes": ["Unknown or unadopted device MAC passed to cmd/devices/{MAC}/*."],
+    },
+    -39303: {
+        "title": "Access point does not exist",
+        "meaning": "No adopted EAP (access point) matches the specified MAC on this site.",
+        "fix": "Check list_devices and confirm the device type is 'ap'.",
+        "ambiguous": False,
+        "causes": ["Calling PATCH eaps/{MAC} with an unknown or non-AP MAC."],
+    },
+    -39501: {
+        "title": "Gateway does not exist",
+        "meaning": "No adopted gateway matches the specified MAC on this site.",
+        "fix": "Check list_devices and confirm the device type is 'gateway'.",
+        "ambiguous": False,
+        "causes": ["Calling PATCH gateways/{MAC} with an unknown or non-gateway MAC."],
+    },
+    -39700: {
+        "title": "Switch does not exist",
+        "meaning": "No adopted switch matches the specified MAC on this site.",
+        "fix": "Check list_devices and confirm the device type is 'switch'.",
+        "ambiguous": False,
+        "causes": ["Calling PATCH switches/{MAC} with an unknown or non-switch MAC."],
+    },
+    -41002: {
+        "title": "Client does not exist",
+        "meaning": "The target client MAC was not found in the active client table for this command.",
+        "fix": ("Check search_clients/list_clients for the exact client MAC (note some client "
+                "commands only accept currently known/active clients)."),
+        "ambiguous": False,
+        "causes": ["Calling cmd/clients/{MAC}/block or unblock on an unknown client MAC."],
     },
     -41011: {
         "title": "Not a client or Admin-only endpoint",
@@ -261,15 +381,25 @@ def _endpoint_context(code: int, endpoint: Optional[str], method: Optional[str])
     if code == -41011 and "clients" in ep and "insight" not in ep:
         return ("sites/{siteId}/clients* requires an Admin account and a known client MAC "
                 "(device MACs from devices return -41011; Viewer accounts must use insight/clients).")
+    if code == -41002 and "cmd/clients" in ep:
+        return ("cmd/clients/{MAC}/block|unblock only operates on clients registered on the site.")
+    if code == -33001:
+        return "This setting requires at least one adopted Omada gateway on the site."
     if code == -33717 and "groups" in ep:
         return ("The IP group is still referenced by one or more ACL rules; re-point rules to a "
                 "temporary group before deleting.")
-    if code == -1001 and "lan/networks" in ep:
+    if code == -1001 and "lan/networks" in ep and meth == "PATCH":
         return ("PATCHing a LAN network requires the complete object from setting/lan/networks/"
                 "interface with lanNetworkIpv6Config={'proto': 'none', 'enable': 0} present.")
+    if code == -1001 and "ssids" in ep and meth == "PATCH":
+        return ("PATCHing an SSID requires the full SSID object (not a sparse diff); start from "
+                "the GET setting/wlans/{wlanId}/ssids record minus server metadata fields.")
     if code == -1 and "clients" in ep:
         return ("PATCHing clients/{MAC} requires ipSetting.netId (the LAN network hex id) and "
                 "Admin privileges.")
+    if code == -33515 and "lan/networks" in ep:
+        return ("POST setting/lan/networks with purpose='interface' requires at least one "
+                "gateway LAN portUuid in interfaceIds.")
     return None
 
 
@@ -890,6 +1020,28 @@ class OmadaClient:
             )
 
         code = payload.get("errorCode")
+        if code == -30109 and not endpoint.lower().startswith("login"):
+            if not _retry:
+                raise OmadaError(
+                    "controller returned -30109 (session expired) twice",
+                    code=-30109,
+                    hint=("the API session keeps dying: another session may be logging in "
+                          "with the same account; log in with a dedicated account"),
+                    endpoint=endpoint,
+                )
+            self._log(f"session expired (-30109 on {method_upper} {endpoint}); re-authenticating")
+            self.authenticate(force=True)
+            if method_upper != "GET":
+                raise OmadaSessionExpiredError(
+                    f"session expired during {method_upper} {endpoint}; re-authenticated, "
+                    "re-read state before retrying",
+                    reauthenticated=True,
+                    hint="use a dedicated Admin account for write operations to avoid session eviction",
+                    endpoint=endpoint,
+                )
+            return self.api(endpoint, method_upper, data, require_auth=False, _retry=False,
+                            _burst=_burst)
+
         if code == -1600 and method_upper == "GET" and _burst < _MAX_BURST_RETRIES:
             self._log(f"-1600 from {endpoint}; pacing {BURST_BACKOFF_SECONDS}s and retrying once")
             self._sleep(BURST_BACKOFF_SECONDS)
@@ -912,6 +1064,43 @@ class OmadaClient:
                 endpoint=endpoint,
             )
         return payload.get("result")
+
+    def paginate(
+        self,
+        endpoint: str,
+        *,
+        page_size: int = 100,
+        max_pages: int = 50,
+    ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """Collect all rows across paginated Omada Web API v2 endpoints."""
+        collected: List[Dict[str, Any]] = []
+        last_meta: Optional[Dict[str, Any]] = None
+        prev_rows: Optional[List[Dict[str, Any]]] = None
+        sep = "&" if "?" in endpoint else "?"
+        for page in range(1, max_pages + 1):
+            paged = f"{endpoint}{sep}currentPage={page}&currentPageSize={page_size}"
+            result = self.api_result(paged)
+            if isinstance(result, list):
+                collected.extend(dict(r) for r in result if isinstance(r, Mapping))
+                return collected, None
+            if not isinstance(result, Mapping):
+                break
+            last_meta = dict(result)
+            raw_rows = result.get("data")
+            if not isinstance(raw_rows, list) or not raw_rows:
+                break
+            rows = [dict(r) for r in raw_rows if isinstance(r, Mapping)]
+            if prev_rows is not None and rows == prev_rows:
+                break
+            prev_rows = rows
+            collected.extend(rows)
+            total = result.get("totalRows")
+            if total is not None:
+                if len(collected) >= int(total):
+                    break
+            elif len(rows) < page_size:
+                break
+        return collected, last_meta
 
     # -- write plumbing (gated, paced, snapshotted, verified, audited) --------
 
@@ -957,7 +1146,7 @@ class OmadaClient:
             "tool": tool_name,
             "target": target,
             "account": self.config.username,
-            "data": payload,
+            "data": redact_secrets(payload),
         }
         path.write_text(json.dumps(record, indent=2, ensure_ascii=False, default=str) + "\n",
                         encoding="utf-8")

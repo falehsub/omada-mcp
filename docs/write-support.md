@@ -375,3 +375,51 @@ Provenance: verified on software controller `6.2.10.17` (Web API v2,
 `TPOMADA_SESSIONID`). Hardware builds (`OC200`/`OC300`, v5.x, `TPEAP_SESSIONID`) are
 untested for writes; treat every row above as "unverified" there and re-probe with
 `--doctor --json` before shipping those paths.
+
+---
+
+## 11. Expanded v1.2+ full-control surface & live Docker `6.2.14.11` findings
+
+Following isolated testing against Docker Omada Software Controller `v6.2.14.11`
+(`DockerLab`, zero home-controller mutations), the surface expanded to **20 read-only**
+and **31 opt-in write** tools (all remaining behind `OMADA_READ_ONLY=false`,
+`OMADA_WRITE_TOOLS`, `dryRun=true`, `confirm="<tool>:<target>"`, pre-write redaction,
+and read-back verification). Firmware upgrade stays unshipped pending a maintenance-window
+policy.
+
+Additional endpoints & live `v6.2.14.11` behaviors observed during Docker E2E testing:
+
+- **LAN/VLAN creation & full PATCH (`create_lan_network`, `update_lan_network`, `delete_lan_network`)**:
+  - `POST setting/lan/networks` stores `dhcpGuard: {}`, `dhcpv6Guard: {}`, and
+    `lanNetworkIpv6Config: {"enable": 0}` on created interface networks, causing subsequent
+    `PATCH setting/lan/networks/{id}` calls to fail `-1001` unless `dhcpGuard.enable`,
+    `dhcpv6Guard.enable`, and `lanNetworkIpv6Config.proto` are populated.
+  - Renaming `name` triggers the controller to auto-sync `origName`, and manual DHCP DNS
+    persists under `dhcpSettings.priDns` / `dhcpSettings.sndDns` + `dhcpns: "manual"` (legacy
+    `dns1` / `dns2` / `dnsEnable` keys are silently discarded on `6.2.14.11`).
+- **Gateway ACL edits/deletes (`update_gateway_acl`, `delete_gateway_acl`, `delete_ip_group`)**:
+  - `PUT setting/firewall/acls/{id}?type=0` updates derived `existSyslog` automatically
+    whenever `syslog` changes.
+- **Offline DHCP reservations (`list_dhcp_reservations`, `upsert_dhcp_reservation`, `delete_dhcp_reservation`)**:
+  - Backed by `setting/service/dhcp` (`GET` paginated, `POST` create, `PUT /{id}` update,
+    `DELETE /{id}`), separate from live-client `/clients/{mac}`.
+- **WLAN/SSID CRUD (`create_ssid`, `update_ssid`, `delete_ssid`)**:
+  - `POST`/`PATCH`/`DELETE` under `setting/wlans/{groupId}/ssids`. Secret keys (`psk`,
+    `securityKey`, `pskSetting`) are scrubbed recursively via `redact_secrets` before any
+    output, diff, snapshot, or `audit.jsonl` record is written.
+- **Port forwarding, static routing & site services**:
+  - `list_port_forwards` / `upsert_port_forward` / `delete_port_forward` (`setting/transmission/portForwardings`)
+  - `list_static_routes` / `upsert_static_route` / `delete_static_route` (`setting/transmission/staticRoutings`)
+  - `get_network_services` / `upsert_mdns_rule` / `delete_mdns_rule` / `set_upnp`
+    (`setting/service/mdns`, `setting/profiles/mdns`, `setting/upnp`, `setting/dns-proxy`,
+    `setting/service/ddns`, `setting/wan/networks`).
+- **Client & device controls**:
+  - `search_clients` falls back automatically from `clients` (`-1007`/`-41011`) to
+    `insight/clients` on Viewer accounts; `set_client_blocked`, `reconnect_client`,
+    `update_client` (`cmd/clients/...`, `clients/{mac}`), and `update_device` / `reboot_device`
+    (`eaps|switches|gateways/{mac}`, `cmd/devices/{mac}/reboot`) stay opt-in with strict
+    anti-stranding and `destructive=True` warnings. Hardwareless Docker returns expected
+    `-33598` on `set_vlan_isolation(true)` and `-41011`/not-found on non-existent targets.
+- **JSON `-30109` session expiry**:
+  - `OmadaClient` treats JSON `errorCode == -30109` on non-login endpoints identically to
+    HTTP 200 HTML expiry (re-authenticating once cleanly and re-running write `reauth_prepare`).

@@ -127,9 +127,15 @@ fields. Two hard requirements:
 
 * `lanNetworkIpv6Config.proto` must be present (`"none"` for IPv4-only).
   A top-level `proto`, a `dhcpSettings.proto`, or `?proto=` are all ignored and
-  you get `-1001 Parameter [proto] should not be null`.
+  you get `-1001 Parameter [proto] should not be null`. Also on 6.2.14+, `POST`
+  creates interface networks with empty `dhcpGuard: {}` and `dhcpv6Guard: {}` —
+  populate `{"enable": false}` on both before PATCHing or you also get `-1001`.
 * `GET /networks/{id}` returns `-1600`. Only the collection and
-  `/networks/interface` read back; take the object from there.
+  `/networks/interface` read back; `GET /setting/lan/networks` requires
+  `?currentPage=...` (`-1001` without it). Take the object from `/interface`.
+* On 6.2.14+, renaming `name` auto-updates `origName`, and manual DHCP DNS uses
+  `dhcpSettings.dhcpns="manual"` + `priDns`/`sndDns` (`dns1`/`dns2`/`dnsEnable`
+  and `icmpPingEnable` on LAN PATCHes are silently dropped).
 
 Multiple DHCP pools (for example, carving a static block out of a dynamic range)
 live in `dhcpSettings.ipRangePool` as `[{ipaddrStart, ipaddrEnd}, ...]`, with
@@ -178,11 +184,15 @@ were unreachable through the Web API is wrong):
 | Purpose | Endpoint |
 |---|---|
 | List gateway ACLs | `GET .../setting/firewall/acls?type=0&currentPage=1&currentPageSize=100` |
-| Create gateway ACL | `POST .../setting/firewall/acls?type=0` |
-| Update / toggle single ACL rule | `PUT .../setting/firewall/acls/{aclId}?type=0` |
+| Create / Update / Delete gateway ACL | `POST .../acls?type=0`, `PUT .../acls/{aclId}?type=0` (updates `existSyslog` when `syslog` changes), `DELETE .../acls/{aclId}?type=0` |
+| Offline DHCP reservations | `GET/POST .../setting/service/dhcp`, `PUT/DELETE .../setting/service/dhcp/{id}` |
+| LAN networks & WAN ports | `POST/DELETE .../setting/lan/networks`, `PATCH .../setting/lan/networks/{id}`, `GET .../setting/wan/networks` (`osgPortInfo.wanLanPortSettings`) |
+| WLAN groups & SSIDs | `GET .../setting/wlans`, `GET/POST .../setting/wlans/{groupId}/ssids`, `PATCH/DELETE .../ssids/{ssidId}` |
+| Port forwards, static routes & services | `.../setting/transmission/portForwardings`, `.../setting/transmission/staticRoutings`, `.../setting/service/mdns`, `.../setting/profiles/mdns`, `.../setting/upnp`, `.../setting/dns-proxy`, `.../setting/service/ddns` |
+| Logs & Audit | `GET .../logs/alerts?...&filters.timeStart=...&filters.timeEnd=...`, `.../logs/events`, `GET .../audit/logs` (`audit-logs` returns `-1600`) |
+| Devices & Clients | `PATCH .../eaps|switches|gateways/{mac}`, `PUT .../config/general`, `POST .../cmd/devices/{mac}/reboot`, `GET .../clients?filters.active=true|false`, `POST .../cmd/clients/{mac}/block|unblock|reconnect` |
 | List groups | `GET .../setting/profiles/groups` |
-| Create group | `POST .../setting/profiles/groups` |
-| Delete group | `DELETE .../setting/profiles/groups/{type}/{groupId}` |
+| Create / Delete group | `POST .../setting/profiles/groups`, `DELETE .../setting/profiles/groups/{type}/{groupId}` |
 | Per-client fixed IP | `PATCH .../clients/{MAC}` |
 
 `result.aclDisable` in the list response is **advisory and unreliable**. A newly created

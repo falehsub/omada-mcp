@@ -8,47 +8,71 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Read-only configuration snapshot (`get_config_snapshot`)**: Brings the
-  always-available read-only surface to 11 tools, merging both LAN endpoints
-  (`setting/lan/networks` and `setting/lan/networks/interface`), gateway ACLs
-  (explicitly flagging `aclDisable` as non-authoritative), IP/port groups,
-  PSK-redacted WLANs, projected devices, and optional clients.
-- **Opt-in write tools (`src/omada_mcp/write_tools.py`)**: Added the 8 allowlistable
-  write tools specified in [`docs/write-support.md`](docs/write-support.md):
-  - `set_client_fixed_ip`, `release_client_fixed_ip` (strips 20 volatile client keys,
-    enforces mandatory `ipSetting.netId`, warns about lease delay and device-MAC `-41011`).
-  - `set_vlan_isolation`, `set_vlan_dhcp_pools` (two-endpoint LAN read-modify-write,
-    auto-populates `lanNetworkIpv6Config.proto` when omitted, checks whole-object integrity
-    and `dhcpSettings.ipRangePool` without trusting stale `ipRangeStart`/`ipRangeEnd` mirrors).
-  - `create_ip_group`, `replace_ip_group` (`<=16`-entry aligned CIDR packing preventing
-    `-33726`, typed delete `/{type}/{id}`, and automatic 6-step temporary-group swap when
-    ACL rules reference the group to prevent `-33717`).
-  - `create_gateway_acl`, `set_acl_rule_status` (single-rule enforcement without touching
-    or trusting `aclDisable`).
+- **Expanded read-only surface (`src/omada_mcp/tools.py`, 20 read-only tools)**:
+  Added `search_clients` (filtered client search with automatic `-1007`/`-41011`
+  Viewer fallback to `insight/clients`), `list_lan_networks`, `list_dhcp_reservations`,
+  `list_acls`, `list_ip_groups`, `list_port_forwards`, `list_static_routes`,
+  `get_network_services` (UPnP, DNS proxy, mDNS rules & profiles, DDNS, WAN),
+  and `list_logs` (`alerts`, `events`, `audit`). Extended `get_config_snapshot` with
+  optional `dhcpReservations`, `portForwards`, `staticRoutes`, `mdnsRules`, and
+  `services` sections alongside the core `networks`, `acls`, `groups`, `wlans`,
+  `devices`, and `clients`.
+- **Full-network opt-in write surface (`src/omada_mcp/write_tools.py`, 31 write tools)**:
+  - Original v1.2 core 8: `set_client_fixed_ip`, `release_client_fixed_ip`,
+    `set_vlan_dhcp_pools`, `set_vlan_isolation`, `create_ip_group`, `replace_ip_group`,
+    `create_gateway_acl`, `set_acl_rule_status` (preserving 20 stripped volatile keys,
+    mandatory `ipSetting.netId`, two-endpoint LAN RMW, non-authoritative `aclDisable`,
+    `<=16` CIDR packing `-33726`, and 6-step swap `-33717`).
+  - Expanded 23 opt-in write tools: `upsert_dhcp_reservation`, `delete_dhcp_reservation`,
+    `create_lan_network`, `update_lan_network`, `delete_lan_network`,
+    `update_gateway_acl`, `delete_gateway_acl`, `delete_ip_group`, `create_ssid`,
+    `update_ssid`, `delete_ssid` (PSK/secret keys recursively scrubbed),
+    `upsert_port_forward`, `delete_port_forward`, `upsert_static_route`,
+    `delete_static_route`, `upsert_mdns_rule`, `delete_mdns_rule`, `set_upnp`,
+    `set_client_blocked`, `reconnect_client`, `update_client`, `update_device`, and
+    `reboot_device`.
+- **Multi-page controller fetches (`OmadaClient.paginate`) & JSON `-30109` recovery**:
+  Added full `currentPage`/`currentPageSize` pagination across devices, clients,
+  WLANs/SSIDs, LAN networks/interfaces, DHCP reservations, ACLs, groups, port
+  forwards, static routes, and logs. `OmadaClient` now treats non-login JSON
+  `errorCode == -30109` identically to HTTP 200 HTML expiry (re-authenticating once
+  and invoking `reauth_prepare` on writes without blinding `-1600` retries).
 - **Fail-closed safety controls & configuration (`config.py`, `client.py`, `server.py`)**:
-  - `OMADA_WRITE_TOOLS` explicit allowlist (rejects wildcards/`all`/read-only names),
-    `OMADA_SNAPSHOT_DIR` (POSIX `0o700`/`0o600` pre-write snapshots + `audit.jsonl`),
-    `OMADA_WRITE_INTERVAL_SECONDS` (default `1.0` s serialized write pacing), and
-    `OMADA_MANAGEMENT_CIDRS` anti-stranding protection.
-  - Every write tool defaults to `dryRun=true` (returning a diff and `confirmToken`);
-    applying requires `dryRun=false` with `confirm="<tool>:<target-id>"`, strict JSON
-    schema argument validation, no write auto-retry on `-1600`, and safe `reauth_prepare`
-    state re-read on HTTP 200 HTML expiry.
+  `OMADA_WRITE_TOOLS` explicit allowlist (rejects wildcards/`all`/read-only names),
+  `OMADA_SNAPSHOT_DIR` (POSIX `0o700`/`0o600` pre-write snapshots + `audit.jsonl`),
+  `OMADA_WRITE_INTERVAL_SECONDS` (default `1.0` s serialized write pacing),
+  `OMADA_MANAGEMENT_CIDRS` anti-stranding protection, `dryRun=true` default,
+  `confirm="<tool>:<target-id>"`, strict JSON schema validation, and recursive
+  `redact_secrets` scrubbing on outputs and snapshots.
 - **Diagnostics & CLI (`doctor.py`, `cli.py`, `schemas/doctor.schema.json`)**:
-  - Added read-only `write` phase to `omada-mcp --doctor` (validates write allowlist,
-    warns on `Viewer` role `-41011`, advises dedicated Admin account to prevent session
-    eviction, and redacts `snapshotDir` paths under `--doctor --json`).
-  - `--list-tools` exposes only active tools (`11` by default); added `--list-tools --all`
-    to inspect all `19` descriptors offline.
-- **Offline mock controller & test suite (`tests/mock_controller.py`, `tests/fixtures/`,
-  `tests/test_write_support.py`)**: Added 27 mock-controller & fault-injection tests
-  alongside the 87 bridge tests (114 tests total).
+  Added read-only `write` phase to `omada-mcp --doctor` (validates write allowlist,
+  warns on `Viewer` role `-41011`, advises dedicated Admin account to prevent session
+  eviction, and redacts `snapshotDir` paths under `--doctor --json`). `--list-tools`
+  exposes `20` active read-only tools by default (`51` total with `--all`).
+- **Offline mock controller & live Docker `v6.2.14.11` verification**:
+  Expanded `tests/mock_controller.py` and `tests/test_write_support.py` to 127 unit
+  and fault-injection tests, and verified read + controller-native write CRUD live
+  against an isolated Docker Omada Controller v6.2.14.11 (`DockerLab`).
+
+### Fixed
+
+- **Live `v6.2.14.11` LAN/DHCP & ACL field quirks caught during Docker testing**:
+  - Updated `_extract_dhcp_pools` and `_project_lan_network` to read `ipaddrStart`/
+    `ipaddrEnd` inside `ipRangePool` and lowercase `leasetime` (avoiding integer
+    `ipRangeStart`/`ipRangeEnd` mirrors).
+  - Normalized empty `dhcpGuard: {}` / `dhcpv6Guard: {}` and `lanNetworkIpv6Config` in
+    `_ensure_lan_patch_body` so PATCHes on freshly created LAN networks do not fail
+    with `-1001`.
+  - Updated `update_lan_network` to persist manual DHCP DNS via `priDns`/`sndDns` +
+    `dhcpns` (ignoring benign controller sync of `origName` and `existSyslog` on
+    `update_gateway_acl` when `name` or `syslog` changes).
 
 ### Kept unshipped
 
-- Device rename/LED, device reboot, firmware upgrade, SSID create/delete, ACL global toggle
-  (`aclDisable`), and `/controller/setting` remain unshipped pending a maintenance-window
-  policy and controller verification.
+- Firmware upgrade and global ACL disable (`aclDisable`) toggles remain unshipped
+  pending a dedicated maintenance-window policy (`aclDisable` is advisory only).
+- `/controller/setting` writes remain unshipped because the controller accepts PATCHes
+  with `errorCode: 0` while silently discarding changes.
 
 ## [1.1.1] - 2026-11-13
 

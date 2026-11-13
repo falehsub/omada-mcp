@@ -6,7 +6,8 @@
 
 | Controller Family | `controllerVer` | Session Cookie | Status | Notes |
 |---|---|---|---|---|
-| `software-6.x` | `6.2.10.17` | `TPOMADA_SESSIONID` | Verified live | `--doctor --json`, all 10 read-only tools (`list_wlans` expands WLAN groups to SSIDs, `network_audit`, `explain_error`), PSK redaction, `OMADA_READ_ONLY=true`, and CA-pinned `OMADA_TLS_SERVER_NAME=Omada` verified. |
+| `software-6.x` | `6.2.10.17` | `TPOMADA_SESSIONID` | Verified live | `--doctor --json`, read-only inspection (`list_wlans` expands WLAN groups to SSIDs, `network_audit`, `explain_error`), PSK redaction, `OMADA_READ_ONLY=true`, and CA-pinned `OMADA_TLS_SERVER_NAME=Omada` verified. |
+| `software-6.x` | `6.2.14.11` | `TPOMADA_SESSIONID` | Verified live (Docker lab) | `--doctor --json`, all 20 read-only tools (incl. `search_clients` Viewer `-1007 -> insight/clients` fallback, `list_lan_networks`, `list_logs`, `get_network_services`), `get_config_snapshot` (11 object types), and controller-native write CRUD (`create/update/delete_lan_network`, `set_vlan_dhcp_pools`, `upsert/delete_dhcp_reservation`, `create/replace/delete_ip_group`, `create/update/set_acl_rule_status/delete_gateway_acl` + 6-step swap, `create/update/delete_ssid` with PSK redaction, `upsert/delete_port_forward`, `upsert/delete_static_route`, `upsert/delete_mdns_rule`, `set_upnp` dry-run, `-33598` on hardwareless isolation, `-41011`/not-found probes). Device/client ops (`update_device`, `reboot_device`, `set_client_*`, `update_client`, `reconnect_client`) covered by stateful mock controller. |
 
 ## Expected / Community-Reportable Builds
 

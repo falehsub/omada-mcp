@@ -131,11 +131,11 @@ class WriteConfigTests(unittest.TestCase):
     def test_tool_name_sets_match_tools_module(self):
         ro_names = {t.name for t in TOOLS if t.read_only}
         wr_names = {t.name for t in TOOLS if not t.read_only}
-        self.assertEqual(len(ro_names), 11)
-        self.assertEqual(len(wr_names), 8)
+        self.assertEqual(len(ro_names), 20)
+        self.assertEqual(len(wr_names), 31)
         self.assertEqual(config_mod._READ_ONLY_TOOL_NAMES, ro_names)
         self.assertEqual(set(WRITE_TOOL_NAMES), wr_names)
-        self.assertEqual(len(TOOLS), 19)
+        self.assertEqual(len(TOOLS), 51)
 
     def test_parse_write_tools_validation(self):
         self.assertEqual(parse_write_tools(None), ())
@@ -251,7 +251,7 @@ class GateAndProtocolTests(unittest.TestCase):
                 tmp, read_only=False, write_tools=("set_client_fixed_ip",)
             )
             listed = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]
-            self.assertEqual(len(listed), 12)
+            self.assertEqual(len(listed), 21)
             names = {t["name"] for t in listed}
             self.assertIn("set_client_fixed_ip", names)
             self.assertNotIn("release_client_fixed_ip", names)
@@ -302,6 +302,15 @@ class GateAndProtocolTests(unittest.TestCase):
     def test_write_annotations_match_safety_tiers(self):
         expected = {
             "get_config_snapshot": (True, False, True),
+            "search_clients": (True, False, True),
+            "list_lan_networks": (True, False, True),
+            "list_dhcp_reservations": (True, False, True),
+            "list_acls": (True, False, True),
+            "list_ip_groups": (True, False, True),
+            "list_port_forwards": (True, False, True),
+            "list_static_routes": (True, False, True),
+            "get_network_services": (True, False, True),
+            "list_logs": (True, False, True),
             "set_client_fixed_ip": (False, False, True),
             "release_client_fixed_ip": (False, False, True),
             "create_ip_group": (False, False, False),
@@ -310,10 +319,38 @@ class GateAndProtocolTests(unittest.TestCase):
             "replace_ip_group": (False, True, False),
             "create_gateway_acl": (False, True, False),
             "set_acl_rule_status": (False, True, True),
+            "upsert_dhcp_reservation": (False, False, True),
+            "delete_dhcp_reservation": (False, True, True),
+            "create_lan_network": (False, False, False),
+            "update_lan_network": (False, True, True),
+            "delete_lan_network": (False, True, True),
+            "update_gateway_acl": (False, True, True),
+            "delete_gateway_acl": (False, True, True),
+            "delete_ip_group": (False, True, True),
+            "create_ssid": (False, False, False),
+            "update_ssid": (False, True, True),
+            "delete_ssid": (False, True, True),
+            "upsert_port_forward": (False, True, True),
+            "delete_port_forward": (False, True, True),
+            "upsert_static_route": (False, True, True),
+            "delete_static_route": (False, True, True),
+            "upsert_mdns_rule": (False, False, True),
+            "delete_mdns_rule": (False, True, True),
+            "set_upnp": (False, True, True),
+            "set_client_blocked": (False, True, True),
+            "reconnect_client": (False, False, False),
+            "update_client": (False, False, True),
+            "update_device": (False, False, True),
+            "reboot_device": (False, True, False),
         }
         for name, (ro, dest, idemp) in expected.items():
             t = TOOL_MAP[name]
             self.assertEqual((t.read_only, t.destructive, t.idempotent), (ro, dest, idemp), name)
+        self.assertEqual(set(TOOL_MAP) - set(expected), {
+            "list_devices", "list_clients", "list_wifi_clients", "list_wired_clients",
+            "get_device", "get_client", "list_wlans", "get_site_info",
+            "network_audit", "explain_error",
+        })
 
 
 class WriteClientAndRecoveryTests(unittest.TestCase):
@@ -897,6 +934,534 @@ class SnapshotAndDoctorTests(unittest.TestCase):
                 }))
                 self.assertTrue(res["applied"])
                 self.assertEqual(res["after"]["ip"], "192.168.20.56")
+
+
+class PaginationAndReauthTests(unittest.TestCase):
+    def test_json_minus_30109_triggers_reauth_for_get_and_safe_check_for_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, client, ctrl, _ = make_write_env(tmp)
+            client.authenticate()
+            self.assertEqual(ctrl.logins, 1)
+
+            # GET session expiry via JSON -30109 triggers one reauth and replays cleanly
+            ctrl.expired_once_for.add(("GET", "setting/upnp"))
+            services = unwrap_ok(call_tool(server, "get_network_services", {}))
+            self.assertEqual(ctrl.logins, 2)
+            self.assertIsNotNone(services["upnp"])
+
+            # Non-GET session expiry via JSON -30109 reauths and checks live state before deciding
+            ctrl.expired_once_for.add(("PUT", "setting/upnp"))
+            applied = unwrap_ok(call_tool(server, "set_upnp", {
+                "enable": True,
+                "dryRun": False,
+                "confirm": f"set_upnp:{client.site.site_id}",
+            }))
+            self.assertTrue(applied["applied"])
+            self.assertIs(applied["after"]["enable"], True)
+            self.assertEqual(ctrl.logins, 3)
+
+            # If another worker/request already flipped UPnP, reauth_prepare detects it without duplicate PUT
+            ctrl.next_fault_hook = None
+            def _expire_after_apply(method, full_path, _body):
+                if method == "PUT" and "setting/upnp" in full_path:
+                    ctrl.upnp["enable"] = False
+                    ctrl.cookie_jar.clear()
+                    ctrl.next_fault_hook = None
+                    return 200, {"errorCode": -30109, "msg": "Session expired."}
+                return None
+
+            ctrl.next_fault_hook = _expire_after_apply
+            puts_before = sum(1 for r in ctrl.requests if r["method"] == "PUT" and "setting/upnp" in r["path"])
+            recovered = unwrap_ok(call_tool(server, "set_upnp", {
+                "enable": False,
+                "dryRun": False,
+                "confirm": f"set_upnp:{client.site.site_id}",
+            }))
+            puts_after = sum(1 for r in ctrl.requests if r["method"] == "PUT" and "setting/upnp" in r["path"])
+            self.assertIs(recovered["after"]["enable"], False)
+            self.assertEqual(puts_after, puts_before + 1)
+
+    def test_multi_page_pagination_beyond_100_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, client, ctrl, _ = make_write_env(tmp)
+            ctrl.devices = [
+                {
+                    "mac": f"AA-BB-CC-01-{i // 256:02X}-{i % 256:02X}",
+                    "name": f"ap-{i:03d}",
+                    "type": "ap",
+                    "model": "EAP650",
+                    "ip": f"192.168.10.{100 + (i % 100)}",
+                    "firmwareVersion": "1.0.0",
+                    "uptime": "1d",
+                    "clientNum": 1,
+                    "status": 1,
+                    "statusCategory": 1,
+                    "needUpgrade": False,
+                }
+                for i in range(105)
+            ]
+            ctrl.acls = [
+                {
+                    "id": f"acl-p-{i}",
+                    "index": i,
+                    "name": f"rule-{i:03d}",
+                    "status": True,
+                    "policy": 1,
+                    "sourceType": 0,
+                    "sourceIds": ["net-iot-20"],
+                    "destinationType": 2,
+                    "destinationIds": [],
+                    "direction": {"lanToWan": True, "lanToLan": False},
+                    "protocols": [256],
+                }
+                for i in range(105)
+            ]
+            devs = call_tool(server, "list_devices", {})["result"]["structuredContent"]
+            acls = call_tool(server, "list_acls", {})["result"]["structuredContent"]
+            self.assertEqual(devs["count"], 105)
+            self.assertEqual(acls["count"], 105)
+
+            # Duplicate-page guard: if server ignores currentPage and repeats page 1, paginate stops instead of looping
+            client.authenticate()
+            ctrl.next_fault_hook = lambda m, p, _b: (
+                (200, {"errorCode": 0, "result": {"data": [{"id": "dup"}], "totalRows": 500}})
+                if m == "GET" and "setting/profiles/groups" in p else None
+            )
+            rows, _ = client.paginate(f"sites/{client.site.site_id}/setting/profiles/groups", page_size=1)
+            ctrl.next_fault_hook = None
+            self.assertEqual(len(rows), 1)
+
+
+class ExpandedReadToolsTests(unittest.TestCase):
+    def test_search_clients_filters_and_viewer_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, ctrl, _ = make_write_env(tmp)
+            ctrl.clients["AA-BB-CC-11-11-02"]["active"] = False
+
+            all_hits = unwrap_ok(call_tool(server, "search_clients", {}))
+            self.assertEqual(all_hits["count"], 3)
+
+            inactive_hits = unwrap_ok(call_tool(server, "search_clients", {"active": False}))
+            self.assertEqual(inactive_hits["count"], 1)
+            self.assertEqual(inactive_hits["items"][0]["mac"], "AA-BB-CC-11-11-02")
+
+            q_hits = unwrap_ok(call_tool(server, "search_clients", {"query": "aabbcc111103"}))
+            self.assertEqual(q_hits["count"], 1)
+            self.assertEqual(q_hits["items"][0]["name"], "legacy-bridge")
+
+            # Viewer role gets -1007 on clients endpoint -> seamless fallback to insight/clients
+            ctrl.role = "Viewer"
+            viewer_hits = unwrap_ok(call_tool(server, "search_clients", {"guest": True}))
+            self.assertEqual(viewer_hits["count"], 1)
+            self.assertEqual(viewer_hits["items"][0]["mac"], "AA-BB-CC-11-11-02")
+
+    def test_network_services_logs_and_extended_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, _ctrl, _ = make_write_env(tmp)
+            services = unwrap_ok(call_tool(server, "get_network_services", {}))
+            self.assertIn("upnp", services)
+            self.assertEqual(services["mdns"]["profileCount"], 2)
+
+            for cat in ("alerts", "events", "audit"):
+                logs = unwrap_ok(call_tool(server, "list_logs", {"category": cat, "hours": 0}))
+                self.assertEqual(logs["count"], 1, cat)
+                self.assertEqual(logs["items"][0]["category"], cat)
+
+            snap = unwrap_ok(call_tool(server, "get_config_snapshot", {
+                "objects": ["dhcpreservations", "portForwards", "staticRoutes", "mdnsRules", "services"],
+            }))
+            self.assertIn("dhcpReservations", snap)
+            self.assertIn("portForwards", snap)
+            self.assertIn("staticRoutes", snap)
+            self.assertIn("mdnsRules", snap)
+            self.assertIn("services", snap)
+
+
+class DhcpLanAclGroupWriteTests(unittest.TestCase):
+    def test_dhcp_reservation_and_lan_lifecycle_and_guards(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, ctrl, _ = make_write_env(tmp)
+            # Create LAN interface
+            lan_dry = unwrap_ok(call_tool(server, "create_lan_network", {
+                "name": "Lab50",
+                "vlan": 50,
+                "purpose": "interface",
+                "gatewaySubnet": "192.168.50.1/24",
+            }))
+            self.assertTrue(lan_dry["dryRun"])
+            lan_created = unwrap_ok(call_tool(server, "create_lan_network", {
+                "name": "Lab50",
+                "vlan": 50,
+                "purpose": "interface",
+                "gatewaySubnet": "192.168.50.1/24",
+                "dryRun": False,
+                "confirm": lan_dry["confirmToken"],
+            }))
+            self.assertTrue(lan_created["applied"])
+
+            # Update LAN DNS/DHCP/name settings with Omada 6.2.x normalization quirks active
+            ctrl.omada62_lan_normalization = True
+            upd_dry = unwrap_ok(call_tool(server, "update_lan_network", {
+                "vlan": 50,
+                "name": "Lab50Up",
+                "leaseTime": 240,
+                "dnsMode": "manual",
+                "dnsServers": ["1.1.1.1", "9.9.9.9"],
+                "igmpSnoopEnable": True,
+            }))
+            upd_res = unwrap_ok(call_tool(server, "update_lan_network", {
+                "vlan": 50,
+                "name": "Lab50Up",
+                "leaseTime": 240,
+                "dnsMode": "manual",
+                "dnsServers": ["1.1.1.1", "9.9.9.9"],
+                "igmpSnoopEnable": True,
+                "dryRun": False,
+                "confirm": upd_dry["confirmToken"],
+            }))
+            self.assertTrue(upd_res["applied"])
+            self.assertEqual(upd_res["after"]["dhcpSettings"]["priDns"], "1.1.1.1")
+            self.assertEqual(upd_res["after"]["dhcpSettings"]["sndDns"], "9.9.9.9")
+            lans_after = unwrap_ok(call_tool(server, "list_lan_networks", {}))["items"]
+            lab50 = next(n for n in lans_after if n["vlan"] == 50)
+            self.assertEqual(lab50["name"], "Lab50Up")
+            self.assertEqual(lab50["leaseTime"], 240)
+            self.assertTrue(lab50["dhcpPools"])
+            ctrl.omada62_lan_normalization = False
+
+            # Upsert + update + delete offline DHCP reservation
+            res_dry = unwrap_ok(call_tool(server, "upsert_dhcp_reservation", {
+                "mac": "AA:BB:CC:50:00:01",
+                "ip": "192.168.50.42",
+                "vlan": 50,
+                "description": "lab-host",
+            }))
+            unwrap_ok(call_tool(server, "upsert_dhcp_reservation", {
+                "mac": "AA:BB:CC:50:00:01",
+                "ip": "192.168.50.42",
+                "vlan": 50,
+                "description": "lab-host",
+                "dryRun": False,
+                "confirm": res_dry["confirmToken"],
+            }))
+            listed = unwrap_ok(call_tool(server, "list_dhcp_reservations", {"vlan": 50}))
+            self.assertEqual(listed["count"], 1)
+
+            # Out-of-subnet IP is refused
+            bad_ip = call_tool(server, "upsert_dhcp_reservation", {
+                "mac": "AA:BB:CC:50:00:01",
+                "ip": "192.168.99.42",
+                "vlan": 50,
+            })
+            self.assertTrue(bad_ip["result"]["isError"])
+
+            # Silent no-op on reservation update fails verification
+            ctrl.silent_noop_for.add(("PUT", "setting/service/dhcp/"))
+            noop_res = call_tool(server, "upsert_dhcp_reservation", {
+                "mac": "AA:BB:CC:50:00:01",
+                "ip": "192.168.50.43",
+                "vlan": 50,
+                "dryRun": False,
+                "confirm": res_dry["confirmToken"],
+            })
+            ctrl.silent_noop_for.clear()
+            self.assertTrue(noop_res["result"]["isError"])
+
+            del_res_dry = unwrap_ok(call_tool(server, "delete_dhcp_reservation", {"mac": "AA:BB:CC:50:00:01"}))
+            unwrap_ok(call_tool(server, "delete_dhcp_reservation", {
+                "mac": "AA:BB:CC:50:00:01",
+                "dryRun": False,
+                "confirm": del_res_dry["confirmToken"],
+            }))
+            self.assertEqual(unwrap_ok(call_tool(server, "list_dhcp_reservations", {"vlan": 50}))["count"], 0)
+
+            # Deleting primary/management LAN network refused
+            blocked_del = call_tool(server, "delete_lan_network", {"vlan": 1})
+            self.assertTrue(blocked_del["result"]["isError"])
+
+            # Deleting Lab50 succeeds
+            del_lan_dry = unwrap_ok(call_tool(server, "delete_lan_network", {"vlan": 50}))
+            unwrap_ok(call_tool(server, "delete_lan_network", {
+                "vlan": 50,
+                "dryRun": False,
+                "confirm": del_lan_dry["confirmToken"],
+            }))
+            self.assertFalse(any(n["vlan"] == 50 for n in unwrap_ok(call_tool(server, "list_lan_networks", {}))["items"]))
+
+    def test_update_and_delete_gateway_acl_and_delete_ip_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, _ctrl, _ = make_write_env(tmp)
+            grp = unwrap_ok(call_tool(server, "create_ip_group", {
+                "name": "grp-del-test",
+                "cidrs": ["192.168.20.150/32"],
+                "dryRun": False,
+                "confirm": "create_ip_group:grp-del-test",
+            }))
+            gid = grp["after"]["groupId"]
+            acl_dry = unwrap_ok(call_tool(server, "create_gateway_acl", {
+                "name": "acl-del-test",
+                "policy": "deny",
+                "source": {"type": "ip_group", "ids": [gid]},
+                "destination": {"type": "port_group", "ids": ["grp-ports-99"]},
+                "direction": {"lanToWan": True, "lanToLan": False},
+            }))
+            unwrap_ok(call_tool(server, "create_gateway_acl", {
+                "name": "acl-del-test",
+                "policy": "deny",
+                "source": {"type": "ip_group", "ids": [gid]},
+                "destination": {"type": "port_group", "ids": ["grp-ports-99"]},
+                "direction": {"lanToWan": True, "lanToLan": False},
+                "dryRun": False,
+                "confirm": acl_dry["confirmToken"],
+            }))
+
+            # Deleting referenced IP group is pre-blocked (-33717 context)
+            ref_err = call_tool(server, "delete_ip_group", {"group": gid})
+            self.assertTrue(ref_err["result"]["isError"])
+            self.assertIn("-33717", ref_err["result"]["content"][0]["text"])
+
+            # Update ACL rule syslog/name via PUT
+            u_dry = unwrap_ok(call_tool(server, "update_gateway_acl", {
+                "rule": "acl-del-test",
+                "syslog": True,
+                "name": "acl-del-renamed",
+            }))
+            u_res = unwrap_ok(call_tool(server, "update_gateway_acl", {
+                "rule": "acl-del-test",
+                "syslog": True,
+                "name": "acl-del-renamed",
+                "dryRun": False,
+                "confirm": u_dry["confirmToken"],
+            }))
+            self.assertIs(u_res["after"]["syslog"], True)
+
+            # Delete ACL then group succeeds
+            d_acl_dry = unwrap_ok(call_tool(server, "delete_gateway_acl", {"rule": "acl-del-renamed"}))
+            unwrap_ok(call_tool(server, "delete_gateway_acl", {
+                "rule": "acl-del-renamed",
+                "dryRun": False,
+                "confirm": d_acl_dry["confirmToken"],
+            }))
+            d_grp_dry = unwrap_ok(call_tool(server, "delete_ip_group", {"group": gid}))
+            unwrap_ok(call_tool(server, "delete_ip_group", {
+                "group": gid,
+                "dryRun": False,
+                "confirm": d_grp_dry["confirmToken"],
+            }))
+            self.assertFalse(any(g["id"] == gid for g in unwrap_ok(call_tool(server, "list_ip_groups", {}))["items"]))
+
+
+class SsidAndGatewayServiceWriteTests(unittest.TestCase):
+    def test_ssid_crud_never_leaks_psk_in_output_or_snapshots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, _ctrl, _ = make_write_env(tmp)
+            secret_a = "UltraSecretPass123!"
+            secret_b = "RotatedSecretPass456!"
+            c_dry = call_tool(server, "create_ssid", {
+                "name": "Lab-Test-WiFi",
+                "bands": ["2g", "5g"],
+                "security": "wpa2-psk",
+                "psk": secret_a,
+                "vlanId": 20,
+            })
+            self.assertNotIn(secret_a, json.dumps(c_dry))
+            c_res = call_tool(server, "create_ssid", {
+                "name": "Lab-Test-WiFi",
+                "bands": ["2g", "5g"],
+                "security": "wpa2-psk",
+                "psk": secret_a,
+                "vlanId": 20,
+                "dryRun": False,
+                "confirm": c_dry["result"]["structuredContent"]["confirmToken"],
+            })
+            self.assertNotIn(secret_a, json.dumps(c_res))
+
+            u_dry = unwrap_ok(call_tool(server, "update_ssid", {
+                "ssid": "Lab-Test-WiFi",
+                "psk": secret_b,
+                "clearVlan": True,
+                "guest": True,
+            }))
+            self.assertNotIn(secret_a, json.dumps(u_dry))
+            self.assertNotIn(secret_b, json.dumps(u_dry))
+            u_res = call_tool(server, "update_ssid", {
+                "ssid": "Lab-Test-WiFi",
+                "psk": secret_b,
+                "clearVlan": True,
+                "guest": True,
+                "dryRun": False,
+                "confirm": u_dry["confirmToken"],
+            })
+            self.assertNotIn(secret_a, json.dumps(u_res))
+            self.assertNotIn(secret_b, json.dumps(u_res))
+
+            d_dry = unwrap_ok(call_tool(server, "delete_ssid", {"ssid": "Lab-Test-WiFi"}))
+            unwrap_ok(call_tool(server, "delete_ssid", {
+                "ssid": "Lab-Test-WiFi",
+                "dryRun": False,
+                "confirm": d_dry["confirmToken"],
+            }))
+
+            for fpath in Path(tmp).rglob("*"):
+                if fpath.is_file():
+                    raw_txt = fpath.read_text(encoding="utf-8")
+                    self.assertNotIn(secret_a, raw_txt, str(fpath))
+                    self.assertNotIn(secret_b, raw_txt, str(fpath))
+
+    def test_port_forward_static_route_mdns_and_upnp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, client, _ctrl, _ = make_write_env(tmp)
+            pf_dry = unwrap_ok(call_tool(server, "upsert_port_forward", {
+                "name": "HTTPS-Lab",
+                "externalPort": "8443",
+                "forwardIp": "192.168.20.50",
+                "forwardPort": "443",
+                "protocol": "tcp",
+            }))
+            unwrap_ok(call_tool(server, "upsert_port_forward", {
+                "name": "HTTPS-Lab",
+                "externalPort": "8443",
+                "forwardIp": "192.168.20.50",
+                "forwardPort": "443",
+                "protocol": "tcp",
+                "dryRun": False,
+                "confirm": pf_dry["confirmToken"],
+            }))
+            self.assertEqual(unwrap_ok(call_tool(server, "list_port_forwards", {}))["count"], 1)
+            pf_del_dry = unwrap_ok(call_tool(server, "delete_port_forward", {"rule": "HTTPS-Lab"}))
+            unwrap_ok(call_tool(server, "delete_port_forward", {
+                "rule": "HTTPS-Lab",
+                "dryRun": False,
+                "confirm": pf_del_dry["confirmToken"],
+            }))
+            self.assertEqual(unwrap_ok(call_tool(server, "list_port_forwards", {}))["count"], 0)
+
+            sr_dry = unwrap_ok(call_tool(server, "upsert_static_route", {
+                "name": "RemoteSub",
+                "destination": "172.16.10.0/24",
+                "nextHop": "192.168.20.254",
+            }))
+            unwrap_ok(call_tool(server, "upsert_static_route", {
+                "name": "RemoteSub",
+                "destination": "172.16.10.0/24",
+                "nextHop": "192.168.20.254",
+                "dryRun": False,
+                "confirm": sr_dry["confirmToken"],
+            }))
+            self.assertEqual(unwrap_ok(call_tool(server, "list_static_routes", {}))["count"], 1)
+            sr_del_dry = unwrap_ok(call_tool(server, "delete_static_route", {"rule": "RemoteSub"}))
+            unwrap_ok(call_tool(server, "delete_static_route", {
+                "rule": "RemoteSub",
+                "dryRun": False,
+                "confirm": sr_del_dry["confirmToken"],
+            }))
+
+            mdns_dry = unwrap_ok(call_tool(server, "upsert_mdns_rule", {
+                "name": "AirPlay-IoT",
+                "profiles": ["AirPlay"],
+                "serviceNetworks": ["20"],
+                "clientNetworks": ["1"],
+            }))
+            unwrap_ok(call_tool(server, "upsert_mdns_rule", {
+                "name": "AirPlay-IoT",
+                "profiles": ["AirPlay"],
+                "serviceNetworks": ["20"],
+                "clientNetworks": ["1"],
+                "dryRun": False,
+                "confirm": mdns_dry["confirmToken"],
+            }))
+            self.assertEqual(unwrap_ok(call_tool(server, "get_network_services", {}))["mdns"]["ruleCount"], 1)
+            mdns_del_dry = unwrap_ok(call_tool(server, "delete_mdns_rule", {"rule": "AirPlay-IoT"}))
+            unwrap_ok(call_tool(server, "delete_mdns_rule", {
+                "rule": "AirPlay-IoT",
+                "dryRun": False,
+                "confirm": mdns_del_dry["confirmToken"],
+            }))
+
+            upnp_res = unwrap_ok(call_tool(server, "set_upnp", {
+                "enable": True,
+                "dryRun": False,
+                "confirm": f"set_upnp:{client.site.site_id}",
+            }))
+            self.assertIs(upnp_res["after"]["enable"], True)
+
+
+class ClientAndDeviceOpsTests(unittest.TestCase):
+    def test_client_block_reconnect_rename_and_device_ops(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, ctrl, _ = make_write_env(tmp)
+            # Refuses managed device MAC (-41011)
+            dev_blk = call_tool(server, "set_client_blocked", {"mac": "AA-BB-CC-00-00-01", "blocked": True})
+            self.assertTrue(dev_blk["result"]["isError"])
+
+            # Block & unblock client
+            blk_dry = unwrap_ok(call_tool(server, "set_client_blocked", {"mac": "AA-BB-CC-11-11-01", "blocked": True}))
+            blk = unwrap_ok(call_tool(server, "set_client_blocked", {
+                "mac": "AA-BB-CC-11-11-01",
+                "blocked": True,
+                "dryRun": False,
+                "confirm": blk_dry["confirmToken"],
+            }))
+            self.assertIs(blk["after"]["blocked"], True)
+            unblk = unwrap_ok(call_tool(server, "set_client_blocked", {
+                "mac": "AA-BB-CC-11-11-01",
+                "blocked": False,
+                "dryRun": False,
+                "confirm": blk_dry["confirmToken"],
+            }))
+            self.assertIs(unblk["after"]["blocked"], False)
+
+            # Reconnect wireless client + refuse wired client
+            ctrl.clients["AA-BB-CC-11-11-01"]["wireless"] = False
+            wired_rec = call_tool(server, "reconnect_client", {"mac": "AA-BB-CC-11-11-01"})
+            self.assertTrue(wired_rec["result"]["isError"])
+
+            rec_dry = unwrap_ok(call_tool(server, "reconnect_client", {"mac": "AA-BB-CC-11-11-02"}))
+            rec = unwrap_ok(call_tool(server, "reconnect_client", {
+                "mac": "AA-BB-CC-11-11-02",
+                "dryRun": False,
+                "confirm": rec_dry["confirmToken"],
+            }))
+            self.assertTrue(rec["applied"])
+
+            # Rename client
+            ren_dry = unwrap_ok(call_tool(server, "update_client", {"mac": "AA-BB-CC-11-11-01", "name": "workstation-1"}))
+            ren = unwrap_ok(call_tool(server, "update_client", {
+                "mac": "AA-BB-CC-11-11-01",
+                "name": "workstation-1",
+                "dryRun": False,
+                "confirm": ren_dry["confirmToken"],
+            }))
+            self.assertEqual(ren["after"]["name"], "workstation-1")
+
+            # Rename device, LED setting, locate blink, and reboot
+            dev_dry = unwrap_ok(call_tool(server, "update_device", {
+                "mac": "ap-living",
+                "name": "ap-kitchen",
+                "ledSetting": "off",
+                "locate": True,
+            }))
+            dev_res = unwrap_ok(call_tool(server, "update_device", {
+                "mac": "ap-living",
+                "name": "ap-kitchen",
+                "ledSetting": "off",
+                "locate": True,
+                "dryRun": False,
+                "confirm": dev_dry["confirmToken"],
+            }))
+            self.assertEqual(dev_res["after"]["name"], "ap-kitchen")
+            self.assertIs(dev_res["after"]["locateEnable"], True)
+
+            reb_dry = unwrap_ok(call_tool(server, "reboot_device", {"mac": "ap-kitchen"}))
+            reb = unwrap_ok(call_tool(server, "reboot_device", {
+                "mac": "ap-kitchen",
+                "dryRun": False,
+                "confirm": reb_dry["confirmToken"],
+            }))
+            self.assertTrue(reb["applied"])
+
+            unknown_dev = call_tool(server, "update_device", {"mac": "AA-BB-CC-99-99-99", "name": "ghost"})
+            self.assertTrue(unknown_dev["result"]["isError"])
 
 
 if __name__ == "__main__":

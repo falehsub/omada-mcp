@@ -8,8 +8,8 @@
 
 Your Omada controller already knows which AP is overloaded, which client is
 sitting on the guest VLAN, and which switch dropped a port. `omada-mcp` hands
-that to Claude, Cursor, Hermes or any other MCP host — as eleven read-only tools
-that return clean JSON (plus eight optional write tools behind an explicit allowlist),
+that to Claude, Cursor, Hermes or any other MCP host — as twenty read-only tools
+that return clean JSON (plus 31 optional write tools behind an explicit allowlist),
 with a self-test that tells you exactly what to fix when something is wrong.
 
 ```
@@ -23,11 +23,11 @@ PASS env      /home/you/.config/omada-mcp/.env | url=https://192.0.2.10:8043 use
 PASS tls      verified against /home/you/.config/omada-mcp/controller-ca.pem (serverName=Omada) | reachable, omadacId=0123456789abcdef01234567, controllerVer=6.2.10.17, family=software-6.x
 PASS login    token accepted for omada-readonly (role=Viewer, scope=all sites, cookie=TPOMADA_SESSIONID), Csrf-Token round-trip OK
 PASS site     Home (89abcdef0123456789abcdef) site 1 of 1; matched OMADA_SITE_NAME=Home
-PASS tools    list_devices -> 7 device(s); 11 read-only tools registered (0 write tool(s) enabled), 23 client(s)
+PASS tools    list_devices -> 7 device(s); 20 read-only tools registered (0 write tool(s) enabled), 23 client(s)
 PASS write    disabled (OMADA_WRITE_TOOLS is empty; read-only tools only)
 ------------------------------------------------------------------
 6/6 checks passed
-Ready: `omada-mcp` will serve 11 read-only tools on stdio.
+Ready: `omada-mcp` will serve 20 read-only tools on stdio.
 ```
 
 Add `--json` (`omada-mcp --doctor --json`) for machine-readable output validated against [`schemas/doctor.schema.json`](schemas/doctor.schema.json). JSON output redacts local `.env` and `OMADA_CA_BUNDLE` filesystem paths to origin labels (`OMADA_ENV_FILE`, `cwd`, `appdata`, `xdg`, `environment`) so reports are safe to paste into issues.
@@ -262,7 +262,7 @@ uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
 
 ## Tools
 
-Eleven read-only tools are always registered; eight optional write tools stay hidden
+Twenty read-only tools are always registered; 31 optional write tools stay hidden
 and disabled until both `OMADA_READ_ONLY=false` and `OMADA_WRITE_TOOLS` allowlist
 them explicitly. `list_clients` windowing is bounded by `limit` (default 500, max 5000)
 and de-duplicated by MAC.
@@ -276,28 +276,39 @@ and de-duplicated by MAC.
 | `list_clients` | `limit?` | MAC, name, hostname, IP, wireless, guest, SSID, AP, network, VLAN, rx/tx, duration, last seen (UTC ISO-8601) |
 | `list_wifi_clients` | `limit?` | Same projection, wireless only |
 | `list_wired_clients` | `limit?` | Same projection, wired only |
+| `search_clients` | `query?`, `active?`, `wireless?`, `guest?`, `limit?` | Filtered client search (`clients` for Admin; automatic `insight/clients` fallback on Viewer `-1007`/`-41011`) |
 | `get_device` | `mac` (or name) | One device |
 | `get_client` | `mac` (or hostname/IP) | One client |
 | `list_wlans` | — | SSID, band, VLAN, security, guest, `hasPresharedKey` (expands v6.x WLAN groups; key never returned) |
+| `list_lan_networks` | — | Merged `setting/lan/networks` + `/interface` view (VLAN, subnet, DHCP `ipRangePool`, `leasetime`, `isolation`, `accessControlRule`) |
+| `list_dhcp_reservations` | `vlan?` | Offline/static DHCP reservations from `setting/service/dhcp` |
+| `list_acls` | — | Gateway ACL rules (`?type=0`) and advisory `aclDisable` flag |
+| `list_ip_groups` | `groupType?` | IP/port/profile groups (`setting/profiles/groups`) with CIDRs / entries |
+| `list_port_forwards` | — | Port-forwarding NAT rules (`setting/transmission/portForwardings`) |
+| `list_static_routes` | — | Static/interface routes (`setting/transmission/staticRoutings`) |
+| `get_network_services` | — | UPnP, DNS proxy, mDNS rules & built-in profiles, DDNS, and WAN port state |
+| `list_logs` | `category?`, `hours?`, `level?`, `limit?` | Controller `alerts`, `events`, or `audit` logs within time window |
 | `network_audit` | — | Composite one-call health audit: pending firmware, offline devices, 0-client APs, guest/unexpected VLAN clients, unisolated VLANs, DHCP pool utilization, and stable finding codes |
 | `explain_error` | `code`, `endpoint?` | Structured decoder for Omada `errorCode` values (`-1600`, `-33717`, `-33726`, `-1505`, `-1001`, `-30109`, `-41011`, `-44116`, …) with ambiguity notes and fixes |
-| `get_config_snapshot` | `objects?` | Read-only snapshot merging `setting/lan/networks` and `setting/lan/networks/interface`, gateway ACLs (with `aclDisableReliable: false`), groups, PSK-redacted WLANs, devices, and optional clients |
+| `get_config_snapshot` | `objects?` | Read-only snapshot merging `networks`, `acls`, `groups`, `wlans`, `devices`, and optional `clients`, `dhcpReservations`, `portForwards`, `staticRoutes`, `mdnsRules`, `services` |
 
 ### Opt-in write tools (`OMADA_READ_ONLY=false` + `OMADA_WRITE_TOOLS`)
 
-| Tool | Arguments | Behaviour |
+Every write tool defaults `dryRun=true` and requires `confirm="<tool>:<target>"` when `dryRun=false`.
+
+| Category | Tools | Behaviour & Safety |
 |---|---|---|
-| `set_client_fixed_ip` | `mac`, `ip`, `vlan?`, `netId?`, `dryRun?`, `confirm?` | Sets DHCP reservation (`useFixedAddr=true`, mandatory `netId`); strips 20 volatile keys; lease-delayed; refuses device MACs |
-| `release_client_fixed_ip` | `mac`, `dryRun?`, `confirm?` | Clears `useFixedAddr` on a client |
-| `set_vlan_dhcp_pools` | `pools`, `vlan?`, `netId?`, `dryRun?`, `confirm?` | Replaces `dhcpSettings.ipRangePool` on `/interface` with anti-stranding overlap checks & full-object verification |
-| `set_vlan_isolation` | `isolation`, `vlan?`, `netId?`, `dryRun?`, `confirm?` | Toggles VLAN `isolation` on `/interface` and verifies across both LAN endpoints without trusting `accessControlRule` |
-| `create_ip_group` | `name`, `cidrs?`, `ipRange?`, `dryRun?`, `confirm?` | Creates IPv4 group (`<=16` aligned CIDRs, enforces `-33726` locally) |
-| `replace_ip_group` | `group`, `cidrs?`, `ipRange?`, `dryRun?`, `confirm?` | Delete+recreate (`/{type}/{id}`), running 6-step temp-group ACL swap automatically when referenced (`-33717`) |
-| `create_gateway_acl` | `name`, `policy`, `source`, `destination`, `direction`, `status?`, `protocols?`, `biDirectional?`, `syslog?`, `dryRun?`, `confirm?` | Creates gateway ACL (`?type=0`) with management-host anti-stranding guard and `aclDisable` advisory warning |
-| `set_acl_rule_status` | `rule`, `status`, `dryRun?`, `confirm?` | Enables/disables one gateway ACL rule without reading or touching `aclDisable` |
+| Live client fixed IP | `set_client_fixed_ip`, `release_client_fixed_ip` | Full-object client PATCH (20 volatile keys stripped), mandatory `netId`, lease-delayed, refuses device MACs (`-41011`) |
+| Client actions & metadata | `set_client_blocked`, `reconnect_client`, `update_client` | Block/unblock, kick/reconnect, or rename active/known client (`cmd/clients/...`, `clients/{mac}`) |
+| Offline DHCP reservations | `upsert_dhcp_reservation`, `delete_dhcp_reservation` | Create/update/delete reservations in `setting/service/dhcp` with subnet & IP-overlap validation |
+| LAN & VLAN management | `create_lan_network`, `update_lan_network`, `delete_lan_network`, `set_vlan_dhcp_pools`, `set_vlan_isolation` | Two-endpoint LAN RMW, normalizes `lanNetworkIpv6Config` + `dhcpGuard`/`dhcpv6Guard`, uses `priDns`/`sndDns`, checks `ipRangePool`, refuses management/primary VLAN deletion |
+| IP groups & Gateway ACLs | `create_ip_group`, `replace_ip_group`, `delete_ip_group`, `create_gateway_acl`, `update_gateway_acl`, `set_acl_rule_status`, `delete_gateway_acl` | Aligned CIDR packing (`<=16`, `-33726`), typed delete `/{type}/{id}`, auto 6-step swap for `-33717`, gateway ACL `?type=0` PUT/POST/DELETE with management-host anti-stranding |
+| Wireless SSIDs | `create_ssid`, `update_ssid`, `delete_ssid` | Manage SSIDs under `setting/wlans/{groupId}/ssids`; PSK/secret keys scrubbed recursively from diffs, outputs, and snapshots |
+| Port forwards, routes & services | `upsert_port_forward`, `delete_port_forward`, `upsert_static_route`, `delete_static_route`, `upsert_mdns_rule`, `delete_mdns_rule`, `set_upnp` | NAT port forwards, static routing (`routeType`, `nextHop`, `metric`), mDNS repeater rules (profile name/ID resolution), and UPnP toggle |
+| Device operations | `update_device`, `reboot_device` | Rename / LED / locate / reboot EAPs, switches, and gateways (`destructive=True` on reboot; firmware upgrade remains unshipped) |
 
 `omada-mcp --list-tools` prints active descriptors without touching the network
-(add `--all` to inspect all 19 tools including non-allowlisted writes).
+(add `--all` to inspect all 51 tools including non-allowlisted writes).
 
 Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18`
 `outputSchema`, so hosts can auto-approve reads and validate structured results:
@@ -327,18 +338,21 @@ Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18
 ### Output shape (`content` vs `structuredContent`)
 
 * **List tools** (`list_devices`, `list_clients`, `list_wifi_clients`,
-  `list_wired_clients`, `list_wlans`): `content[0].text` is serialized as a
+  `list_wired_clients`, `search_clients`, `list_wlans`, `list_lan_networks`,
+  `list_dhcp_reservations`, `list_acls`, `list_ip_groups`, `list_port_forwards`,
+  `list_static_routes`, `list_logs`): `content[0].text` is serialized as a
   **bare JSON array** (`[{...}, ...]`), while `structuredContent` is an object
   matching `outputSchema`: `{"items": [...], "count": <int>}`. Callers parsing
   `content[0].text` (for example migrating from wrapper objects like
   `{"devices": [...]}`) receive a JSON list directly, whereas MCP `2025-06-18`
   hosts read `structuredContent.items` and `structuredContent.count`.
 * **Object tools** (`get_device`, `get_client`, `get_site_info`,
-  `network_audit`, `explain_error`): both `content[0].text` and
-  `structuredContent` contain the same JSON object matching `outputSchema`.
+  `get_network_services`, `network_audit`, `explain_error`, `get_config_snapshot`,
+  and write envelopes): both `content[0].text` and `structuredContent` contain
+  the same JSON object matching `outputSchema`.
 
 `omada-mcp --list-tools` prints active descriptors without touching the network;
-`omada-mcp --list-tools --all` prints all 19 descriptors.
+`omada-mcp --list-tools --all` prints all 51 descriptors.
 
 ## Safety model
 
@@ -384,12 +398,17 @@ table below maps the symptoms it cannot see.
 See [`docs/compatibility.md`](docs/compatibility.md) for the full compatibility table.
 
 * **Software controller v6.x** — read-only path (`--doctor --json` and read tools)
-  verified live on v6.2.10.17 (`TPOMADA_SESSIONID`), and write flows (`create_ip_group`,
-  `replace_ip_group`, `create_gateway_acl`, `set_acl_rule_status`, `set_vlan_dhcp_pools`,
-  `set_vlan_isolation`, `get_config_snapshot`, plus Viewer `-1007` and missing-client
-  `-41011` handling) verified live against an isolated Docker Omada Controller v6.2.14.11;
-  client fixed-IP lease-delayed behavior (`set_client_fixed_ip`/`release_client_fixed_ip`)
-  and adopted-gateway isolation verified against the stateful mock controller.
+  verified live on v6.2.10.17 (`TPOMADA_SESSIONID`), and all 20 read-only tools plus
+  controller-native write CRUD (`create/update/delete_lan_network`,
+  `set_vlan_dhcp_pools`, `upsert/delete_dhcp_reservation`, `create/replace/delete_ip_group`,
+  `create/update/set_acl_rule_status/delete_gateway_acl` including the 6-step swap,
+  `create/update/delete_ssid` with PSK redaction, `upsert/delete_port_forward`,
+  `upsert/delete_static_route`, `upsert/delete_mdns_rule`, `set_upnp` dry-run,
+  `-33598` on hardwareless isolation, Viewer `-1007 -> insight/clients` fallback,
+  and `-41011`/not-found probes) verified live against an isolated Docker Omada
+  Controller v6.2.14.11; client fixed-IP lease-delayed behavior (`set_client_fixed_ip`/
+  `release_client_fixed_ip`), client actions, and device controls (`update_device`,
+  `reboot_device`) are covered by the stateful mock controller.
 * **Software controller v5.x** — expected (v5.13.30.8 core auth/list shapes
   supported; awaiting a `--doctor --json` capture via the issue template).
 * **OC200 / OC300 hardware & `TPEAP_SESSIONID` builds** — expected (`--doctor`
@@ -402,7 +421,7 @@ See [`docs/compatibility.md`](docs/compatibility.md) for the full compatibility 
 
 ```bash
 git clone https://github.com/falehsub/omada-mcp && cd omada-mcp
-python -m unittest discover -s tests -v     # 87 tests, no network, no deps
+python -m unittest discover -s tests -v     # 127 tests, no network, no deps
 python -m omada_mcp.cli --help              # after: pip install -e .
 uvx --from . omada-mcp --doctor             # what an external user does
 
@@ -415,8 +434,8 @@ Layout:
 
 ```
 src/omada_mcp/config.py         dotenv discovery, validation, base-URL normalisation, write allowlist
-src/omada_mcp/client.py         Web API v2 client: auth, pacing, write gate, snapshots/audit, errors
-src/omada_mcp/tools.py          11 read-only tools + 8 write descriptors, projections, outputSchema
+src/omada_mcp/client.py         Web API v2 client: auth, pagination, write gate, snapshots/audit, errors
+src/omada_mcp/tools.py          20 read-only tools + 31 write descriptors, projections, outputSchema
 src/omada_mcp/write_tools.py    read-modify-write handlers, CIDR packer, anti-stranding, 6-step swap
 src/omada_mcp/server.py         JSON-RPC stdio server, fail-closed gates, strict arg/bool checks
 src/omada_mcp/doctor.py         6-phase self-test (env, tls, login, site, tools, write) with --json
@@ -442,13 +461,14 @@ tools are hidden). Opt-in writes follow the contract in
 allowlist, `dryRun=true` default, `confirm="<tool>:<target-id>"`, pre-write snapshots +
 `audit.jsonl`, whole-object verification, and anti-stranding checks. Use a **dedicated
 Admin local account** separate from your read bridge and web UI to avoid session
-eviction. Device reboot, firmware upgrade, LED/rename, and SSID writes remain unshipped.
+eviction. Firmware upgrades remain unshipped pending a maintenance-window policy.
 
 ## Roadmap
 
-Core read-only access, `--doctor --json`, error decoding, `network_audit`, and opt-in
-write support are implemented. Next items in [ROADMAP.md](ROADMAP.md) include
-MCP Registry `server.json` / PyPI publishing and `search_clients`.
+Core read-only access, `--doctor --json`, error decoding, `network_audit`, `search_clients`,
+and the expanded 51-tool read/write control surface are implemented on `main`. Next items
+in [ROADMAP.md](ROADMAP.md) include MCP Registry `server.json` / PyPI publishing and v1.3
+operational tooling.
 
 ## License
 

@@ -96,6 +96,26 @@ class FakeController:
         self.wlans = wlans if wlans is not None else WLANS
         self.lan_networks = lan_networks if lan_networks is not None else LAN_NETWORKS
         self.ssids_by_group = ssids_by_group or {}
+        self.dhcp_reservations = [
+            {"id": "d1", "mac": "AA-BB-CC-11-11-01", "ip": "192.168.20.42", "netId": "n20", "status": True, "description": "cam"}
+        ]
+        self.acls = [
+            {"id": "acl1", "index": 0, "name": "Block IoT", "status": True, "policy": 0,
+             "sourceType": 0, "sourceIds": ["n20"], "destinationType": 2, "destinationIds": [],
+             "direction": {"lanToWan": True, "lanToLan": False}, "protocols": [256]}
+        ]
+        self.groups = [
+            {"groupId": "grp1", "name": "RFC1918", "type": 0, "ipList": [{"ip": "192.168.0.0", "mask": "16"}]}
+        ]
+        self.port_forwards = [
+            {"id": "pf1", "name": "Web", "status": True, "externalPort": "443", "forwardIp": "192.168.1.50", "forwardPort": "8443", "protocol": 6, "dMZ": False}
+        ]
+        self.static_routes = [
+            {"id": "sr1", "name": "LabRoute", "status": True, "routeType": 0, "destinations": ["10.99.0.0/24"], "nextHopIp": "192.168.1.254", "interfaceId": "wan1", "metric": 1}
+        ]
+        self.mdns_rules = [{"id": "m1", "name": "Cast", "status": True, "type": 1}]
+        self.mdns_profiles = [{"id": "buildIn-1", "name": "AirPlay", "serviceId": ["_airplay._tcp.local"], "defaultProfile": True}]
+        self.logs = [{"id": "l1", "level": 2, "type": 1, "module": 1, "content": "Test log", "time": 1700000000000, "resolved": False}]
         self.cookie_name = cookie_name
         self.controller_ver = controller_ver
         self.controller_info_extra = controller_info_extra or {}
@@ -185,6 +205,34 @@ class FakeController:
         if fragment.startswith(site_prefix + "/setting/lan/networks"):
             return 200, json.dumps({"errorCode": 0, "result": {
                 "data": self.lan_networks, "totalRows": len(self.lan_networks)}}).encode()
+        if fragment == site_prefix + "/clients":
+            want = "filters.active=true" in url
+            rows = [c for c in self.clients if bool(c.get("active", True)) == want]
+            return 200, json.dumps({"errorCode": 0, "result": {"data": rows, "totalRows": len(rows)}}).encode()
+        if fragment.startswith(site_prefix + "/setting/service/dhcp"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": self.dhcp_reservations, "totalRows": len(self.dhcp_reservations)}}).encode()
+        if fragment.startswith(site_prefix + "/setting/firewall/acls"):
+            return 200, json.dumps({"errorCode": 0, "result": {"aclDisable": True, "data": self.acls, "totalRows": len(self.acls)}}).encode()
+        if fragment.startswith(site_prefix + "/setting/profiles/groups"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": self.groups, "totalRows": len(self.groups)}}).encode()
+        if fragment.startswith(site_prefix + "/setting/transmission/portForwardings"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": self.port_forwards, "totalRows": len(self.port_forwards)}}).encode()
+        if fragment.startswith(site_prefix + "/setting/transmission/staticRoutings"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": self.static_routes, "totalRows": len(self.static_routes)}}).encode()
+        if fragment.startswith(site_prefix + "/setting/service/mdns"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": self.mdns_rules, "totalRows": len(self.mdns_rules)}}).encode()
+        if fragment.startswith(site_prefix + "/setting/profiles/mdns"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": self.mdns_profiles, "totalRows": len(self.mdns_profiles)}}).encode()
+        if fragment.startswith(site_prefix + "/setting/upnp"):
+            return 200, json.dumps({"errorCode": 0, "result": {"enable": False}}).encode()
+        if fragment.startswith(site_prefix + "/setting/dns-proxy"):
+            return 200, json.dumps({"errorCode": 0, "result": {"enable": False}}).encode()
+        if fragment.startswith(site_prefix + "/setting/service/ddns"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
+        if fragment.startswith(site_prefix + "/setting/wan/networks"):
+            return 200, json.dumps({"errorCode": 0, "result": {"wanMode": 0, "osgPortInfo": {"wanLanPortSettings": []}}}).encode()
+        if fragment.startswith(site_prefix + "/logs/") or fragment.startswith(site_prefix + "/audit/logs"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": self.logs, "totalRows": len(self.logs)}}).encode()
         return 200, json.dumps({"errorCode": -1600, "msg": "unsupported request path"}).encode()
 
 
@@ -472,11 +520,15 @@ class ProtocolTests(unittest.TestCase):
     def test_tools_list_annotations(self):
         server, _, _ = self._server()
         tools = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
-        self.assertEqual(len(tools), 11)
+        self.assertEqual(len(tools), 20)
         self.assertEqual({t["name"] for t in tools},
                          {"list_devices", "list_clients", "list_wifi_clients",
-                          "list_wired_clients", "get_device", "get_client",
-                          "list_wlans", "get_site_info", "network_audit",
+                          "list_wired_clients", "search_clients", "get_device",
+                          "get_client", "list_wlans", "list_lan_networks",
+                          "list_dhcp_reservations", "list_acls", "list_ip_groups",
+                          "list_port_forwards", "list_static_routes",
+                          "get_network_services", "list_logs",
+                          "get_site_info", "network_audit",
                           "explain_error", "get_config_snapshot"})
         for tool in tools:
             annotations = tool["annotations"]
@@ -886,7 +938,7 @@ class CliTests(unittest.TestCase):
             finally:
                 sys.stdout = original
             payload = json.loads(buffer.getvalue())
-            self.assertEqual(len(payload["tools"]), 11)
+            self.assertEqual(len(payload["tools"]), 20)
 
             buffer_all = io.StringIO()
             sys.stdout = buffer_all
@@ -895,7 +947,7 @@ class CliTests(unittest.TestCase):
             finally:
                 sys.stdout = original
             payload_all = json.loads(buffer_all.getvalue())
-            self.assertEqual(len(payload_all["tools"]), 19)
+            self.assertEqual(len(payload_all["tools"]), 51)
 
     def test_missing_config_exits_non_zero(self):
         from omada_mcp.cli import main
@@ -1190,13 +1242,27 @@ class V11FeatureTests(unittest.TestCase):
             ("list_clients", {}),
             ("list_wifi_clients", {}),
             ("list_wired_clients", {}),
+            ("search_clients", {}),
             ("get_device", {"mac": "AA-BB-CC-00-00-01"}),
             ("get_client", {"mac": "AA-BB-CC-11-11-01"}),
             ("list_wlans", {}),
+            ("list_lan_networks", {}),
+            ("list_dhcp_reservations", {}),
+            ("list_acls", {}),
+            ("list_ip_groups", {}),
+            ("list_port_forwards", {}),
+            ("list_static_routes", {}),
+            ("get_network_services", {}),
+            ("list_logs", {}),
             ("get_site_info", {}),
             ("network_audit", {}),
             ("explain_error", {"code": -33726}),
-            ("get_config_snapshot", {"objects": ["wlans", "devices", "clients"]}),
+            ("get_config_snapshot", {
+                "objects": [
+                    "wlans", "devices", "clients", "dhcpReservations",
+                    "portForwards", "staticRoutes", "mdnsRules", "services",
+                ],
+            }),
         ]
         self.assertEqual({name for name, _ in calls}, set(descriptors))
         for name, args in calls:

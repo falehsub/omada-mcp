@@ -76,18 +76,24 @@ fail closed unless explicitly enabled.
 
 * `OMADA_WRITE_TOOLS` allowlist (default empty): `OMADA_READ_ONLY=false` alone cannot
   run writes; wildcards and `all` are rejected cleanly at startup.
-* Read-only `get_config_snapshot` plus 8 opt-in write tools (`set_client_fixed_ip`,
-  `release_client_fixed_ip`, `set_vlan_dhcp_pools`, `set_vlan_isolation`,
-  `create_ip_group`, `replace_ip_group`, `create_gateway_acl`, `set_acl_rule_status`).
+* Read-only `get_config_snapshot` plus expanded read tools (`list_lan_networks`,
+  `list_dhcp_reservations`, `list_acls`, `list_ip_groups`, `list_port_forwards`,
+  `list_static_routes`, `get_network_services`, `list_logs`) and 31 opt-in write tools:
+  the core 8 (`set_client_fixed_ip`, `release_client_fixed_ip`, `set_vlan_dhcp_pools`,
+  `set_vlan_isolation`, `create_ip_group`, `replace_ip_group`, `create_gateway_acl`,
+  `set_acl_rule_status`) plus offline DHCP reservation CRUD, LAN/VLAN CRUD, ACL
+  update/delete, IP-group delete, SSID CRUD (PSK-redacted), port forwarding, static
+  routing, mDNS/UPnP service controls, client block/reconnect/rename, and device
+  rename/LED/locate/reboot.
 * Every write tool defaults `dryRun` to `true`, requires `confirm: "<tool>:<target-id>"`
   for `dryRun=false`, saves pre-write JSON snapshots + `audit.jsonl` records, enforces
   controller/management-host anti-stranding guards, and verifies read-back state.
 * Respects live controller traps documented in [`docs/write-support.md`](docs/write-support.md):
   two-endpoint LAN RMW, non-authoritative `aclDisable`, `-33726` aligned CIDR packing
   (`<=16`), `-33717` 6-step tmp-group swap for ACL-referenced IP groups, 20 stripped
-  volatile client keys, and no blind `-1600` retries on writes.
-* Device reboot, firmware upgrade, LED/rename, and SSID writes remain unshipped until
-  a maintenance-window model is designed.
+  volatile client keys, `dhcpGuard`/`dhcpv6Guard`/`lanNetworkIpv6Config` normalization,
+  `priDns`/`sndDns` DNS persistence, and no blind `-1600` retries on writes.
+* Firmware upgrade remains unshipped until a dedicated maintenance-window policy exists.
 
 ### 5. Discoverability: MCP Registry `server.json` + listings
 
@@ -103,19 +109,15 @@ fail closed unless explicitly enabled.
 **Acceptance:** `mcp-publisher publish` succeeds and a registry client resolves
 `omada-mcp` to this package.
 
-### 6. Filtered search instead of "fetch everything"
+### 6. Filtered search instead of "fetch everything" *(shipped on `main`)*
 
 **Why:** a 200-client site returns a large payload for a question like "which
 clients are on the guest VLAN".
 
-* `search_clients` with `ssid`, `vlan`, `wireless`, `active`, `name_contains`
-  filters applied server-side after the paginated fetch, returning a count and a
-  bounded sample.
-* Push filters into the controller query where it supports them; measure before
-  assuming it helps.
-
-**Acceptance:** `search_clients(ssid="Guest")` on a 200-client site returns in
-under 2 s and never returns the full client list.
+* `search_clients` with `query`, `active`, `wireless`, `guest`, and `limit`
+  filters applied server-side over paginated fetch (`insight/clients` fallback on
+  Viewer `-1007`/`-41011`), returning a bounded matching slice without returning the
+  entire client table.
 
 ## v1.3 — "operational"
 

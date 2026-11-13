@@ -149,6 +149,36 @@ class MockController:
 
         self.wlans: List[Dict[str, Any]] = copy.deepcopy(DEFAULT_WLANS)
         self.ssids_by_group: Dict[str, List[Dict[str, Any]]] = copy.deepcopy(DEFAULT_SSIDS_BY_GROUP)
+        self.dhcp_reservations: List[Dict[str, Any]] = []
+        self.port_forwards: List[Dict[str, Any]] = []
+        self.static_routes: List[Dict[str, Any]] = []
+        self.mdns_rules: List[Dict[str, Any]] = []
+        self.mdns_profiles: List[Dict[str, Any]] = [
+            {"id": "buildIn-1", "name": "AirPlay", "serviceId": ["_airplay._tcp.local"], "defaultProfile": True},
+            {"id": "buildIn-7", "name": "Printers", "serviceId": ["_ipp._tcp.local"], "defaultProfile": True},
+        ]
+        self.upnp: Dict[str, Any] = {"enable": False, "resource": 0}
+        self.dns_proxy: Dict[str, Any] = {"enable": False, "supportDnsOverride": True}
+        self.ddns: Dict[str, Any] = {"data": [], "totalRows": 0}
+        self.wan: Dict[str, Any] = {
+            "wanMode": 0,
+            "osgPortInfo": {
+                "wanLanPortSettings": [
+                    {"portUuid": "wan-port-1", "portName": "WAN", "mode": 0, "status": 1},
+                    {"portUuid": "lan-port-1", "portName": "LAN1", "mode": 1, "status": 1},
+                ]
+            },
+        }
+        now_ms = int(time.time() * 1000)
+        self.logs_alerts: List[Dict[str, Any]] = [
+            {"id": "al-1", "level": 2, "type": 1, "module": 1, "content": "Mock alert entry", "time": now_ms - 60000, "resolved": False},
+        ]
+        self.logs_events: List[Dict[str, Any]] = [
+            {"id": "ev-1", "level": 4, "type": 10, "module": 2, "content": "Client connected", "time": now_ms - 30000},
+        ]
+        self.logs_audit: List[Dict[str, Any]] = [
+            {"id": "au-1", "level": 4, "auditType": 1, "content": "Admin session started", "operator": username, "time": now_ms - 15000},
+        ]
 
         self.cookie_jar = http.cookiejar.CookieJar()
         self.token: str = "tok-mock-001"
@@ -160,6 +190,7 @@ class MockController:
         self.html_once_for: set[Any] = set()
         self.html_always_for: set[Any] = set()
         self.burst_once_for: set[Any] = set()
+        self.expired_once_for: set[Any] = set()
         self.silent_noop_for: set[Any] = set()
         self.corrupt_dhcp_on_patch: bool = False
         self.drop_collection_isolation_sync: bool = False
@@ -298,6 +329,11 @@ class MockController:
         if burst_once is not None:
             self.burst_once_for.discard(burst_once)
             return self._err(-1600, "Too many requests.")
+        expired_once = self._match_fault_set(self.expired_once_for, method, full_path)
+        if expired_once is not None:
+            self.expired_once_for.discard(expired_once)
+            self.cookie_jar.clear()
+            return self._err(-30109, "Session expired.")
 
         if not self._is_authenticated(req_headers):
             return 200, b"<!DOCTYPE html><html><title>Login</title></html>"
@@ -326,6 +362,22 @@ class MockController:
             return path.split(marker2, 1)[1]
         return path.lstrip("/")
 
+    @staticmethod
+    def _paginate_rows(rows: Sequence[Dict[str, Any]], params: Mapping[str, List[str]]) -> Dict[str, Any]:
+        total = len(rows)
+        if "currentPage" in params:
+            page = max(1, int(params["currentPage"][0]))
+            size = max(1, int(params.get("currentPageSize", ["100"])[0]))
+            start = (page - 1) * size
+            chunk = list(rows[start:start + size])
+            return {
+                "data": copy.deepcopy(chunk),
+                "totalRows": total,
+                "currentPage": page,
+                "currentSize": size,
+            }
+        return {"data": copy.deepcopy(list(rows)), "totalRows": total}
+
     def _dispatch(self, method: str, raw_path: str, query: str, body: Any) -> Tuple[int, bytes]:
         ep = self._strip_api_prefix(raw_path)
         params = urllib.parse.parse_qs(query)
@@ -345,7 +397,41 @@ class MockController:
 
         m_dev = re.fullmatch(r"sites/([^/]+)/devices", ep)
         if m_dev and method == "GET":
-            return self._ok({"data": copy.deepcopy(self.devices), "totalRows": len(self.devices)})
+            return self._ok(self._paginate_rows(self.devices, params))
+
+        m_dev_cfg = re.fullmatch(r"sites/([^/]+)/(eaps|switches|gateways)/([^/]+)(?:/config/general)?", ep)
+        if m_dev_cfg:
+            kind, mac_raw = m_dev_cfg.group(2), m_dev_cfg.group(3)
+            has_general = ep.endswith("/config/general")
+            if method == "PUT" and not has_general:
+                return self._err(-1600, "PUT on device root requires /config/general.")
+            mac = _normalize_mac(urllib.parse.unquote(mac_raw))
+            kind_map = {"eaps": ("ap", -39303), "switches": ("switch", -39700), "gateways": ("gateway", -39501)}
+            expected_type, err_code = kind_map[kind]
+            dev = next((d for d in self.devices if _normalize_mac(d["mac"]) == mac and d.get("type") == expected_type), None)
+            if dev is None:
+                return self._err(err_code, f"{kind} device does not exist.")
+            if method in ("PATCH", "PUT"):
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Device update body must be JSON object.")
+                for k, v in body.items():
+                    dev[k] = copy.deepcopy(v)
+                return self._ok(copy.deepcopy(dev))
+            return self._err(-1600, "Method not supported.")
+
+        m_dev_cmd = re.fullmatch(r"sites/([^/]+)/cmd/devices/([^/]+)/(locate|reboot)", ep)
+        if m_dev_cmd and method == "POST":
+            mac = _normalize_mac(urllib.parse.unquote(m_dev_cmd.group(2)))
+            action = m_dev_cmd.group(3)
+            dev = next((d for d in self.devices if _normalize_mac(d["mac"]) == mac), None)
+            if dev is None:
+                return self._err(-39303, "Device does not exist.")
+            if action == "locate":
+                if isinstance(body, Mapping) and "locateEnable" in body:
+                    dev["locateEnable"] = bool(body["locateEnable"])
+            elif action == "reboot":
+                dev["lastReboot"] = int(time.time() * 1000)
+            return self._ok({})
 
         m_ic = re.fullmatch(r"sites/([^/]+)/insight/clients", ep)
         if m_ic and method == "GET":
@@ -369,7 +455,39 @@ class MockController:
                     "lastSeen": c.get("lastSeen", 0),
                     "signalLevel": c.get("signalLevel", 0),
                 })
-            return self._ok({"data": rows, "totalRows": len(rows)})
+            return self._ok(self._paginate_rows(rows, params))
+
+        m_clients_col = re.fullmatch(r"sites/([^/]+)/clients", ep)
+        if m_clients_col and method == "GET":
+            if "viewer" in self.role.lower():
+                return self._err(-1007, "Insufficient user permissions for clients endpoint.")
+            if "filters.active" not in params:
+                return self._err(-1, "filters.active parameter is required.")
+            want_active = params["filters.active"][0].lower() == "true"
+            rows = [
+                copy.deepcopy(c) for c in self.clients.values()
+                if bool(c.get("active", True)) == want_active
+            ]
+            return self._ok(self._paginate_rows(rows, params))
+
+        m_client_cmd = re.fullmatch(r"sites/([^/]+)/cmd/clients/([^/]+)/(block|unblock|reconnect)", ep)
+        if m_client_cmd and method == "POST":
+            mac = _normalize_mac(urllib.parse.unquote(m_client_cmd.group(2)))
+            action = m_client_cmd.group(3)
+            if any(_normalize_mac(d["mac"]) == mac for d in self.devices):
+                return self._err(-41011, "Managed device MAC is not a client.")
+            client_obj = self.clients.get(mac)
+            if client_obj is None:
+                return self._err(-41011, "Client not found.")
+            if action == "block":
+                client_obj["blocked"] = True
+            elif action == "unblock":
+                client_obj["blocked"] = False
+            elif action == "reconnect":
+                if not client_obj.get("wireless") or not client_obj.get("active", True):
+                    return self._err(-41002, "Client is not an online wireless client.")
+                client_obj["lastReconnect"] = int(time.time() * 1000)
+            return self._ok({})
 
         m_client = re.fullmatch(r"sites/([^/]+)/clients/([^/]+)", ep)
         if m_client:
@@ -399,13 +517,51 @@ class MockController:
                 return self._ok(copy.deepcopy(updated))
             return self._err(-1600, "Method not supported.")
 
+        m_wan = re.fullmatch(r"sites/([^/]+)/setting/wan/networks", ep)
+        if m_wan and method == "GET":
+            return self._ok(copy.deepcopy(self.wan))
+
         m_lan_col = re.fullmatch(r"sites/([^/]+)/setting/lan/networks", ep)
-        if m_lan_col and method == "GET":
-            return self._ok({"data": copy.deepcopy(self.lan_collection), "totalRows": len(self.lan_collection)})
+        if m_lan_col:
+            if method == "GET":
+                return self._ok(self._paginate_rows(self.lan_collection, params))
+            if method == "POST":
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid LAN network body.")
+                if body.get("domain") == "":
+                    return self._err(-1001, "domain must not be empty string.")
+                purpose = str(body.get("purpose") or "interface")
+                if purpose == "interface" and not (body.get("interfaceIds") or []):
+                    return self._err(-33515, "Select at least one LAN interface port.")
+                new_id = self._next_id("net-new")
+                col_item = {
+                    "id": new_id,
+                    "name": str(body.get("name") or new_id),
+                    "vlan": int(body.get("vlan", 1)),
+                    "purpose": purpose,
+                    "isolation": bool(body.get("isolation", False)),
+                    "existNetworkIsolation": bool(body.get("isolation", False)),
+                    "accessControlRule": False,
+                    "igmpSnoopEnable": bool(body.get("igmpSnoopEnable", False)),
+                    "gatewaySubnet": body.get("gatewaySubnet"),
+                    "dhcpSettings": copy.deepcopy(body.get("dhcpSettings") or {"enable": False}),
+                }
+                self.lan_collection.append(col_item)
+                if purpose == "interface":
+                    iface_item = copy.deepcopy(dict(body))
+                    iface_item["id"] = new_id
+                    iface_item.setdefault("origName", str(body.get("name") or new_id))
+                    iface_item["lanNetworkIpv6Config"] = {"enable": 0}
+                    iface_item.setdefault("dhcpGuard", {})
+                    iface_item.setdefault("dhcpv6Guard", {})
+                    iface_item.setdefault("icmpPingEnable", True)
+                    self.lan_interfaces.append(iface_item)
+                return self._ok({"id": new_id})
+            return self._err(-1600, "Method not supported.")
 
         m_lan_iface = re.fullmatch(r"sites/([^/]+)/setting/lan/networks/interface", ep)
         if m_lan_iface and method == "GET":
-            return self._ok({"data": copy.deepcopy(self.lan_interfaces), "totalRows": len(self.lan_interfaces)})
+            return self._ok(self._paginate_rows(self.lan_interfaces, params))
 
         m_lan_id = re.fullmatch(r"sites/([^/]+)/setting/lan/networks/([^/]+)", ep)
         if m_lan_id:
@@ -421,9 +577,14 @@ class MockController:
                     return self._err(-1001, "Parameter [proto] should not be null.")
                 if v6.get("enable") is None:
                     return self._err(-1001, "Parameter [enable] should not be null.")
+                for gk in ("dhcpGuard", "dhcpv6Guard"):
+                    gv = body.get(gk)
+                    if isinstance(gv, Mapping) and gv.get("enable") is None:
+                        return self._err(-1001, f"Parameter [{gk}.enable] should not be null.")
                 idx = next((i for i, item in enumerate(self.lan_interfaces) if str(item["id"]) == nid), None)
                 if idx is None:
                     return self._err(-1600, "Network not found.")
+                prev_iface = self.lan_interfaces[idx]
                 new_iface = copy.deepcopy(dict(body))
                 new_iface["id"] = nid
                 if self.omada62_lan_normalization:
@@ -431,12 +592,22 @@ class MockController:
                     new_v6.pop("proto", None)
                     new_iface["lanNetworkIpv6Config"] = new_v6
                     new_iface["qosQueueEnable"] = False
+                    if "name" in new_iface and (
+                        "origName" in prev_iface or new_iface.get("name") != prev_iface.get("name")
+                    ):
+                        new_iface["origName"] = new_iface["name"]
+                    if isinstance(new_iface.get("dhcpSettings"), dict):
+                        for legacy_dns in ("dns1", "dns2"):
+                            new_iface["dhcpSettings"].pop(legacy_dns, None)
                 if self.corrupt_dhcp_on_patch and isinstance(new_iface.get("dhcpSettings"), dict):
                     new_iface["dhcpSettings"]["leaseTime"] = 999
                 self.lan_interfaces[idx] = new_iface
 
                 col_item = next((c for c in self.lan_collection if str(c["id"]) == nid), None)
                 if col_item is not None:
+                    for field in ("name", "igmpSnoopEnable", "dhcpSettings"):
+                        if field in new_iface:
+                            col_item[field] = copy.deepcopy(new_iface[field])
                     if "isolation" in new_iface and not self.drop_collection_isolation_sync:
                         col_item["isolation"] = bool(new_iface["isolation"])
                     dhcp_new = new_iface.get("dhcpSettings") or {}
@@ -447,12 +618,61 @@ class MockController:
                         col_item["dhcpSettings"]["ipRangeStart"] = pools[0]["ipaddrStart"]
                         col_item["dhcpSettings"]["ipRangeEnd"] = pools[-1]["ipaddrEnd"]
                 return self._ok({})
+            if method == "DELETE":
+                target_col = next((c for c in self.lan_collection if str(c.get("id")) == nid), None)
+                if target_col is None:
+                    return self._err(-1600, "Network not found.")
+                if int(target_col.get("vlan", 0)) == 1:
+                    return self._err(-33501, "Cannot delete default LAN network.")
+                self.lan_collection = [c for c in self.lan_collection if str(c.get("id")) != nid]
+                self.lan_interfaces = [i for i in self.lan_interfaces if str(i.get("id")) != nid]
+                return self._ok({})
             return self._err(-1600, "Method not allowed.")
+
+        m_dhcp = re.fullmatch(r"sites/([^/]+)/setting/service/dhcp", ep)
+        if m_dhcp:
+            if method == "GET":
+                return self._ok(self._paginate_rows(self.dhcp_reservations, params))
+            if method == "POST":
+                if not isinstance(body, Mapping) or not body.get("mac") or not body.get("ip") or not body.get("netId"):
+                    return self._err(-1001, "mac, ip, and netId are required.")
+                mac_norm = _normalize_mac(body["mac"])
+                if any(_normalize_mac(r.get("mac", "")) == mac_norm for r in self.dhcp_reservations):
+                    return self._err(-34522, "MAC reservation already exists.")
+                if any(str(r.get("ip")) == str(body["ip"]) and str(r.get("netId")) == str(body["netId"]) for r in self.dhcp_reservations):
+                    return self._err(-34522, "IP reservation already exists.")
+                new_id = self._next_id("dhcp-new")
+                created = copy.deepcopy(dict(body))
+                created["id"] = new_id
+                created.setdefault("status", True)
+                created.setdefault("description", "")
+                created.setdefault("exportToIpMacBinding", True)
+                self.dhcp_reservations.append(created)
+                return self._ok({"id": new_id})
+            return self._err(-1600, "Method not supported.")
+
+        m_dhcp_mac = re.fullmatch(r"sites/([^/]+)/setting/service/dhcp/([^/]+)", ep)
+        if m_dhcp_mac:
+            mac_norm = _normalize_mac(urllib.parse.unquote(m_dhcp_mac.group(2)))
+            idx = next((i for i, r in enumerate(self.dhcp_reservations) if _normalize_mac(r.get("mac", "")) == mac_norm), None)
+            if idx is None:
+                return self._err(-1600, "DHCP reservation not found.")
+            if method == "PUT":
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                updated = copy.deepcopy(self.dhcp_reservations[idx])
+                updated.update(copy.deepcopy(dict(body)))
+                self.dhcp_reservations[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                self.dhcp_reservations.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
 
         m_groups = re.fullmatch(r"sites/([^/]+)/setting/profiles/groups", ep)
         if m_groups:
             if method == "GET":
-                return self._ok({"data": copy.deepcopy(self.groups), "totalRows": len(self.groups)})
+                return self._ok(self._paginate_rows(self.groups, params))
             if method == "POST":
                 if not isinstance(body, Mapping):
                     return self._err(-1001, "Invalid body.")
@@ -499,11 +719,9 @@ class MockController:
         m_acls = re.fullmatch(r"sites/([^/]+)/setting/firewall/acls", ep)
         if m_acls:
             if method == "GET":
-                return self._ok({
-                    "aclDisable": self.acl_disable,
-                    "data": copy.deepcopy(self.acls),
-                    "totalRows": len(self.acls),
-                })
+                paged = self._paginate_rows(self.acls, params)
+                paged["aclDisable"] = self.acl_disable
+                return self._ok(paged)
             if method == "POST":
                 if not isinstance(body, Mapping):
                     return self._err(-1001, "Invalid ACL body.")
@@ -522,29 +740,141 @@ class MockController:
         if m_acl_id:
             if method == "PATCH":
                 return self._err(-1600, "Unsupported request path.")
+            if params.get("type", [""])[0] != "0":
+                return self._err(-1600, "Gateway ACL PUT/DELETE requires ?type=0.")
+            acl_id = m_acl_id.group(2)
+            idx = next((i for i, a in enumerate(self.acls) if str(a.get("id")) == acl_id), None)
+            if idx is None:
+                return self._err(-1600, "ACL rule not found.")
             if method == "PUT":
-                if params.get("type", [""])[0] != "0":
-                    return self._err(-1600, "Gateway ACL PUT requires ?type=0.")
-                acl_id = m_acl_id.group(2)
-                idx = next((i for i, a in enumerate(self.acls) if str(a.get("id")) == acl_id), None)
-                if idx is None:
-                    return self._err(-1600, "ACL rule not found.")
                 updated = copy.deepcopy(self.acls[idx])
                 if isinstance(body, Mapping):
                     for k, v in body.items():
                         updated[k] = copy.deepcopy(v)
                 updated["id"] = acl_id
+                if isinstance(body, Mapping) and "syslog" in body and body["syslog"] != self.acls[idx].get("syslog"):
+                    updated["existSyslog"] = bool(updated.get("syslog"))
                 self.acls[idx] = updated
                 return self._ok({})
+            if method == "DELETE":
+                self.acls.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
 
         m_wlans = re.fullmatch(r"sites/([^/]+)/setting/wlans", ep)
         if m_wlans and method == "GET":
-            return self._ok({"data": copy.deepcopy(self.wlans), "totalRows": len(self.wlans)})
+            return self._ok(self._paginate_rows(self.wlans, params))
 
         m_ssids = re.fullmatch(r"sites/([^/]+)/setting/wlans/([^/]+)/ssids", ep)
-        if m_ssids and method == "GET":
-            rows = copy.deepcopy(self.ssids_by_group.get(m_ssids.group(2), []))
-            return self._ok({"data": rows, "totalRows": len(rows)})
+        if m_ssids:
+            gid = m_ssids.group(2)
+            if method == "GET":
+                return self._ok(self._paginate_rows(self.ssids_by_group.get(gid, []), params))
+            if method == "POST":
+                if not isinstance(body, Mapping) or not body.get("name"):
+                    return self._err(-1001, "SSID name is required.")
+                new_id = self._next_id("ssid-new")
+                created = copy.deepcopy(dict(body))
+                created["id"] = new_id
+                created["wlanId"] = gid
+                self.ssids_by_group.setdefault(gid, []).append(created)
+                return self._ok({"id": new_id})
+            return self._err(-1600, "Method not supported.")
+
+        m_ssid_id = re.fullmatch(r"sites/([^/]+)/setting/wlans/([^/]+)/ssids/([^/]+)", ep)
+        if m_ssid_id:
+            gid, sid = m_ssid_id.group(2), m_ssid_id.group(3)
+            items = self.ssids_by_group.get(gid, [])
+            idx = next((i for i, s in enumerate(items) if str(s.get("id")) == sid), None)
+            if idx is None:
+                return self._err(-1600, "SSID not found.")
+            if method == "PATCH":
+                if not isinstance(body, Mapping) or "band" not in body or "security" not in body:
+                    return self._err(-1001, "SSID PATCH requires full DTO (band/security missing).")
+                if any(k in body for k in ("id", "wlanId", "site")):
+                    return self._err(-1001, "SSID PATCH rejects server-only keys.")
+                updated = copy.deepcopy(dict(body))
+                updated["id"] = sid
+                updated["wlanId"] = gid
+                items[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                items.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
+
+        crud_collections = {
+            "setting/transmission/portForwardings": (self.port_forwards, "pf-new"),
+            "setting/transmission/staticRoutings": (self.static_routes, "sr-new"),
+            "setting/service/mdns": (self.mdns_rules, "mdns-new"),
+        }
+        for path_suffix, (store, id_prefix) in crud_collections.items():
+            m_col = re.fullmatch(rf"sites/([^/]+)/{re.escape(path_suffix)}", ep)
+            if m_col:
+                if method == "GET":
+                    return self._ok(self._paginate_rows(store, params))
+                if method == "POST":
+                    if not isinstance(body, Mapping):
+                        return self._err(-1001, "Invalid body.")
+                    new_id = self._next_id(id_prefix)
+                    created = copy.deepcopy(dict(body))
+                    created["id"] = new_id
+                    store.append(created)
+                    return self._ok({"id": new_id})
+                return self._err(-1600, "Method not supported.")
+            m_item = re.fullmatch(rf"sites/([^/]+)/{re.escape(path_suffix)}/([^/]+)", ep)
+            if m_item:
+                rid = m_item.group(2)
+                idx = next((i for i, item in enumerate(store) if str(item.get("id")) == rid), None)
+                if idx is None:
+                    return self._err(-1600, "Rule not found.")
+                if method == "PUT":
+                    if not isinstance(body, Mapping):
+                        return self._err(-1001, "Invalid body.")
+                    updated = copy.deepcopy(store[idx])
+                    updated.update(copy.deepcopy(dict(body)))
+                    updated["id"] = rid
+                    store[idx] = updated
+                    return self._ok({})
+                if method == "DELETE":
+                    store.pop(idx)
+                    return self._ok({})
+                return self._err(-1600, "Method not supported.")
+
+        m_mdns_prof = re.fullmatch(r"sites/([^/]+)/setting/profiles/mdns", ep)
+        if m_mdns_prof and method == "GET":
+            return self._ok(self._paginate_rows(self.mdns_profiles, params))
+
+        m_upnp = re.fullmatch(r"sites/([^/]+)/setting/upnp", ep)
+        if m_upnp:
+            if method == "GET":
+                return self._ok(copy.deepcopy(self.upnp))
+            if method == "PUT":
+                if not isinstance(body, Mapping) or "enable" not in body:
+                    return self._err(-1001, "enable is required.")
+                self.upnp["enable"] = bool(body["enable"])
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
+
+        m_dns_proxy = re.fullmatch(r"sites/([^/]+)/setting/dns-proxy", ep)
+        if m_dns_proxy and method == "GET":
+            return self._ok(copy.deepcopy(self.dns_proxy))
+
+        m_ddns = re.fullmatch(r"sites/([^/]+)/setting/service/ddns", ep)
+        if m_ddns and method == "GET":
+            return self._ok(copy.deepcopy(self.ddns))
+
+        m_logs = re.fullmatch(r"sites/([^/]+)/logs/(alerts|events)", ep)
+        if m_logs and method == "GET":
+            kind = m_logs.group(2)
+            if "filters.timeStart" not in params or "filters.timeEnd" not in params:
+                return self._err(-1001 if kind == "alerts" else -1, "timeStart and timeEnd required.")
+            rows = self.logs_alerts if kind == "alerts" else self.logs_events
+            return self._ok(self._paginate_rows(rows, params))
+
+        m_audit = re.fullmatch(r"sites/([^/]+)/audit/logs", ep)
+        if m_audit and method == "GET":
+            return self._ok(self._paginate_rows(self.logs_audit, params))
 
         return self._err(-1600, f"Unmocked endpoint: {method} {ep}")
 
@@ -578,6 +908,9 @@ class MockControllerHTTPServer:
 
             def do_POST(self) -> None:
                 self._handle("POST")
+
+            def do_PUT(self) -> None:
+                self._handle("PUT")
 
             def do_PATCH(self) -> None:
                 self._handle("PATCH")

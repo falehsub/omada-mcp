@@ -352,16 +352,15 @@ class Server:
 
         unknown = sorted(k for k in arguments if k not in props)
         if unknown:
-            camel_hints = {
-                "dry_run": "dryRun",
-                "net_id": "netId",
-                "ip_range": "ipRange",
-                "bi_directional": "biDirectional",
+            camel_lookup = {
+                "".join(ch for ch in prop.lower() if ch.isalnum()): prop
+                for prop in props
             }
-            fixes = [
-                f"use {camel_hints[k]!r} instead of {k!r}"
-                for k in unknown if k in camel_hints
-            ]
+            fixes = []
+            for k in unknown:
+                norm_k = "".join(ch for ch in k.lower() if ch.isalnum())
+                if norm_k in camel_lookup:
+                    fixes.append(f"use {camel_lookup[norm_k]!r} instead of {k!r}")
             hint = "; ".join(fixes) if fixes else "allowed arguments: " + ", ".join(sorted(props))
             raise RpcError(
                 -32602,
