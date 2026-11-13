@@ -18,7 +18,7 @@ uvx omada-mcp --doctor
 ```
 
 ```
-omada-mcp doctor v1.2.0 on Linux-6.8 (Python 3.12.7)
+omada-mcp doctor v1.2.1 on Linux-6.8 (Python 3.12.7)
 ------------------------------------------------------------------
 PASS env      /home/you/.config/omada-mcp/.env | url=https://192.0.2.10:8043 user=omada-readonly password=set (24 chars)
 PASS tls      verified against /home/you/.config/omada-mcp/controller-ca.pem (serverName=Omada) | reachable, omadacId=0123456789abcdef01234567, controllerVer=6.2.10.17, family=software-6.x
@@ -69,7 +69,7 @@ Three properties make it safe to hand to an LLM:
 # from git (works today)
 uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
 
-# from PyPI (once v1.2.0 is published there -- the name `omada-mcp` is reserved-free)
+# from PyPI (once v1.2.1 is published there -- the name `omada-mcp` is reserved-free)
 uvx omada-mcp --doctor
 
 # or install the command (once published to PyPI)
