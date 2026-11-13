@@ -68,31 +68,26 @@ and the runtime stays under ~5 s on a 4-device / 15-client site (verified at ~2.
 
 ## v1.2 — "usable as a daily driver"
 
-### 4. Write tools behind an explicit allowlist
+### 4. Write tools behind an explicit allowlist (shipped on `main`)
 
-**Why:** DHCP reservations and SSID edits are the two requests that always
-follow "you can see my network, can you change X". They must not arrive as a
-silent capability.
+**Why:** DHCP reservations, VLAN isolation/DHCP pool tuning, and IP-group/ACL updates
+are the next natural step after read-only visibility, but they must stay hidden and
+fail closed unless explicitly enabled.
 
-* `OMADA_WRITE_TOOLS=set_client_fixed_ip,create_dhcp_reservation` — an allowlist,
-  so `OMADA_READ_ONLY=false` alone is not enough to write.
-* Every write tool gets `readOnlyHint: false`, `destructiveHint: true` and a
-  required `dry_run` argument defaulting to `true`.
-* `set_client_fixed_ip` maps to `PATCH clients/{MAC}` with
-  `ipSetting.netId` (omitting it is `-1 General error`) and re-reads the object to
-  prove the change.
-* Group writes respect `-33726`: refuse to create a 17th entry and explain the
-  CIDR packing alternative (aligned-CIDR arithmetic is specified in
-  [`docs/write-support.md`](docs/write-support.md), section 3.2).
-
-**Brief for the implementer:** [`docs/write-support.md`](docs/write-support.md) — the
-verified write surface, payloads, the read-modify-write flows, the traps that cost hours
-(two different VLAN read endpoints, `aclDisable` semantics, delete-needs-type, lease delay),
-the safety contract, and a mock-controller test plan.
-
-**Acceptance:** with `OMADA_READ_ONLY=true` a write tool is refused `-32003`;
-with the allowlist empty it is refused `-32601`-class; with both set, `dry_run`
-defaults true and a real write re-reads its own effect.
+* `OMADA_WRITE_TOOLS` allowlist (default empty): `OMADA_READ_ONLY=false` alone cannot
+  run writes; wildcards and `all` are rejected cleanly at startup.
+* Read-only `get_config_snapshot` plus 8 opt-in write tools (`set_client_fixed_ip`,
+  `release_client_fixed_ip`, `set_vlan_dhcp_pools`, `set_vlan_isolation`,
+  `create_ip_group`, `replace_ip_group`, `create_gateway_acl`, `set_acl_rule_status`).
+* Every write tool defaults `dryRun` to `true`, requires `confirm: "<tool>:<target-id>"`
+  for `dryRun=false`, saves pre-write JSON snapshots + `audit.jsonl` records, enforces
+  controller/management-host anti-stranding guards, and verifies read-back state.
+* Respects live controller traps documented in [`docs/write-support.md`](docs/write-support.md):
+  two-endpoint LAN RMW, non-authoritative `aclDisable`, `-33726` aligned CIDR packing
+  (`<=16`), `-33717` 6-step tmp-group swap for ACL-referenced IP groups, 20 stripped
+  volatile client keys, and no blind `-1600` retries on writes.
+* Device reboot, firmware upgrade, LED/rename, and SSID writes remain unshipped until
+  a maintenance-window model is designed.
 
 ### 5. Discoverability: MCP Registry `server.json` + listings
 

@@ -57,7 +57,8 @@ jobs:
         run: |
           python -m pip install --force-reinstall --no-deps dist/*.whl
           omada-mcp --version
-          omada-mcp --list-tools | python -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==10, len(d['tools'])"
+          omada-mcp --list-tools | python -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==11, len(d['tools'])"
+          omada-mcp --list-tools --all | python -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==19, len(d['tools'])"
 
       - name: Stdio frames are LF-only and complete
         env:
@@ -71,7 +72,10 @@ jobs:
             '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
             | omada-mcp > frames.jsonl
           python -c "raw=open('frames.jsonl','rb').read(); assert b'\r' not in raw, 'CRLF leaked into frames'; assert raw.endswith(b'\n'), 'frames not newline terminated'"
-          python -c "import json; L=[json.loads(l) for l in open('frames.jsonl',encoding='utf-8') if l.strip()]; assert len(L)==2, len(L); assert L[0]['result']['serverInfo']['name']=='omada-mcp'; assert len(L[1]['result']['tools'])==10"
+          python -c "import json; L=[json.loads(l) for l in open('frames.jsonl',encoding='utf-8') if l.strip()]; assert len(L)==2, len(L); assert L[0]['result']['serverInfo']['name']=='omada-mcp'; assert len(L[1]['result']['tools'])==11"
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+            | OMADA_READ_ONLY=false OMADA_WRITE_TOOLS=set_client_fixed_ip omada-mcp > frames-write.jsonl
+          python -c "import json; L=[json.loads(l) for l in open('frames-write.jsonl',encoding='utf-8') if l.strip()]; assert len(L)==1, len(L); assert len(L[0]['result']['tools'])==12, len(L[0]['result']['tools'])"
 
       - name: Config discovery finds %APPDATA% (Windows only)
         if: runner.os == 'Windows'

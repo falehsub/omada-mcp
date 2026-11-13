@@ -1,0 +1,50 @@
+[
+  {
+    "mac": "AA-BB-CC-00-00-01",
+    "name": "gw-core",
+    "type": "gateway",
+    "model": "ER605",
+    "modelVersion": "2.0",
+    "firmwareVersion": "2.2.6",
+    "ip": "192.168.10.1",
+    "status": 1,
+    "statusCategory": 1,
+    "needUpgrade": false,
+    "uptime": "4d 02:15:00",
+    "clientNum": 4,
+    "cpuUtil": 8,
+    "memUtil": 31
+  },
+  {
+    "mac": "AA-BB-CC-00-00-02",
+    "name": "sw-access",
+    "type": "switch",
+    "model": "SG2008P",
+    "modelVersion": "3.0",
+    "firmwareVersion": "3.0.4",
+    "ip": "192.168.10.2",
+    "status": 1,
+    "statusCategory": 1,
+    "needUpgrade": false,
+    "uptime": "4d 02:14:12",
+    "clientNum": 2,
+    "cpuUtil": 12,
+    "memUtil": 29
+  },
+  {
+    "mac": "AA-BB-CC-00-00-03",
+    "name": "ap-living",
+    "type": "ap",
+    "model": "EAP650",
+    "modelVersion": "1.0",
+    "firmwareVersion": "1.0.9",
+    "ip": "192.168.10.3",
+    "status": 1,
+    "statusCategory": 1,
+    "needUpgrade": false,
+    "uptime": "4d 02:10:45",
+    "clientNum": 3,
+    "cpuUtil": 6,
+    "memUtil": 38
+  }
+]

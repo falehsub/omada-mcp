@@ -18,6 +18,7 @@ environment, so a shell override always wins.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import urllib.parse
@@ -31,12 +32,17 @@ __all__ = [
     "DEFAULT_ENV_FILENAME",
     "DEFAULT_HTTPS_PORT",
     "DEFAULT_HTTP_PORT",
+    "DEFAULT_WRITE_MIN_INTERVAL",
+    "WRITE_TOOL_NAMES",
     "candidate_env_files",
+    "default_snapshot_dir",
     "load_config",
     "normalize_base_url",
     "parse_bool",
     "parse_env_file",
     "parse_env_text",
+    "parse_management_cidrs",
+    "parse_write_tools",
 ]
 
 #: Evaluated once at import; tests patch it to exercise the Windows branch.
@@ -47,6 +53,33 @@ DEFAULT_HTTPS_PORT = 8043
 DEFAULT_HTTP_PORT = 8088
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MIN_INTERVAL = 0.25
+DEFAULT_WRITE_MIN_INTERVAL = 1.0
+
+#: Exact allowlistable write tool names (kept in sync with tools.TOOLS).
+WRITE_TOOL_NAMES: Tuple[str, ...] = (
+    "set_client_fixed_ip",
+    "release_client_fixed_ip",
+    "set_vlan_dhcp_pools",
+    "set_vlan_isolation",
+    "create_ip_group",
+    "replace_ip_group",
+    "create_gateway_acl",
+    "set_acl_rule_status",
+)
+
+_READ_ONLY_TOOL_NAMES = frozenset({
+    "list_devices",
+    "list_clients",
+    "list_wifi_clients",
+    "list_wired_clients",
+    "get_device",
+    "get_client",
+    "list_wlans",
+    "get_site_info",
+    "network_audit",
+    "explain_error",
+    "get_config_snapshot",
+})
 
 _TRUE = {"1", "true", "yes", "on", "y", "t"}
 _FALSE = {"0", "false", "no", "off", "n", "f"}
@@ -85,6 +118,11 @@ class Config:
     strict_x509: bool = True
     tls_server_name: Optional[str] = None
     read_only: bool = False
+    write_tools: Tuple[str, ...] = ()
+    snapshot_dir: Optional[Path] = None
+    snapshot_origin: str = "default"
+    write_min_interval: float = DEFAULT_WRITE_MIN_INTERVAL
+    management_cidrs: Tuple[str, ...] = ()
     use_system_proxy: bool = False
     timeout: float = DEFAULT_TIMEOUT
     min_interval: float = DEFAULT_MIN_INTERVAL
@@ -107,12 +145,105 @@ class Config:
             "strict_x509": self.strict_x509,
             "tls_server_name": self.tls_server_name,
             "read_only": self.read_only,
+            "write_tools": list(self.write_tools),
+            "snapshot_dir": str(self.snapshot_dir) if self.snapshot_dir else None,
+            "write_min_interval": self.write_min_interval,
+            "management_cidrs": list(self.management_cidrs),
             "use_system_proxy": self.use_system_proxy,
             "timeout": self.timeout,
             "min_interval": self.min_interval,
             "env_file": str(self.env_file) if self.env_file else None,
             "env_origin": self.env_origin,
         }
+
+
+def parse_write_tools(raw: Optional[str]) -> Tuple[str, ...]:
+    """Parse ``OMADA_WRITE_TOOLS`` as an explicit comma-separated allowlist.
+
+    Wildcards (``*``, ``?``, ``[``) and ``all`` are refused so writes are always
+    explicitly enumerated by exact tool name.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ()
+    valid = set(WRITE_TOOL_NAMES)
+    seen = set()
+    tools: List[str] = []
+    for part in text.split(","):
+        name = part.strip()
+        if not name:
+            raise ConfigError(
+                f"OMADA_WRITE_TOOLS={raw!r} contains an empty entry",
+                hint="use a comma-separated list of exact write tool names, e.g. "
+                     + ", ".join(WRITE_TOOL_NAMES[:2]),
+                key="OMADA_WRITE_TOOLS",
+            )
+        lowered = name.lower()
+        if lowered == "all" or any(ch in name for ch in ("*", "?", "[")):
+            raise ConfigError(
+                f"OMADA_WRITE_TOOLS={name!r} uses a wildcard or 'all', which is forbidden",
+                hint="list exact write tool names only: " + ", ".join(WRITE_TOOL_NAMES),
+                key="OMADA_WRITE_TOOLS",
+            )
+        if name in _READ_ONLY_TOOL_NAMES:
+            raise ConfigError(
+                f"OMADA_WRITE_TOOLS={name!r} is a read-only tool, not a write tool",
+                hint="read-only tools are always available; valid write tools: "
+                     + ", ".join(WRITE_TOOL_NAMES),
+                key="OMADA_WRITE_TOOLS",
+            )
+        if name not in valid:
+            raise ConfigError(
+                f"OMADA_WRITE_TOOLS contains unknown write tool {name!r}",
+                hint="valid write tools: " + ", ".join(WRITE_TOOL_NAMES),
+                key="OMADA_WRITE_TOOLS",
+            )
+        if name not in seen:
+            seen.add(name)
+            tools.append(name)
+    return tuple(tools)
+
+
+def parse_management_cidrs(raw: Optional[str]) -> Tuple[str, ...]:
+    """Parse ``OMADA_MANAGEMENT_CIDRS`` into canonical IPv4 network strings."""
+    text = (raw or "").strip()
+    if not text:
+        return ()
+    cidrs: List[str] = []
+    for part in text.split(","):
+        item = part.strip()
+        if not item:
+            continue
+        try:
+            net = ipaddress.IPv4Network(item, strict=False)
+        except ValueError as exc:
+            raise ConfigError(
+                f"OMADA_MANAGEMENT_CIDRS has invalid IPv4/CIDR {item!r}: {exc}",
+                hint="use comma-separated IPv4 addresses or CIDRs (e.g. 192.168.1.50,192.168.1.0/24)",
+                key="OMADA_MANAGEMENT_CIDRS",
+            ) from None
+        canon = str(net)
+        if canon not in cidrs:
+            cidrs.append(canon)
+    return tuple(cidrs)
+
+
+def default_snapshot_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
+    """Default per-user snapshot directory (``~/.local/state/omada-mcp/snapshots``)."""
+    env = os.environ if environ is None else environ
+    state_home = (env.get("XDG_STATE_HOME") or "").strip()
+    if state_home:
+        return Path(state_home).expanduser() / "omada-mcp" / "snapshots"
+    if environ is not None:
+        home = (env.get("HOME") or env.get("USERPROFILE") or "").strip()
+        if home:
+            return Path(home).expanduser() / ".local" / "state" / "omada-mcp" / "snapshots"
+        if _IS_WINDOWS:
+            local_app = (env.get("LOCALAPPDATA") or "").strip()
+            if local_app:
+                return Path(local_app) / "omada-mcp" / "snapshots"
+        return Path("/nonexistent-xdg-state-home") / "omada-mcp" / "snapshots"
+    return Path.home() / ".local" / "state" / "omada-mcp" / "snapshots"
 
 
 def parse_bool(raw: object, key: str, default: bool = False) -> bool:
@@ -373,15 +504,35 @@ def load_config(
     try:
         timeout = float(values.get("OMADA_TIMEOUT_SECONDS") or DEFAULT_TIMEOUT)
         min_interval = float(values.get("OMADA_MIN_INTERVAL_SECONDS") or DEFAULT_MIN_INTERVAL)
+        write_min_interval = float(
+            values.get("OMADA_WRITE_INTERVAL_SECONDS") or DEFAULT_WRITE_MIN_INTERVAL
+        )
     except ValueError as exc:
         raise ConfigError(
             f"invalid numeric value: {exc}",
-            hint="OMADA_TIMEOUT_SECONDS / OMADA_MIN_INTERVAL_SECONDS must be numbers",
+            hint=("OMADA_TIMEOUT_SECONDS / OMADA_MIN_INTERVAL_SECONDS / "
+                  "OMADA_WRITE_INTERVAL_SECONDS must be numbers"),
         ) from None
+    if write_min_interval < 0:
+        raise ConfigError(
+            f"OMADA_WRITE_INTERVAL_SECONDS={write_min_interval} cannot be negative",
+            hint="set OMADA_WRITE_INTERVAL_SECONDS=1.0 (or 0 to disable write pacing)",
+            key="OMADA_WRITE_INTERVAL_SECONDS",
+        )
 
     site_id = (values.get("OMADA_SITE_ID") or "").strip() or None
     site_name = (values.get("OMADA_SITE_NAME") or "").strip() or None
     tls_server_name = (values.get("OMADA_TLS_SERVER_NAME") or "").strip() or None
+    write_tools = parse_write_tools(values.get("OMADA_WRITE_TOOLS"))
+    management_cidrs = parse_management_cidrs(values.get("OMADA_MANAGEMENT_CIDRS"))
+
+    snap_raw = (values.get("OMADA_SNAPSHOT_DIR") or "").strip()
+    if snap_raw:
+        snapshot_dir = Path(snap_raw).expanduser()
+        snapshot_origin = "OMADA_SNAPSHOT_DIR"
+    else:
+        snapshot_dir = default_snapshot_dir(environ)
+        snapshot_origin = "default"
 
     return Config(
         base_url=normalize_base_url(values["OMADA_BASE_URL"]),
@@ -394,6 +545,11 @@ def load_config(
         strict_x509=parse_bool(values.get("OMADA_STRICT_X509"), "OMADA_STRICT_X509", True),
         tls_server_name=tls_server_name,
         read_only=parse_bool(values.get("OMADA_READ_ONLY"), "OMADA_READ_ONLY", False),
+        write_tools=write_tools,
+        snapshot_dir=snapshot_dir,
+        snapshot_origin=snapshot_origin,
+        write_min_interval=write_min_interval,
+        management_cidrs=management_cidrs,
         use_system_proxy=parse_bool(values.get("OMADA_USE_SYSTEM_PROXY"),
                                     "OMADA_USE_SYSTEM_PROXY", False),
         timeout=timeout,

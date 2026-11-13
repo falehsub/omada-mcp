@@ -36,11 +36,12 @@ DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "omada-mcp"
 
 INSTRUCTIONS = (
-    "Read-only access to a TP-Link Omada SDN controller through its Web API v2. "
-    "All ten tools are read-only and idempotent. Prefer network_audit or get_site_info "
-    "for an overview, list_devices / list_clients for detail, get_device or get_client "
-    "for one object, and explain_error to decode any Omada errorCode. Timestamps are UTC "
-    "ISO-8601. Error messages include the controller's numeric errorCode and a fix hint."
+    "Read-only access by default to a TP-Link Omada SDN controller through its Web API v2. "
+    "Eleven read-only tools are always available, including get_config_snapshot, network_audit, "
+    "get_site_info, list_devices / list_clients, get_device / get_client, and explain_error. "
+    "Optional write tools remain hidden and disabled unless both OMADA_READ_ONLY=false and "
+    "OMADA_WRITE_TOOLS explicitly allowlist them. Timestamps are UTC ISO-8601. Error messages "
+    "include the controller's numeric errorCode and a fix hint."
 )
 
 
@@ -216,7 +217,7 @@ class Server:
         if method == "ping":
             return {}
         if method == "tools/list":
-            return {"tools": tool_descriptors()}
+            return {"tools": tool_descriptors(config=self.config)}
         if method == "tools/call":
             return self._tools_call(params)
         if method in ("resources/list",):
@@ -237,23 +238,40 @@ class Server:
         self.protocol_version = requested if requested in PROTOCOL_VERSIONS \
             else DEFAULT_PROTOCOL_VERSION
         self.initialized = True
+        active_writes = list(self.config.write_tools) if not self.config.read_only else []
+        title = (
+            "TP-Link Omada SDN (read + allowlisted write)"
+            if active_writes
+            else "TP-Link Omada SDN (read-only)"
+        )
+        instructions = INSTRUCTIONS
+        if active_writes:
+            instructions = (
+                f"{INSTRUCTIONS} Active write allowlist: {', '.join(active_writes)}. "
+                "Every write tool defaults to dryRun=true; applying requires dryRun=false "
+                "with confirm='<tool>:<target-id>' from the dry-run preview."
+            )
         return {
             "protocolVersion": self.protocol_version,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {
                 "name": SERVER_NAME,
-                "title": "TP-Link Omada SDN (read-only)",
+                "title": title,
                 "version": __version__,
             },
-            "instructions": INSTRUCTIONS,
+            "instructions": instructions,
         }
 
     # -- tools ----------------------------------------------------------------
 
     def _tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         name = str(params.get("name") or "").strip()
-        arguments = params.get("arguments") or {}
-        if not isinstance(arguments, dict):
+        raw_arguments = params.get("arguments")
+        if raw_arguments is None:
+            arguments: Dict[str, Any] = {}
+        elif isinstance(raw_arguments, dict):
+            arguments = dict(raw_arguments)
+        else:
             raise RpcError(-32602, "invalid params: arguments must be an object")
         if not name:
             raise RpcError(-32602, "invalid params: tool name is required")
@@ -261,22 +279,36 @@ class Server:
         spec: Optional[Tool] = get_tool(name)
 
         # Fail closed: in read-only mode anything not declared read-only is
-        # refused, including names this build does not know.
+        # refused before argument validation or controller I/O.
+        read_only_names = sorted(t.name for t in TOOL_MAP.values() if t.read_only)
         if self.config.read_only and (spec is None or not spec.read_only):
             raise RpcError(
                 -32003,
                 f"OMADA_READ_ONLY=true refuses the non-read-only tool {name!r}",
-                hint=("unset OMADA_READ_ONLY (or set it to false) to allow write "
-                      "operations; read-only tools: "
-                      + ", ".join(sorted(TOOL_MAP))),
+                hint=("unset OMADA_READ_ONLY (or set it to false) and allowlist the tool in "
+                      "OMADA_WRITE_TOOLS to enable write operations; read-only tools: "
+                      + ", ".join(read_only_names)),
                 data={"tool": name, "readOnly": True},
             )
 
         if spec is None:
+            available = [d["name"] for d in tool_descriptors(config=self.config)]
             raise RpcError(
                 -32601,
                 f"unknown tool: {name}",
-                hint="call tools/list; available: " + ", ".join(sorted(TOOL_MAP)),
+                hint="call tools/list; available: " + ", ".join(available),
+            )
+
+        # Second gate: even with OMADA_READ_ONLY=false, every write tool stays
+        # refused unless explicitly named in OMADA_WRITE_TOOLS.
+        if not spec.read_only and name not in self.config.write_tools:
+            raise RpcError(
+                -32003,
+                f"OMADA_WRITE_TOOLS refuses write tool {name!r}",
+                hint=(f"add {name!r} to OMADA_WRITE_TOOLS to allowlist it "
+                      "(currently active write tools: "
+                      + (", ".join(self.config.write_tools) or "none") + ")"),
+                data={"tool": name, "writeTools": list(self.config.write_tools)},
             )
 
         self._check_arguments(spec, arguments)
@@ -316,25 +348,114 @@ class Server:
     @staticmethod
     def _check_arguments(spec: Tool, arguments: Dict[str, Any]) -> None:
         schema = spec.input_schema or {}
+        props = schema.get("properties") or {}
+
+        unknown = sorted(k for k in arguments if k not in props)
+        if unknown:
+            camel_hints = {
+                "dry_run": "dryRun",
+                "net_id": "netId",
+                "ip_range": "ipRange",
+                "bi_directional": "biDirectional",
+            }
+            fixes = [
+                f"use {camel_hints[k]!r} instead of {k!r}"
+                for k in unknown if k in camel_hints
+            ]
+            hint = "; ".join(fixes) if fixes else "allowed arguments: " + ", ".join(sorted(props))
+            raise RpcError(
+                -32602,
+                f"{spec.name}: unexpected argument(s): {', '.join(unknown)}",
+                hint=hint,
+            )
+
+        if not spec.read_only and "dryRun" in props and "dryRun" not in arguments:
+            arguments["dryRun"] = True
+
         required = schema.get("required") or []
-        missing = [key for key in required if arguments.get(key) in (None, "")]
+        missing = [
+            key for key in required
+            if key not in arguments or arguments[key] is None or arguments[key] == ""
+        ]
         if missing:
             raise RpcError(
                 -32602,
                 f"{spec.name}: missing required argument(s): {', '.join(missing)}",
-                hint="inputSchema: " + json.dumps(schema.get("properties") or {}),
+                hint="inputSchema: " + json.dumps(props),
             )
-        limit = arguments.get("limit")
-        if limit is not None and "limit" in (schema.get("properties") or {}):
-            try:
-                arguments["limit"] = max(1, min(5000, int(limit)))
-            except (TypeError, ValueError):
-                raise RpcError(-32602, "limit must be an integer between 1 and 5000") from None
-        code = arguments.get("code")
-        if code is not None and "code" in (schema.get("properties") or {}):
-            if isinstance(code, bool):
-                raise RpcError(-32602, "code must be an integer")
-            try:
-                arguments["code"] = int(code)
-            except (TypeError, ValueError):
-                raise RpcError(-32602, "code must be an integer") from None
+
+        for key, val in list(arguments.items()):
+            prop_schema = props.get(key) or {}
+            ptype = prop_schema.get("type")
+            if val is None:
+                if ptype == "boolean" or key in required:
+                    raise RpcError(-32602, f"{spec.name}: {key} must not be null")
+                continue
+
+            if key == "limit":
+                if isinstance(val, bool):
+                    raise RpcError(-32602, "limit must be an integer between 1 and 5000")
+                try:
+                    arguments["limit"] = max(1, min(5000, int(val)))
+                except (TypeError, ValueError):
+                    raise RpcError(-32602, "limit must be an integer between 1 and 5000") from None
+                continue
+
+            if key == "code":
+                if isinstance(val, bool):
+                    raise RpcError(-32602, "code must be an integer")
+                try:
+                    arguments["code"] = int(val)
+                except (TypeError, ValueError):
+                    raise RpcError(-32602, "code must be an integer") from None
+                continue
+
+            if ptype == "boolean":
+                if not isinstance(val, bool):
+                    raise RpcError(
+                        -32602,
+                        f"{spec.name}: {key} must be a boolean",
+                        hint=f"pass JSON true or false for {key} (not a string)",
+                    )
+            elif ptype == "integer":
+                if isinstance(val, bool) or not isinstance(val, int):
+                    raise RpcError(-32602, f"{spec.name}: {key} must be an integer")
+            elif ptype == "string":
+                if not isinstance(val, str):
+                    raise RpcError(-32602, f"{spec.name}: {key} must be a string")
+            elif ptype == "array":
+                if not isinstance(val, list):
+                    raise RpcError(-32602, f"{spec.name}: {key} must be an array")
+                item_type = (prop_schema.get("items") or {}).get("type")
+                if item_type == "integer" and any(isinstance(x, bool) or not isinstance(x, int) for x in val):
+                    raise RpcError(-32602, f"{spec.name}: {key} items must be integers")
+                if item_type == "string" and any(not isinstance(x, str) for x in val):
+                    raise RpcError(-32602, f"{spec.name}: {key} items must be strings")
+                if item_type == "object" and any(not isinstance(x, dict) for x in val):
+                    raise RpcError(-32602, f"{spec.name}: {key} items must be objects")
+            elif ptype == "object":
+                if not isinstance(val, dict):
+                    raise RpcError(-32602, f"{spec.name}: {key} must be an object")
+            elif isinstance(ptype, list):
+                allowed_primitives = set(ptype)
+                ok = (
+                    ("string" in allowed_primitives and isinstance(val, str))
+                    or ("integer" in allowed_primitives and isinstance(val, int) and not isinstance(val, bool))
+                    or ("boolean" in allowed_primitives and isinstance(val, bool))
+                    or ("array" in allowed_primitives and isinstance(val, list))
+                    or ("object" in allowed_primitives and isinstance(val, dict))
+                )
+                if not ok:
+                    raise RpcError(
+                        -32602,
+                        f"{spec.name}: {key} must match type {' or '.join(ptype)}",
+                    )
+
+        if not spec.read_only and arguments.get("dryRun") is False:
+            conf = arguments.get("confirm")
+            if not isinstance(conf, str) or not conf.strip():
+                raise RpcError(
+                    -32602,
+                    f"{spec.name}: confirm is required when dryRun is false",
+                    hint="run with dryRun=true first to inspect the diff and obtain confirmToken",
+                )

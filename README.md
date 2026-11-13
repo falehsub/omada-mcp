@@ -8,9 +8,9 @@
 
 Your Omada controller already knows which AP is overloaded, which client is
 sitting on the guest VLAN, and which switch dropped a port. `omada-mcp` hands
-that to Claude, Cursor, Hermes or any other MCP host — as ten read-only tools
-that return clean JSON, with a self-test that tells you exactly what to fix when
-something is wrong.
+that to Claude, Cursor, Hermes or any other MCP host — as eleven read-only tools
+that return clean JSON (plus eight optional write tools behind an explicit allowlist),
+with a self-test that tells you exactly what to fix when something is wrong.
 
 ```
 uvx omada-mcp --doctor
@@ -23,10 +23,11 @@ PASS env      /home/you/.config/omada-mcp/.env | url=https://192.0.2.10:8043 use
 PASS tls      verified against /home/you/.config/omada-mcp/controller-ca.pem (serverName=Omada) | reachable, omadacId=0123456789abcdef01234567, controllerVer=6.2.10.17, family=software-6.x
 PASS login    token accepted for omada-readonly (role=Viewer, scope=all sites, cookie=TPOMADA_SESSIONID), Csrf-Token round-trip OK
 PASS site     Home (89abcdef0123456789abcdef) site 1 of 1; matched OMADA_SITE_NAME=Home
-PASS tools    list_devices -> 7 device(s); 10 read-only tools registered, 23 client(s)
+PASS tools    list_devices -> 7 device(s); 11 read-only tools registered (0 write tool(s) enabled), 23 client(s)
+PASS write    disabled (OMADA_WRITE_TOOLS is empty; read-only tools only)
 ------------------------------------------------------------------
-5/5 checks passed
-Ready: `omada-mcp` will serve 10 read-only tools on stdio.
+6/6 checks passed
+Ready: `omada-mcp` will serve 11 read-only tools on stdio.
 ```
 
 Add `--json` (`omada-mcp --doctor --json`) for machine-readable output validated against [`schemas/doctor.schema.json`](schemas/doctor.schema.json). JSON output redacts local `.env` and `OMADA_CA_BUNDLE` filesystem paths to origin labels (`OMADA_ENV_FILE`, `cwd`, `appdata`, `xdg`, `environment`) so reports are safe to paste into issues.
@@ -149,7 +150,7 @@ output pastes straight in.
 | Variable | Default | Notes |
 |---|---|---|
 | `OMADA_BASE_URL` | — **required** | `https://host:8043`. Scheme-less values get `https://…:8043`; `http://` defaults to port 8088. Must not embed credentials. |
-| `OMADA_USERNAME` | — **required** | Local controller account. `Viewer` is sufficient. |
+| `OMADA_USERNAME` | — **required** | Local controller account. `Viewer` is sufficient for reads; use a **dedicated Admin account** for writes (every login evicts an existing session sharing that username). |
 | `OMADA_PASSWORD` | — **required** | Never printed, never logged. |
 | `OMADA_SITE_NAME` | first site | Display name, e.g. `Home`. |
 | `OMADA_SITE_ID` | first site | Hex id **or** name — names are resolved, because the controller only accepts the hex id in URLs (that mismatch is exactly what `-1505` reports). |
@@ -157,10 +158,14 @@ output pastes straight in.
 | `OMADA_VERIFY_SSL` | `true` | `false` disables chain + hostname checks. Not for production. |
 | `OMADA_STRICT_X509` | `true` | `false` clears Python 3.13+'s `VERIFY_X509_STRICT` while keeping chain and hostname checks — the fix for "self-signed certificate" errors on 3.13/3.14. |
 | `OMADA_TLS_SERVER_NAME` | — | Optional TLS `server_hostname` override (e.g. `Omada`) when connecting by IP against the controller's built-in cert (`SAN=DNS:Omada`) so `OMADA_CA_BUNDLE` still verifies the chain and SAN. |
-| `OMADA_READ_ONLY` | `false` | `true` refuses every non-read-only tool (`-32003`). |
+| `OMADA_READ_ONLY` | `false` | `true` refuses every non-read-only tool (`-32003`) before argument validation. |
+| `OMADA_WRITE_TOOLS` | empty | Comma-separated exact write tool names to enable (wildcards and `all` are rejected). Both `OMADA_READ_ONLY=false` and this allowlist are required to expose or invoke any write tool. |
+| `OMADA_SNAPSHOT_DIR` | platform state dir | Override directory for pre-write JSON snapshots and `audit.jsonl` (POSIX `0700`/`0600`). Defaults to `$XDG_STATE_HOME/omada-mcp/snapshots` (`%LOCALAPPDATA%\omada-mcp\snapshots` on Windows). |
+| `OMADA_MANAGEMENT_CIDRS` | empty | Comma-separated IPv4 hosts/CIDRs (in addition to controller host IP) protected from lockouts during VLAN isolation, DHCP pool, or deny-ACL writes. |
 | `OMADA_USE_SYSTEM_PROXY` | `false` | System/registry proxies are ignored by default. On Windows, `urllib` inherits the WinINET proxy, which makes a one-hop controller look unreachable; set `true` only when a proxy is genuinely required. |
 | `OMADA_TIMEOUT_SECONDS` | `30` | Per-request timeout. |
 | `OMADA_MIN_INTERVAL_SECONDS` | `0.25` | Minimum spacing between controller calls; raise to `0.8` on large sites. |
+| `OMADA_WRITE_INTERVAL_SECONDS` | `1.0` | Minimum serialized spacing between write requests (writes never auto-retry `-1600`). |
 
 `omada-mcp --show-config` prints the resolved values with the password masked;
 `omada-mcp --doctor` validates them.
@@ -257,8 +262,12 @@ uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
 
 ## Tools
 
-Ten tools, all read-only, all idempotent, all returning JSON. `list_clients`
-windowing is bounded by `limit` (default 500, max 5000) and de-duplicated by MAC.
+Eleven read-only tools are always registered; eight optional write tools stay hidden
+and disabled until both `OMADA_READ_ONLY=false` and `OMADA_WRITE_TOOLS` allowlist
+them explicitly. `list_clients` windowing is bounded by `limit` (default 500, max 5000)
+and de-duplicated by MAC.
+
+### Read-only tools (always available)
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -271,7 +280,24 @@ windowing is bounded by `limit` (default 500, max 5000) and de-duplicated by MAC
 | `get_client` | `mac` (or hostname/IP) | One client |
 | `list_wlans` | — | SSID, band, VLAN, security, guest, `hasPresharedKey` (expands v6.x WLAN groups; key never returned) |
 | `network_audit` | — | Composite one-call health audit: pending firmware, offline devices, 0-client APs, guest/unexpected VLAN clients, unisolated VLANs, DHCP pool utilization, and stable finding codes |
-| `explain_error` | `code`, `endpoint?` | Structured decoder for Omada `errorCode` values (`-1600`, `-33726`, `-1505`, `-1001`, `-30109`, `-41011`, `-44116`, …) with ambiguity notes and fixes |
+| `explain_error` | `code`, `endpoint?` | Structured decoder for Omada `errorCode` values (`-1600`, `-33717`, `-33726`, `-1505`, `-1001`, `-30109`, `-41011`, `-44116`, …) with ambiguity notes and fixes |
+| `get_config_snapshot` | `objects?` | Read-only snapshot merging `setting/lan/networks` and `setting/lan/networks/interface`, gateway ACLs (with `aclDisableReliable: false`), groups, PSK-redacted WLANs, devices, and optional clients |
+
+### Opt-in write tools (`OMADA_READ_ONLY=false` + `OMADA_WRITE_TOOLS`)
+
+| Tool | Arguments | Behaviour |
+|---|---|---|
+| `set_client_fixed_ip` | `mac`, `ip`, `vlan?`, `netId?`, `dryRun?`, `confirm?` | Sets DHCP reservation (`useFixedAddr=true`, mandatory `netId`); strips 20 volatile keys; lease-delayed; refuses device MACs |
+| `release_client_fixed_ip` | `mac`, `dryRun?`, `confirm?` | Clears `useFixedAddr` on a client |
+| `set_vlan_dhcp_pools` | `pools`, `vlan?`, `netId?`, `dryRun?`, `confirm?` | Replaces `dhcpSettings.ipRangePool` on `/interface` with anti-stranding overlap checks & full-object verification |
+| `set_vlan_isolation` | `isolation`, `vlan?`, `netId?`, `dryRun?`, `confirm?` | Toggles VLAN `isolation` on `/interface` and verifies across both LAN endpoints without trusting `accessControlRule` |
+| `create_ip_group` | `name`, `cidrs?`, `ipRange?`, `dryRun?`, `confirm?` | Creates IPv4 group (`<=16` aligned CIDRs, enforces `-33726` locally) |
+| `replace_ip_group` | `group`, `cidrs?`, `ipRange?`, `dryRun?`, `confirm?` | Delete+recreate (`/{type}/{id}`), running 6-step temp-group ACL swap automatically when referenced (`-33717`) |
+| `create_gateway_acl` | `name`, `policy`, `source`, `destination`, `direction`, `status?`, `protocols?`, `biDirectional?`, `syslog?`, `dryRun?`, `confirm?` | Creates gateway ACL (`?type=0`) with management-host anti-stranding guard and `aclDisable` advisory warning |
+| `set_acl_rule_status` | `rule`, `status`, `dryRun?`, `confirm?` | Enables/disables one gateway ACL rule without reading or touching `aclDisable` |
+
+`omada-mcp --list-tools` prints active descriptors without touching the network
+(add `--all` to inspect all 19 tools including non-allowlisted writes).
 
 Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18`
 `outputSchema`, so hosts can auto-approve reads and validate structured results:
@@ -311,18 +337,23 @@ Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18
   `network_audit`, `explain_error`): both `content[0].text` and
   `structuredContent` contain the same JSON object matching `outputSchema`.
 
-`omada-mcp --list-tools` prints every descriptor without touching the network.
+`omada-mcp --list-tools` prints active descriptors without touching the network;
+`omada-mcp --list-tools --all` prints all 19 descriptors.
 
 ## Safety model
 
 | Control | Behaviour |
 |---|---|
-| `OMADA_READ_ONLY=true` | Refuses any tool not declared read-only, before lookup (`-32003`, fails closed). |
+| `OMADA_READ_ONLY=true` | Refuses any tool not declared read-only (`-32003`), before argument validation or transport. |
+| `OMADA_WRITE_TOOLS` allowlist | Defaults empty. Wildcards and `all` are rejected; write tools remain hidden and return `-32003` unless explicitly named. |
+| Two-phase apply (`dryRun` / `confirm`) | Every write defaults `dryRun=true` (zero writes; returns diff + `confirmToken`). Applying requires boolean `dryRun=false` and exact `confirm="<tool>:<target-id>"`. |
+| Snapshot before & verify after | Saves pre-write JSON snapshot + `audit.jsonl` record (`0700`/`0600` on POSIX), re-reads state afterwards, and fails on silent controller no-ops or collateral field drift. |
+| Anti-stranding guards | Refuses VLAN isolation, DHCP pool overlaps, or deny ACL rules that isolate/conflict with controller IP, gateway, device IPs, or `OMADA_MANAGEMENT_CIDRS`. |
 | Credential handling | Password only ever rendered as `set (N chars)`; tokens never logged; stdout is reserved for JSON-RPC, diagnostics go to stderr. |
-| Secret redaction | `list_wlans` omits `securityKey`; only `hasPresharedKey` is exposed. |
-| Session recovery | A 200 response containing the web UI shell produces **one** re-login and a replay; a second failure raises instead of looping. |
-| Pacing | Calls spaced by `OMADA_MIN_INTERVAL_SECONDS`; a burst `-1600` is retried once after 0.8 s. |
-| Dotenv hygiene | `--doctor` warns when the dotenv file is readable by group/other and tells you the `chmod`. |
+| Secret redaction | `list_wlans` and `get_config_snapshot` omit `securityKey` / `pskSetting`; only `hasPresharedKey` is exposed. |
+| Session recovery | A 200 response containing the web UI shell triggers **one** re-login: reads replay once, writes re-read live state first and never auto-retry `-1600`. |
+| Pacing | Reads spaced by `OMADA_MIN_INTERVAL_SECONDS`; writes serialized at `OMADA_WRITE_INTERVAL_SECONDS` (default 1.0 s). |
+| Dotenv hygiene | `--doctor` warns when the dotenv file is readable by group/other, and flags Viewer accounts when write tools are enabled. |
 
 ## Troubleshooting
 
@@ -332,10 +363,11 @@ table below maps the symptoms it cannot see.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `-1505` on a site call | Site **name** used where the hex site id is required | Set `OMADA_SITE_NAME` (or `OMADA_SITE_ID`) and let the server resolve it |
-| `-1600` everywhere | Wrong path shape **or** burst rate-limiting (the controller reuses one code) | Check the endpoint, and pace: the client already retries once after 0.8 s; raise `OMADA_MIN_INTERVAL_SECONDS` |
-| `-33726` on an IP group write | The group holds at most **16** entries | Store ranges as network-aligned CIDRs; one `/32` per host overflows immediately |
-| `-1001` "bean validation" | A mandatory field missing from a PATCH body — for LAN networks it is `lanNetworkIpv6Config.proto: "none"` | Send the whole object, not a partial patch |
-| `-41011` | Client endpoints are **Admin-only** and the MAC is not in that site's client table | Use `insight/clients` with a Viewer account |
+| `-1600` everywhere | Wrong path shape (`GET /networks/{id}`, missing `/{type}` on group DELETE, no PATCH on groups) **or** burst rate-limiting | Reads retry once after 0.8 s; writes never auto-retry `-1600` |
+| `-33717` on group delete | Group is referenced by one or more ACL rules | Use `replace_ip_group`, which performs the 6-step temp-group ACL swap automatically |
+| `-33726` on an IP group write | The group holds at most **16** entries | Store ranges as network-aligned CIDRs (packed automatically by `create_ip_group`/`replace_ip_group`) |
+| `-1001` "bean validation" | A mandatory field missing from a PATCH body — for LAN networks it is `lanNetworkIpv6Config.proto: "none"` | Send the whole object (handled automatically by LAN write tools) |
+| `-41011` | Client endpoints are **Admin-only**, client does not exist, **or MAC belongs to a managed device** | Use `insight/clients` or `list_devices` to inspect; use a dedicated Admin account for writes |
 | `-44116` | You are on the Open API without Platform Integration | Use this server (Web API) instead |
 | HTTP 200 with HTML in response | The controller's **server-side** session died (cookie is still valid for 15 days) — another login for the same account, or a restart | Automatic: the client re-authenticates once and replays |
 | `CERTIFICATE_VERIFY_FAILED` | Self-signed controller cert, IP/SAN mismatch, or Python 3.13+ strict X509 | Set `OMADA_CA_BUNDLE` to the controller CA, `OMADA_STRICT_X509=false`, and `OMADA_TLS_SERVER_NAME=Omada` when connecting by IP; `OMADA_VERIFY_SSL=false` only as a last resort |
@@ -348,8 +380,9 @@ table below maps the symptoms it cannot see.
 
 See [`docs/compatibility.md`](docs/compatibility.md) for the full compatibility table.
 
-* **Software controller v6.x** — verified live: `--doctor --json` and all ten read
-  tools return data on v6.2.10.17 (`TPOMADA_SESSIONID`).
+* **Software controller v6.x** — read-only path (`--doctor --json` and read tools)
+  verified live on v6.2.10.17 (`TPOMADA_SESSIONID`); write flows verified against
+  the stateful mock controller seeded from probed v6.x payloads.
 * **Software controller v5.x** — expected (v5.13.30.8 core auth/list shapes
   supported; awaiting a `--doctor --json` capture via the issue template).
 * **OC200 / OC300 hardware & `TPEAP_SESSIONID` builds** — expected (`--doctor`
@@ -374,15 +407,19 @@ UV_CACHE_DIR=$(mktemp -d) uvx --from . omada-mcp --doctor
 Layout:
 
 ```
-src/omada_mcp/config.py   dotenv discovery, validation, base-URL normalisation
-src/omada_mcp/client.py   Web API v2 client: auth, pacing, session recovery, errors
-src/omada_mcp/tools.py    10 read-only tools, field whitelists, MCP annotations
-src/omada_mcp/server.py   JSON-RPC stdio server, read-only gate, lazy auth
-src/omada_mcp/doctor.py   ordered self-test with fix hints and --json output
-schemas/doctor.schema.json JSON Schema for --doctor --json
-docs/compatibility.md     controller family and cookie compatibility matrix
-tests/test_bridge.py      fake controller + protocol tests (stdlib unittest)
-skills/omada-controller/  agent skill: field notes for the Omada API itself
+src/omada_mcp/config.py         dotenv discovery, validation, base-URL normalisation, write allowlist
+src/omada_mcp/client.py         Web API v2 client: auth, pacing, write gate, snapshots/audit, errors
+src/omada_mcp/tools.py          11 read-only tools + 8 write descriptors, projections, outputSchema
+src/omada_mcp/write_tools.py    read-modify-write handlers, CIDR packer, anti-stranding, 6-step swap
+src/omada_mcp/server.py         JSON-RPC stdio server, fail-closed gates, strict arg/bool checks
+src/omada_mcp/doctor.py         6-phase self-test (env, tls, login, site, tools, write) with --json
+schemas/doctor.schema.json      JSON Schema for --doctor --json
+docs/compatibility.md           controller family and cookie compatibility matrix
+docs/write-support.md           write-support contract, verified endpoints, and controller traps
+tests/mock_controller.py        stateful Web API v2 mock controller with fault injection
+tests/test_bridge.py            read-only bridge + protocol tests (stdlib unittest)
+tests/test_write_support.py     write-gate, RMW flows, anti-stranding, and fault-injection tests
+skills/omada-controller/        agent skill: field notes for the Omada API itself
 ```
 
 The API notes in [`skills/omada-controller/SKILL.md`](skills/omada-controller/SKILL.md)
@@ -390,19 +427,21 @@ document the parts of the controller that are not in any public reference:
 session expiry semantics, CIDR packing limits, dual-pool DHCP bodies, and the
 endpoints that are Admin-only.
 
-## Write support (planned for v1.2)
+## Write support
 
-Nothing in this release writes, and read-only remains the default. The implementation
-brief — verified endpoints and payloads, the read-modify-write flows, the safety contract
-(allowlist, two-phase apply, snapshot-before/verify-after) and a mock-controller test plan —
-lives in [`docs/write-support.md`](docs/write-support.md).
+Read-only mode remains the default (`OMADA_WRITE_TOOLS` defaults empty and write
+tools are hidden). Opt-in writes follow the contract in
+[`docs/write-support.md`](docs/write-support.md) — explicit `OMADA_WRITE_TOOLS`
+allowlist, `dryRun=true` default, `confirm="<tool>:<target-id>"`, pre-write snapshots +
+`audit.jsonl`, whole-object verification, and anti-stranding checks. Use a **dedicated
+Admin local account** separate from your read bridge and web UI to avoid session
+eviction. Device reboot, firmware upgrade, LED/rename, and SSID writes remain unshipped.
 
 ## Roadmap
 
-v1.0 is deliberately read-only. The next releases, in priority order, are listed
-in [ROADMAP.md](ROADMAP.md) — OC200/v5 session-cookie support, an error-code
-decoder, a composite `network_audit` tool, write tools behind an explicit
-opt-in, and an MCP Registry `server.json`.
+Core read-only access, `--doctor --json`, error decoding, `network_audit`, and opt-in
+write support are implemented. Next items in [ROADMAP.md](ROADMAP.md) include
+MCP Registry `server.json` / PyPI publishing and `search_clients`.
 
 ## License
 

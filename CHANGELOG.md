@@ -4,6 +4,52 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Read-only configuration snapshot (`get_config_snapshot`)**: Brings the
+  always-available read-only surface to 11 tools, merging both LAN endpoints
+  (`setting/lan/networks` and `setting/lan/networks/interface`), gateway ACLs
+  (explicitly flagging `aclDisable` as non-authoritative), IP/port groups,
+  PSK-redacted WLANs, projected devices, and optional clients.
+- **Opt-in write tools (`src/omada_mcp/write_tools.py`)**: Added the 8 allowlistable
+  write tools specified in [`docs/write-support.md`](docs/write-support.md):
+  - `set_client_fixed_ip`, `release_client_fixed_ip` (strips 20 volatile client keys,
+    enforces mandatory `ipSetting.netId`, warns about lease delay and device-MAC `-41011`).
+  - `set_vlan_isolation`, `set_vlan_dhcp_pools` (two-endpoint LAN read-modify-write,
+    auto-populates `lanNetworkIpv6Config.proto` when omitted, checks whole-object integrity
+    and `dhcpSettings.ipRangePool` without trusting stale `ipRangeStart`/`ipRangeEnd` mirrors).
+  - `create_ip_group`, `replace_ip_group` (`<=16`-entry aligned CIDR packing preventing
+    `-33726`, typed delete `/{type}/{id}`, and automatic 6-step temporary-group swap when
+    ACL rules reference the group to prevent `-33717`).
+  - `create_gateway_acl`, `set_acl_rule_status` (single-rule enforcement without touching
+    or trusting `aclDisable`).
+- **Fail-closed safety controls & configuration (`config.py`, `client.py`, `server.py`)**:
+  - `OMADA_WRITE_TOOLS` explicit allowlist (rejects wildcards/`all`/read-only names),
+    `OMADA_SNAPSHOT_DIR` (POSIX `0o700`/`0o600` pre-write snapshots + `audit.jsonl`),
+    `OMADA_WRITE_INTERVAL_SECONDS` (default `1.0` s serialized write pacing), and
+    `OMADA_MANAGEMENT_CIDRS` anti-stranding protection.
+  - Every write tool defaults to `dryRun=true` (returning a diff and `confirmToken`);
+    applying requires `dryRun=false` with `confirm="<tool>:<target-id>"`, strict JSON
+    schema argument validation, no write auto-retry on `-1600`, and safe `reauth_prepare`
+    state re-read on HTTP 200 HTML expiry.
+- **Diagnostics & CLI (`doctor.py`, `cli.py`, `schemas/doctor.schema.json`)**:
+  - Added read-only `write` phase to `omada-mcp --doctor` (validates write allowlist,
+    warns on `Viewer` role `-41011`, advises dedicated Admin account to prevent session
+    eviction, and redacts `snapshotDir` paths under `--doctor --json`).
+  - `--list-tools` exposes only active tools (`11` by default); added `--list-tools --all`
+    to inspect all `19` descriptors offline.
+- **Offline mock controller & test suite (`tests/mock_controller.py`, `tests/fixtures/`,
+  `tests/test_write_support.py`)**: Added 27 mock-controller & fault-injection tests
+  alongside the 87 bridge tests (114 tests total).
+
+### Kept unshipped
+
+- Device rename/LED, device reboot, firmware upgrade, SSID create/delete, ACL global toggle
+  (`aclDisable`), and `/controller/setting` remain unshipped pending a maintenance-window
+  policy and controller verification.
+
 ## [1.1.1] - 2026-11-13
 
 MCP `outputSchema` declarations, documented tool output shapes, path redaction

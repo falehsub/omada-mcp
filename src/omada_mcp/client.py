@@ -29,6 +29,7 @@ from __future__ import annotations
 import datetime
 import http.cookiejar
 import json
+import os
 import re
 import socket
 import ssl
@@ -38,9 +39,10 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
-from .config import Config
+from .config import Config, default_snapshot_dir
 
 __all__ = [
     "AuthInfo",
@@ -49,6 +51,7 @@ __all__ = [
     "ERROR_HINTS",
     "OmadaClient",
     "OmadaError",
+    "OmadaSessionExpiredError",
     "SESSION_COOKIE_NAMES",
     "SiteInfo",
     "UrllibTransport",
@@ -157,6 +160,18 @@ ERROR_CATALOG: Dict[int, Dict[str, Any]] = {
             "Expired or evicted server-side session token/cookie on subsequent API calls.",
         ],
     },
+    -33717: {
+        "title": "Object is referenced elsewhere; delete refused",
+        "meaning": ("Object is referenced elsewhere and cannot be deleted directly (for example, "
+                    "an IP profile group still referenced by a gateway ACL rule)."),
+        "fix": ("Re-point every referencing rule to a temporary group first, delete and recreate "
+                "the target group, re-point the rules back, then delete the temporary group "
+                "(the replace_ip_group tool automates this swap)."),
+        "ambiguous": False,
+        "causes": [
+            "Attempting to DELETE an IP profile group while a firewall ACL rule references its ID.",
+        ],
+    },
     -33726: {
         "title": "IP group entry limit exceeded",
         "meaning": ("IP group is full: a group holds at most 16 entries. Store an address "
@@ -168,13 +183,15 @@ ERROR_CATALOG: Dict[int, Dict[str, Any]] = {
         "causes": ["Attempting to create or replace an IP profile group with more than 16 entries."],
     },
     -41011: {
-        "title": "Client does not exist or Admin-only endpoint",
-        "meaning": ("This client does not exist -- the client endpoints are Admin-only; use "
-                    "insight/clients with a Viewer account."),
-        "fix": ("Use sites/{siteId}/insight/clients when authenticated as a Viewer, or confirm the "
-                "MAC address is currently known to that site."),
+        "title": "Not a client or Admin-only endpoint",
+        "meaning": ("This client does not exist -- either the target MAC belongs to a managed "
+                    "network device (switch/AP/gateway) rather than a client, the MAC is unknown "
+                    "to the site, or a Viewer account called an Admin-only clients/* endpoint."),
+        "fix": ("Resolve client MACs via sites/{siteId}/insight/clients (never pass a switch/AP/"
+                "gateway MAC from devices), and ensure write operations use an Admin account."),
         "ambiguous": True,
         "causes": [
+            "Managed device MAC (switch/AP/gateway) passed to sites/{siteId}/clients/{MAC}.",
             "Viewer account calling the Admin-only sites/{siteId}/clients* endpoint.",
             "Target client MAC is not present in the site's client table.",
         ],
@@ -201,13 +218,25 @@ def _endpoint_context(code: int, endpoint: Optional[str], method: Optional[str])
                 "lockout), not an expired session.")
     if code == -1600:
         if meth in ("POST", "PATCH", "PUT", "DELETE"):
-            return (f"On {meth} {endpoint or ''}, -1600 usually means an unsupported path or "
-                    "missing path segment (e.g. DELETE /groups/0/{groupId}).")
+            return (f"On {meth} {endpoint or ''}, -1600 usually means an unsupported path+method "
+                    "pair or missing path segment (e.g. DELETE /groups/{type}/{groupId}); do not "
+                    "blindly retry writes.")
         if ep or meth:
             return (f"On {meth or 'GET'} {endpoint or ''}, -1600 may be either burst rate-limiting "
-                    "(retry once after 0.8 s) or an unsupported endpoint path shape.")
+                    "(retry once after 0.8 s) or an unsupported endpoint path shape (e.g. "
+                    "GET setting/lan/networks/{id} is unsupported).")
     if code == -41011 and "clients" in ep and "insight" not in ep:
-        return "sites/{siteId}/clients* requires Admin role; Viewer accounts must use insight/clients."
+        return ("sites/{siteId}/clients* requires an Admin account and a known client MAC "
+                "(device MACs from devices return -41011; Viewer accounts must use insight/clients).")
+    if code == -33717 and "groups" in ep:
+        return ("The IP group is still referenced by one or more ACL rules; re-point rules to a "
+                "temporary group before deleting.")
+    if code == -1001 and "lan/networks" in ep:
+        return ("PATCHing a LAN network requires the complete object from setting/lan/networks/"
+                "interface with lanNetworkIpv6Config.proto present (e.g. 'none').")
+    if code == -1 and "clients" in ep:
+        return ("PATCHing clients/{MAC} requires ipSetting.netId (the LAN network hex id) and "
+                "Admin privileges.")
     return None
 
 
@@ -292,6 +321,26 @@ class OmadaError(RuntimeError):
         if self.hint:
             text += f" (fix: {self.hint})"
         return text
+
+
+class OmadaSessionExpiredError(OmadaError):
+    """Raised when a non-GET request receives HTML on HTTP 200 (session evicted/expired).
+
+    ``OmadaClient.api`` re-authenticates once before raising so callers such as
+    ``OmadaClient.write`` can re-read state safely instead of blindly replaying
+    a mutating POST/PATCH/DELETE.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reauthenticated: bool = True,
+        hint: Optional[str] = None,
+        endpoint: Optional[str] = None,
+    ):
+        super().__init__(message, hint=hint, endpoint=endpoint)
+        self.reauthenticated = reauthenticated
 
 
 @dataclass(frozen=True)
@@ -500,6 +549,8 @@ class OmadaClient:
         self._transport = transport
         self._lock = threading.RLock()
         self._last_request_at = 0.0
+        self._last_write_at: Optional[float] = None
+        self._snapshot_seq = 0
         self._auth_in_progress = False
         self.token: Optional[str] = None
         self.controller_id: Optional[str] = None
@@ -767,6 +818,7 @@ class OmadaClient:
 
         status, raw = self._raw(method, url, headers=headers, data=body)
 
+        method_upper = method.upper()
         if self._looks_like_html(raw):
             # 200 + SPA shell == the server-side API session is gone.
             if not _retry:
@@ -780,9 +832,19 @@ class OmadaClient:
             cookie_state = f"cookie={cookie_name} present, server-side session expired" \
                 if cookie_name else "no session cookie"
             self._log(f"session expired (HTML response; {cookie_state}); "
-                      "re-authenticating and replaying once")
+                      "re-authenticating")
             self.authenticate(force=True)
-            return self.api(endpoint, method, data, require_auth=False, _retry=False,
+            if method_upper != "GET":
+                # Never blindly replay POST/PATCH/DELETE: callers must re-read
+                # state first to verify whether the write already landed.
+                raise OmadaSessionExpiredError(
+                    f"session expired during {method_upper} {endpoint}; re-authenticated, "
+                    "re-read state before retrying",
+                    reauthenticated=True,
+                    hint="use a dedicated Admin account for write operations to avoid session eviction",
+                    endpoint=endpoint,
+                )
+            return self.api(endpoint, method_upper, data, require_auth=False, _retry=False,
                             _burst=_burst)
 
         payload = self._decode(raw)
@@ -795,10 +857,10 @@ class OmadaClient:
             )
 
         code = payload.get("errorCode")
-        if code == -1600 and method == "GET" and _burst < _MAX_BURST_RETRIES:
+        if code == -1600 and method_upper == "GET" and _burst < _MAX_BURST_RETRIES:
             self._log(f"-1600 from {endpoint}; pacing {BURST_BACKOFF_SECONDS}s and retrying once")
             self._sleep(BURST_BACKOFF_SECONDS)
-            return self.api(endpoint, method, data, require_auth=False, _retry=_retry,
+            return self.api(endpoint, method_upper, data, require_auth=False, _retry=_retry,
                             _burst=_burst + 1)
 
         payload["_httpStatus"] = status
@@ -817,6 +879,279 @@ class OmadaClient:
                 endpoint=endpoint,
             )
         return payload.get("result")
+
+    # -- write plumbing (gated, paced, snapshotted, verified, audited) --------
+
+    def _pace_write(self) -> None:
+        interval = max(
+            float(getattr(self.config, "write_min_interval", 1.0) or 0.0),
+            float(self.config.min_interval or 0.0),
+        )
+        if interval <= 0 or self._last_write_at is None:
+            return
+        elapsed = self._clock() - self._last_write_at
+        if elapsed < interval:
+            self._sleep(interval - elapsed)
+
+    def _snapshot_dir(self) -> Path:
+        return Path(self.config.snapshot_dir) if self.config.snapshot_dir else default_snapshot_dir()
+
+    @staticmethod
+    def _safe_filename_part(value: str, fallback: str = "target") -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "").strip()).strip("-.")
+        return (cleaned[:64] if cleaned else fallback)
+
+    def _ensure_snapshot_dir(self) -> Path:
+        directory = self._snapshot_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        if os.name != "nt":
+            try:
+                os.chmod(directory, 0o700)
+            except OSError:
+                pass
+        return directory
+
+    def _save_snapshot(self, tool_name: str, target: str, payload: Any) -> str:
+        directory = self._ensure_snapshot_dir()
+        self._snapshot_seq += 1
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        safe_tool = self._safe_filename_part(tool_name, "write")
+        safe_target = self._safe_filename_part(target, "target")
+        filename = f"{stamp}-{self._snapshot_seq:04d}-{safe_tool}-{safe_target}.json"
+        path = directory / filename
+        record = {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "tool": tool_name,
+            "target": target,
+            "account": self.config.username,
+            "data": payload,
+        }
+        path.write_text(json.dumps(record, indent=2, ensure_ascii=False, default=str) + "\n",
+                        encoding="utf-8")
+        if os.name != "nt":
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+        return filename
+
+    def _append_audit(
+        self,
+        *,
+        tool_name: str,
+        target: str,
+        snapshot_id: str,
+        fields_changed: Any,
+        result: str,
+        verified: bool,
+        detail: Optional[str] = None,
+    ) -> None:
+        directory = self._ensure_snapshot_dir()
+        audit_path = directory / "audit.jsonl"
+        entry: Dict[str, Any] = {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "tool": tool_name,
+            "target": target,
+            "snapshot": snapshot_id,
+            "fieldsChanged": fields_changed,
+            "result": result,
+            "verified": bool(verified),
+            "account": self.config.username,
+        }
+        if detail:
+            entry["detail"] = detail
+        with open(audit_path, "a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+        if os.name != "nt":
+            try:
+                os.chmod(audit_path, 0o600)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _verify_expect_keys(
+        expect_keys: Mapping[str, Any],
+        after: Any,
+    ) -> Tuple[bool, Optional[str]]:
+        if not isinstance(after, Mapping):
+            return False, "read-back did not return a JSON object"
+        for key, expected in expect_keys.items():
+            if key not in after:
+                return False, f"field {key!r} missing in read-back"
+            actual = after[key]
+            if isinstance(expected, Mapping):
+                ok, reason = OmadaClient._verify_expect_keys(expected, actual)
+                if not ok:
+                    return False, f"{key}.{reason}"
+            elif actual != expected:
+                return False, f"field {key!r} expected {expected!r}, got {actual!r}"
+        return True, None
+
+    def _require_write_allowed(self, tool_name: Optional[str], endpoint: str) -> None:
+        if self.config.read_only:
+            raise OmadaError(
+                "OMADA_READ_ONLY=true refuses all write operations",
+                hint="set OMADA_READ_ONLY=false and add the exact tool name to OMADA_WRITE_TOOLS",
+                endpoint=endpoint,
+            )
+        allowed = set(getattr(self.config, "write_tools", ()) or ())
+        if not allowed or (tool_name is not None and tool_name not in allowed):
+            raise OmadaError(
+                f"OMADA_WRITE_TOOLS does not allow {tool_name or 'write operations'}",
+                hint="set OMADA_WRITE_TOOLS to a comma-separated list of exact write tool names",
+                endpoint=endpoint,
+            )
+
+    def write(
+        self,
+        endpoint: str,
+        method: str = "PATCH",
+        data: Optional[Dict[str, Any]] = None,
+        *,
+        expect_keys: Optional[Mapping[str, Any]] = None,
+        tool_name: Optional[str] = None,
+        target: Optional[str] = None,
+        before: Any = None,
+        snapshot_payload: Any = None,
+        read_back: Optional[Callable[[], Any]] = None,
+        verify_fn: Optional[Callable[[Any, Any], Tuple[bool, Optional[str]]]] = None,
+        reauth_prepare: Optional[Callable[[], Tuple[bool, Optional[Dict[str, Any]], Any]]] = None,
+        fields_changed: Any = None,
+    ) -> Dict[str, Any]:
+        """Single serialised write path: gate -> pace -> snapshot -> call -> verify -> audit."""
+        method_upper = method.upper()
+        if method_upper not in ("POST", "PATCH", "PUT", "DELETE"):
+            raise OmadaError(
+                f"OmadaClient.write() does not accept method {method_upper!r}",
+                endpoint=endpoint,
+            )
+        self._require_write_allowed(tool_name, endpoint)
+
+        eff_tool = tool_name or f"write_{method_upper.lower()}"
+        eff_target = target or endpoint
+        eff_fields = fields_changed if fields_changed is not None else sorted((expect_keys or {}).keys())
+
+        with self._lock:
+            snap_data = before if snapshot_payload is None else snapshot_payload
+            snapshot_id = self._save_snapshot(eff_tool, eff_target, snap_data)
+
+            already_applied = False
+            payload: Optional[Dict[str, Any]] = None
+            write_data = data
+            self._pace_write()
+            try:
+                try:
+                    payload = self.api(endpoint, method=method_upper, data=write_data)
+                except OmadaSessionExpiredError:
+                    if reauth_prepare is None:
+                        raise OmadaError(
+                            f"session expired during {method_upper} {endpoint}; write not replayed blindly",
+                            hint=("re-read controller state before retrying, and give write tools a "
+                                  "dedicated Admin account"),
+                            endpoint=endpoint,
+                        ) from None
+                    already_applied, refreshed_data, refreshed_before = reauth_prepare()
+                    if refreshed_before is not None:
+                        before = refreshed_before
+                    if not already_applied:
+                        self._pace_write()
+                        payload = self.api(
+                            endpoint,
+                            method=method_upper,
+                            data=write_data if refreshed_data is None else refreshed_data,
+                            require_auth=False,
+                            _retry=False,
+                        )
+            except OmadaError as exc:
+                self._append_audit(
+                    tool_name=eff_tool,
+                    target=eff_target,
+                    snapshot_id=snapshot_id,
+                    fields_changed=eff_fields,
+                    result="error",
+                    verified=False,
+                    detail=str(exc),
+                )
+                raise
+            finally:
+                self._last_write_at = self._clock()
+
+            if not already_applied and payload is not None:
+                code = payload.get("errorCode")
+                if code not in (0, None):
+                    msg = describe_error(
+                        code,
+                        str(payload.get("msg") or ""),
+                        endpoint=endpoint,
+                        method=method_upper,
+                    )
+                    self._append_audit(
+                        tool_name=eff_tool,
+                        target=eff_target,
+                        snapshot_id=snapshot_id,
+                        fields_changed=eff_fields,
+                        result="error",
+                        verified=False,
+                        detail=msg,
+                    )
+                    raise OmadaError(msg, code=code, endpoint=endpoint)
+
+            after: Any = None
+            try:
+                if read_back is not None:
+                    after = read_back()
+                if verify_fn is not None:
+                    verified, reason = verify_fn(before, after)
+                elif expect_keys is not None:
+                    verified, reason = self._verify_expect_keys(expect_keys, after)
+                else:
+                    verified = read_back is None
+                    reason = None
+            except OmadaError as exc:
+                self._append_audit(
+                    tool_name=eff_tool,
+                    target=eff_target,
+                    snapshot_id=snapshot_id,
+                    fields_changed=eff_fields,
+                    result="verification_failed",
+                    verified=False,
+                    detail=str(exc),
+                )
+                raise
+
+            if not verified:
+                detail = reason or "controller accepted write but read-back did not match intent"
+                self._append_audit(
+                    tool_name=eff_tool,
+                    target=eff_target,
+                    snapshot_id=snapshot_id,
+                    fields_changed=eff_fields,
+                    result="verification_failed",
+                    verified=False,
+                    detail=detail,
+                )
+                raise OmadaError(
+                    f"write verification failed for {eff_tool} ({eff_target}): {detail}",
+                    hint=(f"the controller may have silently ignored or altered the write; inspect "
+                          f"snapshot {snapshot_id} and re-read state before retrying"),
+                    endpoint=endpoint,
+                )
+
+            self._append_audit(
+                tool_name=eff_tool,
+                target=eff_target,
+                snapshot_id=snapshot_id,
+                fields_changed=eff_fields,
+                result="success",
+                verified=True,
+            )
+            return {
+                "result": payload.get("result") if payload is not None else None,
+                "before": before,
+                "after": after,
+                "verified": True,
+                "snapshot": snapshot_id,
+            }
 
     # -- discovery ------------------------------------------------------------
 

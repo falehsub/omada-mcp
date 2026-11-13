@@ -154,14 +154,20 @@ a missing object and is actually a permissions refusal. Use
 for Admin. Do not promise per-client IPs from a Viewer account.
 
 **Fixed IP (DHCP reservation)** — `PATCH /sites/{siteId}/clients/{MAC}` with the
-full client object (`GET` it first and drop volatile keys: traffic counters,
-`rssi`, uptime, `lastSeen`, rates, `dpiStat`), then:
+full 55-key client object (`GET` it first and strip the 20 volatile runtime keys:
+`trafficDown`, `trafficUp`, `downPacket`, `upPacket`, `uptime`, `lastSeen`,
+`activity`, `uploadActivity`, `rxRate`, `txRate`, `rssi`, `snr`, `signalLevel`,
+`signalRank`, `dpiStat`, `authInfo`, `channel`, `active`, `rateLimit`, `authStatus`),
+then set:
 
 ```json
 {"ipSetting": {"useFixedAddr": true, "netId": "<LAN network id>", "ip": "192.168.20.180"}}
 ```
 
-Omitting `netId` returns `-1 General error`; it is required, not optional. The
+Omitting `netId` returns `-1 General error` with no field hint; `ip` on the live
+client remains at its current lease until DHCP renewal, while a managed device MAC
+(switch/AP/gateway) answers `-41011` on `/clients/{MAC}` because devices are not
+clients. The same endpoint also enforces Admin privilege (`-41011` for `Viewer`).
 address changes when the DHCP lease renews; `useFixedAddr: false` releases it.
 
 ## ACLs and IP groups
@@ -173,15 +179,22 @@ were unreachable through the Web API is wrong):
 |---|---|
 | List gateway ACLs | `GET .../setting/firewall/acls?type=0&currentPage=1&currentPageSize=100` |
 | Create gateway ACL | `POST .../setting/firewall/acls?type=0` |
+| Toggle single ACL rule | `PATCH .../setting/firewall/acls/{aclId}?type=0` |
 | List groups | `GET .../setting/profiles/groups` |
 | Create group | `POST .../setting/profiles/groups` |
 | Delete group | `DELETE .../setting/profiles/groups/{type}/{groupId}` |
 | Per-client fixed IP | `PATCH .../clients/{MAC}` |
 
-`result.aclDisable` in the list response is **advisory**. A newly created
+`result.aclDisable` in the list response is **advisory and unreliable**. A newly created
 LAN→WAN deny rule was observed enforcing on the gateway while `aclDisable` still
-read `true`; verify empirically (toggle the rule's `status`, watch a client
-re-associate) before claiming a policy is or is not in force.
+read `true`; never build a safety check on `aclDisable`, and verify enforcement
+empirically (toggle the rule's own `status`, watch a client re-associate) before
+claiming a policy is or is not in force.
+
+Group updates require delete + recreate (no `PATCH`/`PUT`). If any ACL rule
+references the group, `DELETE` fails with `-33717`; perform a temporary-group swap
+(create temp group → repoint ACL `sourceIds`/`destinationIds` → delete original →
+recreate original → repoint ACLs back → delete temp) and re-read at each step.
 
 Group object (`type: 0` = IP group):
 
@@ -227,8 +240,9 @@ group used for "to WAN".
 | `-1505` | No permission for this site | Use the hex site id, not the name |
 | `-1600` | Unsupported request path **or** burst rate-limiting | See below — the same code means both |
 | `-30109` | Session expired | Re-authenticate |
+| `-33717` | IP/port group is referenced by an ACL rule | Re-point ACL rule(s) to a temporary group first, delete/recreate, re-point back |
 | `-33726` | IP group full (16 entries max) | Use aligned CIDRs |
-| `-41011` | Client does not exist (Admin-only endpoint) | Use `insight/clients` |
+| `-41011` | Client does not exist, target MAC is a managed device, or Viewer role | Use `insight/clients` or `/devices` for read; use a dedicated Admin account for writes |
 | `-44116` | Open API not enabled | Use the Web API |
 
 ### `-1600` is overloaded
@@ -306,8 +320,12 @@ not just the label.
 * SSID objects contain `securityKey` (the passphrase in plaintext). Whitelist
   fields when returning WLAN data; expose "has a key" rather than the key.
 * Prefer a dedicated local account. Sharing one account across a long-lived
-  bridge and interactive logins causes the session-eviction loop described above
-  (each login kills the other session).
+  bridge, write automation, and interactive web UI logins causes the
+  session-eviction loop described above (each login kills the other session).
+* Writes (when explicitly enabled in `omada-mcp` via `OMADA_READ_ONLY=false` and
+  `OMADA_WRITE_TOOLS`) default to `dryRun=true`, require `confirm="<tool>:<target>"`,
+  pace at `>= 1.0 s`, never retry on `-1600`, snapshot before mutation, and re-read
+  afterwards to catch silent controller no-ops.
 * Reads are idempotent; nothing in this document should be scheduled faster than
   the 0.8 s pacing. A health check that spawns a fresh login every minute will
   evict a session held by an agent.

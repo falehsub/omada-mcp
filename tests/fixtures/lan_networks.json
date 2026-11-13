@@ -1,0 +1,145 @@
+{
+  "collection": [
+    {
+      "id": "net-mgmt-1",
+      "name": "Default",
+      "vlan": 1,
+      "purpose": "interface",
+      "gatewaySubnet": "192.168.10.1/24",
+      "isolation": false,
+      "existNetworkIsolation": true,
+      "accessControlRule": false,
+      "dhcpSettings": {
+        "enable": true,
+        "ipRangeStart": "192.168.10.100",
+        "ipRangeEnd": "192.168.10.200"
+      }
+    },
+    {
+      "id": "net-iot-20",
+      "name": "IoT",
+      "vlan": 20,
+      "purpose": "interface",
+      "gatewaySubnet": "192.168.20.1/24",
+      "isolation": false,
+      "existNetworkIsolation": true,
+      "accessControlRule": false,
+      "dhcpSettings": {
+        "enable": true,
+        "ipRangeStart": "192.168.20.100",
+        "ipRangeEnd": "192.168.20.220"
+      }
+    },
+    {
+      "id": "net-guest-30",
+      "name": "Guest",
+      "vlan": 30,
+      "purpose": "interface",
+      "gatewaySubnet": "192.168.30.1/24",
+      "isolation": false,
+      "existNetworkIsolation": true,
+      "accessControlRule": false,
+      "dhcpSettings": {
+        "enable": true,
+        "ipRangeStart": "192.168.30.50",
+        "ipRangeEnd": "192.168.30.200"
+      }
+    },
+    {
+      "id": "net-lab-40",
+      "name": "Lab",
+      "vlan": 40,
+      "purpose": "interface",
+      "gatewaySubnet": "192.168.40.1/24",
+      "isolation": false,
+      "existNetworkIsolation": true,
+      "accessControlRule": false,
+      "dhcpSettings": {
+        "enable": true,
+        "ipRangeStart": "192.168.40.50",
+        "ipRangeEnd": "192.168.40.150"
+      }
+    }
+  ],
+  "interface": [
+    {
+      "id": "net-mgmt-1",
+      "name": "Default",
+      "vlan": 1,
+      "gatewaySubnet": "192.168.10.1/24",
+      "isolation": false,
+      "igmpSnoop": true,
+      "lanNetworkIpv6Config": {"proto": "none"},
+      "dhcpSettings": {
+        "enable": true,
+        "ipaddrStart": "192.168.10.100",
+        "ipaddrEnd": "192.168.10.200",
+        "ipRangePool": [
+          {"ipaddrStart": "192.168.10.100", "ipaddrEnd": "192.168.10.200"}
+        ],
+        "leaseTime": 120,
+        "dnsEnable": false,
+        "gateway": "192.168.10.1"
+      }
+    },
+    {
+      "id": "net-iot-20",
+      "name": "IoT",
+      "vlan": 20,
+      "gatewaySubnet": "192.168.20.1/24",
+      "isolation": false,
+      "igmpSnoop": false,
+      "lanNetworkIpv6Config": {"proto": "none"},
+      "dhcpSettings": {
+        "enable": true,
+        "ipaddrStart": "192.168.20.100",
+        "ipaddrEnd": "192.168.20.220",
+        "ipRangePool": [
+          {"ipaddrStart": "192.168.20.100", "ipaddrEnd": "192.168.20.220"}
+        ],
+        "leaseTime": 120,
+        "dnsEnable": false,
+        "gateway": "192.168.20.1"
+      }
+    },
+    {
+      "id": "net-guest-30",
+      "name": "Guest",
+      "vlan": 30,
+      "gatewaySubnet": "192.168.30.1/24",
+      "isolation": false,
+      "igmpSnoop": false,
+      "lanNetworkIpv6Config": {"proto": "none"},
+      "dhcpSettings": {
+        "enable": true,
+        "ipaddrStart": "192.168.30.50",
+        "ipaddrEnd": "192.168.30.200",
+        "ipRangePool": [
+          {"ipaddrStart": "192.168.30.50", "ipaddrEnd": "192.168.30.200"}
+        ],
+        "leaseTime": 60,
+        "dnsEnable": false,
+        "gateway": "192.168.30.1"
+      }
+    },
+    {
+      "id": "net-lab-40",
+      "name": "Lab",
+      "vlan": 40,
+      "gatewaySubnet": "192.168.40.1/24",
+      "isolation": false,
+      "igmpSnoop": false,
+      "dhcpSettings": {
+        "enable": true,
+        "ipaddrStart": "192.168.40.50",
+        "ipaddrEnd": "192.168.40.150",
+        "ipRangePool": [
+          {"ipaddrStart": "192.168.40.50", "ipaddrEnd": "192.168.40.150"}
+        ],
+        "leaseTime": 120,
+        "dnsEnable": false,
+        "gateway": "192.168.40.1"
+      }
+    }
+  ]
+}

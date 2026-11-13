@@ -1,0 +1,45 @@
+{
+  "aclDisable": true,
+  "data": [
+    {
+      "id": "acl-001",
+      "name": "deny-guest-to-mgmt",
+      "index": 0,
+      "status": true,
+      "policy": 0,
+      "protocols": [256],
+      "sourceType": 0,
+      "sourceIds": ["net-guest-30"],
+      "destinationType": 0,
+      "destinationIds": ["net-mgmt-1"],
+      "direction": {
+        "lanToWan": false,
+        "lanToLan": true,
+        "wanInIds": [],
+        "vpnInIds": []
+      },
+      "biDirectional": false,
+      "syslog": false
+    },
+    {
+      "id": "acl-002",
+      "name": "deny-lab-devices-to-guest",
+      "index": 1,
+      "status": true,
+      "policy": 0,
+      "protocols": [256],
+      "sourceType": 1,
+      "sourceIds": ["grp-devices-01"],
+      "destinationType": 0,
+      "destinationIds": ["net-guest-30"],
+      "direction": {
+        "lanToWan": false,
+        "lanToLan": true,
+        "wanInIds": [],
+        "vpnInIds": []
+      },
+      "biDirectional": false,
+      "syslog": false
+    }
+  ]
+}

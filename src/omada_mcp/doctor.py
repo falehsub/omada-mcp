@@ -63,6 +63,8 @@ class Report:
             "sessionCookie": None,
         }
         self.site_meta: Optional[Dict[str, Any]] = None
+        ro_count = sum(1 for t in TOOL_MAP.values() if t.read_only)
+        self.tool_summary: str = f"{ro_count} read-only tools"
 
     def add(self, phase: PhaseResult) -> PhaseResult:
         self.results.append(phase)
@@ -147,7 +149,7 @@ class Report:
         if warned:
             print("Ready, with warnings: `omada-mcp` will start.", file=self.stream)
             return 0
-        print(f"Ready: `omada-mcp` will serve {len(TOOL_MAP)} read-only tools on stdio.",
+        print(f"Ready: `omada-mcp` will serve {self.tool_summary} on stdio.",
               file=self.stream)
         return 0
 
@@ -258,13 +260,24 @@ def _phase_site(client: OmadaClient, config: Config, report: Report) -> bool:
     return True
 
 
-def _phase_tools(client: OmadaClient, report: Report) -> bool:
+def _phase_tools(client: OmadaClient, config: Config, report: Report) -> bool:
+    ro_count = sum(1 for t in TOOL_MAP.values() if t.read_only)
+    write_count = len(config.write_tools) if not config.read_only else 0
+    if write_count:
+        report.tool_summary = (
+            f"{ro_count} read-only + {write_count} write tool(s) ({ro_count + write_count} total)"
+        )
+    else:
+        report.tool_summary = f"{ro_count} read-only tools"
     try:
         devices = TOOL_MAP["list_devices"].handler(client)
     except OmadaError as exc:
         report.add(PhaseResult("tools", FAIL, exc.message, exc.hint))
         return False
-    detail = f"list_devices -> {len(devices)} device(s); {len(TOOL_MAP)} read-only tools registered"
+    detail = (
+        f"list_devices -> {len(devices)} device(s); "
+        f"{ro_count} read-only tools registered ({write_count} write tool(s) enabled)"
+    )
     try:
         clients = _client_count(client)
         detail += f", {clients} client(s)"
@@ -277,6 +290,61 @@ def _phase_tools(client: OmadaClient, report: Report) -> bool:
         report.add(PhaseResult("tools", WARN, "device listing returned an error object",
                                str(devices[0])))
     return True
+
+
+def _phase_write(client: OmadaClient, config: Config, report: Report) -> None:
+    """Inspect write-gate, snapshot dir, and account role without performing any write."""
+    if config.read_only:
+        report.add(PhaseResult(
+            "write", PASS,
+            "disabled (OMADA_READ_ONLY=true; read-only tools only)",
+        ))
+        return
+    if not config.write_tools:
+        report.add(PhaseResult(
+            "write", PASS,
+            "disabled (OMADA_WRITE_TOOLS is empty; read-only tools only)",
+        ))
+        return
+
+    if report.json_output:
+        snap_label = (
+            "<default>" if config.snapshot_origin == "default" else config.snapshot_origin
+        )
+    else:
+        snap_label = str(config.snapshot_dir) if config.snapshot_dir else "default"
+
+    auth = getattr(client, "auth_info", None)
+    username = getattr(auth, "username", None) or config.username
+    privilege = str(getattr(auth, "privilege", "") or "").strip()
+    priv_lower = privilege.lower()
+    tools_label = ",".join(config.write_tools)
+    mgmt_suffix = f" mgmtCidrs={len(config.management_cidrs)}" if config.management_cidrs else ""
+
+    if "viewer" in priv_lower:
+        report.add(PhaseResult(
+            "write", WARN,
+            f"enabled tools={tools_label} account={username} role={privilege} "
+            f"snapshotDir={snap_label}{mgmt_suffix} — Viewer role cannot execute writes (-41011)",
+            hint=("switch OMADA_USERNAME to a dedicated Admin account separate from your web UI "
+                  "and read-only sessions to avoid -41011 and session eviction"),
+        ))
+        return
+    if not privilege:
+        report.add(PhaseResult(
+            "write", WARN,
+            f"enabled tools={tools_label} account={username} role=unknown "
+            f"snapshotDir={snap_label}{mgmt_suffix}",
+            hint=("verify this account has Admin privilege and is dedicated to writes "
+                  "(every login evicts the previous session for the same username)"),
+        ))
+        return
+    report.add(PhaseResult(
+        "write", PASS,
+        f"enabled tools={tools_label} account={username} role={privilege} "
+        f"snapshotDir={snap_label}{mgmt_suffix}; dryRun=true default "
+        "(use a dedicated Admin account to avoid evicting web UI sessions)",
+    ))
 
 
 def _client_count(client: OmadaClient) -> int:
@@ -318,5 +386,6 @@ def run_doctor(
         return report.finish()
     if not _phase_site(client, config, report):
         return report.finish()
-    _phase_tools(client, report)
+    _phase_tools(client, config, report)
+    _phase_write(client, config, report)
     return report.finish()

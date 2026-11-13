@@ -472,12 +472,12 @@ class ProtocolTests(unittest.TestCase):
     def test_tools_list_annotations(self):
         server, _, _ = self._server()
         tools = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
-        self.assertEqual(len(tools), 10)
+        self.assertEqual(len(tools), 11)
         self.assertEqual({t["name"] for t in tools},
                          {"list_devices", "list_clients", "list_wifi_clients",
                           "list_wired_clients", "get_device", "get_client",
                           "list_wlans", "get_site_info", "network_audit",
-                          "explain_error"})
+                          "explain_error", "get_config_snapshot"})
         for tool in tools:
             annotations = tool["annotations"]
             self.assertIs(annotations["readOnlyHint"], True, tool["name"])
@@ -500,9 +500,13 @@ class ProtocolTests(unittest.TestCase):
 
     def test_unknown_tool_is_reported_when_writes_are_allowed(self):
         server, _, _ = self._server(read_only=False)
-        response = server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                                  "params": {"name": "set_client_fixed_ip"}})
-        self.assertEqual(response["error"]["code"], -32601)
+        unknown_resp = server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                                      "params": {"name": "nonexistent_tool"}})
+        self.assertEqual(unknown_resp["error"]["code"], -32601)
+        blocked_write = server.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                                       "params": {"name": "set_client_fixed_ip"}})
+        self.assertEqual(blocked_write["error"]["code"], -32003)
+        self.assertIn("OMADA_WRITE_TOOLS", blocked_write["error"]["message"])
 
     def test_read_only_gate_also_blocks_declared_write_tools(self):
         from dataclasses import replace
@@ -870,17 +874,28 @@ class DoctorTests(unittest.TestCase):
 
 class CliTests(unittest.TestCase):
     def test_list_tools_emits_valid_json(self):
+        from unittest import mock
         from omada_mcp.cli import main
 
-        buffer = io.StringIO()
-        original = sys.stdout
-        sys.stdout = buffer
-        try:
-            self.assertEqual(main(["--list-tools"]), 0)
-        finally:
-            sys.stdout = original
-        payload = json.loads(buffer.getvalue())
-        self.assertEqual(len(payload["tools"]), 10)
+        with mock.patch.dict(os.environ, {}, clear=True):
+            buffer = io.StringIO()
+            original = sys.stdout
+            sys.stdout = buffer
+            try:
+                self.assertEqual(main(["--list-tools"]), 0)
+            finally:
+                sys.stdout = original
+            payload = json.loads(buffer.getvalue())
+            self.assertEqual(len(payload["tools"]), 11)
+
+            buffer_all = io.StringIO()
+            sys.stdout = buffer_all
+            try:
+                self.assertEqual(main(["--list-tools", "--all"]), 0)
+            finally:
+                sys.stdout = original
+            payload_all = json.loads(buffer_all.getvalue())
+            self.assertEqual(len(payload_all["tools"]), 19)
 
     def test_missing_config_exits_non_zero(self):
         from omada_mcp.cli import main
@@ -1145,7 +1160,7 @@ class V11FeatureTests(unittest.TestCase):
         self.assertEqual(doc["exitCode"], 0)
         self.assertEqual(doc["controller"]["family"], "software-6.x")
         self.assertEqual(doc["controller"]["sessionCookie"], "TPOMADA_SESSIONID")
-        self.assertEqual(doc["summary"]["passed"], 5)
+        self.assertEqual(doc["summary"]["passed"], 6)
         self.assertEqual(doc["summary"]["failed"], 0)
 
     def test_doctor_json_failure_sets_exit_code_one(self):
@@ -1181,6 +1196,7 @@ class V11FeatureTests(unittest.TestCase):
             ("get_site_info", {}),
             ("network_audit", {}),
             ("explain_error", {"code": -33726}),
+            ("get_config_snapshot", {"objects": ["wlans", "devices", "clients"]}),
         ]
         self.assertEqual({name for name, _ in calls}, set(descriptors))
         for name, args in calls:

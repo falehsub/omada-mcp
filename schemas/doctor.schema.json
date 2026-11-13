@@ -63,7 +63,7 @@
         "additionalProperties": false,
         "required": ["name", "status", "detail", "hint"],
         "properties": {
-          "name": { "type": "string", "enum": ["env", "tls", "login", "site", "tools"] },
+          "name": { "type": "string", "enum": ["env", "tls", "login", "site", "tools", "write"] },
           "status": { "type": "string", "enum": ["PASS", "WARN", "FAIL"] },
           "detail": { "type": "string" },
           "hint": { "type": ["string", "null"] }

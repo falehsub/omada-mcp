@@ -1,0 +1,30 @@
+[
+  {
+    "id": "grp-devices-01",
+    "name": "lab-devices",
+    "type": 0,
+    "resource": 0,
+    "ipList": [
+      {"ip": "192.168.20.180", "mask": 30, "description": ""},
+      {"ip": "192.168.20.184", "mask": 29, "description": ""}
+    ]
+  },
+  {
+    "id": "grp-printers-02",
+    "name": "shared-printers",
+    "type": 0,
+    "resource": 0,
+    "ipList": [
+      {"ip": "192.168.20.50", "mask": 32, "description": ""}
+    ]
+  },
+  {
+    "id": "grp-ports-99",
+    "name": "web-ports",
+    "type": 1,
+    "resource": 0,
+    "portList": [
+      {"portStart": 80, "portEnd": 80}
+    ]
+  }
+]

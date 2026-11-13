@@ -21,9 +21,26 @@ from __future__ import annotations
 import datetime
 import ipaddress
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .client import OmadaClient, OmadaError, SiteInfo, explain_error_code
+from .config import Config
+from .write_tools import (
+    WRITE_ENVELOPE_SCHEMA,
+    _ACL_DISPATCH_NOTES,
+    _fetch_acls,
+    _fetch_groups,
+    _fetch_lan_collection,
+    _fetch_lan_interfaces,
+    create_gateway_acl,
+    create_ip_group,
+    release_client_fixed_ip,
+    replace_ip_group,
+    set_acl_rule_status,
+    set_client_fixed_ip,
+    set_vlan_dhcp_pools,
+    set_vlan_isolation,
+)
 
 __all__ = [
     "TOOLS",
@@ -751,6 +768,203 @@ _LIMIT_PROP = {
     "description": "Maximum number of clients to return (default 500, max 5000)",
 }
 
+_SNAPSHOT_DEFAULT_OBJECTS: Tuple[str, ...] = ("networks", "acls", "groups", "wlans", "devices")
+_SNAPSHOT_ALL_OBJECTS: Tuple[str, ...] = (
+    "networks", "acls", "groups", "wlans", "devices", "clients",
+)
+
+_SNAPSHOT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "site": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "id": {"type": "string"},
+            },
+            "required": ["name", "id"],
+        },
+        "objects": {"type": "array", "items": {"type": "string"}},
+        "networks": {"type": "array", "items": {"type": "object"}},
+        "acls": {
+            "type": "object",
+            "properties": {
+                "aclDisable": {"type": ["boolean", "null"]},
+                "aclDisableReliable": {"type": "boolean"},
+                "warning": {"type": "string"},
+                "count": {"type": "integer"},
+                "rules": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["aclDisable", "aclDisableReliable", "warning", "count", "rules"],
+        },
+        "groups": {
+            "type": "object",
+            "properties": {
+                "count": {"type": "integer"},
+                "ipGroups": {"type": "array", "items": {"type": "object"}},
+                "otherGroups": {"type": "array", "items": {"type": "object"}},
+                "all": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["count", "ipGroups", "otherGroups", "all"],
+        },
+        "wlans": {"type": "array", "items": {"type": "object"}},
+        "devices": {"type": "array", "items": {"type": "object"}},
+        "clients": {"type": "array", "items": {"type": "object"}},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["site", "objects", "warnings"],
+}
+
+_WRITE_CONTROL_PROPS: Dict[str, Any] = {
+    "dryRun": {
+        "type": "boolean",
+        "default": True,
+        "description": (
+            "Preview the exact before/after diff and obtain confirmToken without changing the "
+            "controller (default true; pass dryRun=false with confirm='<tool>:<target>' to apply)"
+        ),
+    },
+    "confirm": {
+        "type": "string",
+        "description": (
+            "Confirmation token formatted '<tool>:<target-id>', required when dryRun is false; "
+            "run with dryRun=true first to inspect the diff and obtain confirmToken"
+        ),
+    },
+}
+
+
+def _parse_group_type(group: Dict[str, Any]) -> Optional[int]:
+    raw = group.get("type")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_config_snapshot(
+    client: OmadaClient,
+    objects: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Read-only snapshot merging two-endpoint LAN data, ACLs, groups, WLANs, and devices."""
+    if objects is None:
+        selected = list(_SNAPSHOT_DEFAULT_OBJECTS)
+    else:
+        if not isinstance(objects, list):
+            raise OmadaError("objects must be an array of snapshot section names")
+        selected = []
+        seen = set()
+        for raw in objects:
+            name = str(raw or "").strip().lower()
+            if not name:
+                raise OmadaError("objects contains an empty entry")
+            if name not in _SNAPSHOT_ALL_OBJECTS:
+                raise OmadaError(
+                    f"unknown snapshot object {name!r}",
+                    hint="valid objects: " + ", ".join(_SNAPSHOT_ALL_OBJECTS),
+                )
+            if name not in seen:
+                seen.add(name)
+                selected.append(name)
+        if not selected:
+            raise OmadaError(
+                "objects must not be empty",
+                hint="omit objects for default snapshot ("
+                     + ", ".join(_SNAPSHOT_DEFAULT_OBJECTS) + ")",
+            )
+
+    site = _site(client)
+    warnings: List[str] = []
+    snapshot: Dict[str, Any] = {
+        "site": {"name": site.name, "id": site.site_id},
+        "objects": selected,
+        "warnings": warnings,
+    }
+
+    if "networks" in selected:
+        collection = _fetch_lan_collection(client, site)
+        interfaces = _fetch_lan_interfaces(client, site)
+        iface_by_id = {
+            str(item.get("id")): item for item in interfaces if item.get("id") is not None
+        }
+        col_ids = set()
+        merged_networks: List[Dict[str, Any]] = []
+        for col_item in collection:
+            nid = str(col_item.get("id") or "")
+            if nid:
+                col_ids.add(nid)
+            iface_item = iface_by_id.get(nid)
+            base = iface_item if iface_item is not None else col_item
+            merged_networks.append({
+                "id": nid,
+                "name": base.get("name", ""),
+                "vlan": base.get("vlan"),
+                "purpose": col_item.get("purpose"),
+                "gatewaySubnet": base.get("gatewaySubnet"),
+                "isolation": col_item.get("isolation"),
+                "interfaceIsolation": (
+                    iface_item.get("isolation") if iface_item is not None else None
+                ),
+                "existNetworkIsolation": col_item.get("existNetworkIsolation"),
+                "accessControlRule": col_item.get("accessControlRule"),
+                "dhcpSettings": base.get("dhcpSettings"),
+                "collection": col_item,
+                "interface": iface_item,
+            })
+        for iface_item in interfaces:
+            nid = str(iface_item.get("id") or "")
+            if nid not in col_ids:
+                merged_networks.append({
+                    "id": nid,
+                    "name": iface_item.get("name", ""),
+                    "vlan": iface_item.get("vlan"),
+                    "purpose": None,
+                    "gatewaySubnet": iface_item.get("gatewaySubnet"),
+                    "isolation": iface_item.get("isolation"),
+                    "interfaceIsolation": iface_item.get("isolation"),
+                    "existNetworkIsolation": None,
+                    "accessControlRule": None,
+                    "dhcpSettings": iface_item.get("dhcpSettings"),
+                    "collection": None,
+                    "interface": iface_item,
+                })
+        snapshot["networks"] = merged_networks
+
+    if "acls" in selected:
+        acl_disable, rules = _fetch_acls(client, site)
+        warnings.append(_ACL_DISPATCH_NOTES)
+        snapshot["acls"] = {
+            "aclDisable": acl_disable,
+            "aclDisableReliable": False,
+            "warning": _ACL_DISPATCH_NOTES,
+            "count": len(rules),
+            "rules": rules,
+        }
+
+    if "groups" in selected:
+        groups = _fetch_groups(client, site)
+        ip_groups = [g for g in groups if _parse_group_type(g) == 0]
+        other_groups = [g for g in groups if _parse_group_type(g) != 0]
+        snapshot["groups"] = {
+            "count": len(groups),
+            "ipGroups": ip_groups,
+            "otherGroups": other_groups,
+            "all": groups,
+        }
+
+    if "wlans" in selected:
+        snapshot["wlans"] = _list_wlans(client)
+
+    if "devices" in selected:
+        snapshot["devices"] = _list_devices(client)
+
+    if "clients" in selected:
+        snapshot["clients"] = _fetch_clients(client, limit=0)
+
+    return snapshot
+
 TOOLS: Tuple[Tool, ...] = (
     Tool(
         name="list_devices",
@@ -848,7 +1062,7 @@ TOOLS: Tuple[Tool, ...] = (
     Tool(
         name="explain_error",
         title="Explain Omada errorCode",
-        description=("Decode an Omada Web API errorCode (e.g. -1600, -33726, -1505, -1001, "
+        description=("Decode an Omada Web API errorCode (e.g. -1600, -33717, -33726, -1505, -1001, "
                     "-30109, -41011, -44116) into its meaning, ambiguity notes, and fix."),
         input_schema={
             "type": "object",
@@ -865,6 +1079,291 @@ TOOLS: Tuple[Tool, ...] = (
         open_world=False,
         requires_auth=False,
     ),
+    Tool(
+        name="get_config_snapshot",
+        title="Get site configuration snapshot",
+        description=(
+            "Read-only snapshot of LAN networks (both collection and /interface endpoints), "
+            "gateway ACLs, IP/port groups, PSK-redacted WLANs, devices, and optional clients."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "objects": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(_SNAPSHOT_ALL_OBJECTS)},
+                    "description": (
+                        "Optional subset of sections to fetch: networks, acls, groups, wlans, "
+                        "devices, clients (defaults to all except clients)"
+                    ),
+                },
+            },
+        },
+        output_schema=_SNAPSHOT_SCHEMA,
+        handler=_get_config_snapshot,
+    ),
+    Tool(
+        name="set_client_fixed_ip",
+        title="Set client DHCP reservation",
+        description=(
+            "Assign a DHCP fixed IPv4 reservation on a client (PATCH clients/{MAC}). "
+            "Lease-delayed; strips volatile keys and refuses managed device MACs (-41011). "
+            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Client MAC address"},
+                "ip": {"type": "string", "description": "Fixed IPv4 address within target VLAN"},
+                "vlan": {"type": "integer", "description": "Optional VLAN ID to resolve netId"},
+                "netId": {"type": "string", "description": "Optional LAN network ID"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["mac", "ip"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=set_client_fixed_ip,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="release_client_fixed_ip",
+        title="Release client DHCP reservation",
+        description=(
+            "Clear useFixedAddr on a client (PATCH clients/{MAC}). "
+            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Client MAC address"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["mac"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=release_client_fixed_ip,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="set_vlan_dhcp_pools",
+        title="Set VLAN DHCP pools",
+        description=(
+            "Update dhcpSettings.ipRangePool on a LAN/VLAN via full /interface PATCH with "
+            "two-endpoint verification and controller/device overlap guards. "
+            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "pools": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "ipaddrStart": {"type": "string"},
+                            "ipaddrEnd": {"type": "string"},
+                        },
+                        "required": ["ipaddrStart", "ipaddrEnd"],
+                    },
+                    "description": "Non-empty list of {ipaddrStart, ipaddrEnd} DHCP pools",
+                },
+                "vlan": {"type": "integer", "description": "Target VLAN ID (or provide netId)"},
+                "netId": {"type": "string", "description": "Target LAN network ID (or provide vlan)"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["pools"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=set_vlan_dhcp_pools,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="set_vlan_isolation",
+        title="Set VLAN isolation",
+        description=(
+            "Toggle client/network isolation on a LAN/VLAN via the /interface endpoint and "
+            "verify across both setting/lan/networks and setting/lan/networks/interface. "
+            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "isolation": {
+                    "type": "boolean",
+                    "description": "True to enable VLAN isolation, false to disable",
+                },
+                "vlan": {"type": "integer", "description": "Target VLAN ID (or provide netId)"},
+                "netId": {"type": "string", "description": "Target LAN network ID (or provide vlan)"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["isolation"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=set_vlan_isolation,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="create_ip_group",
+        title="Create IPv4 IP group",
+        description=(
+            "Create an IPv4 IP profile group (type=0), packing ranges into <=16 aligned CIDRs "
+            "(-33726). Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Unique IPv4 IP group name"},
+                "cidrs": {
+                    "type": "array",
+                    "description": "List of IPv4 CIDRs, IPs, ranges, or {ip, mask} objects",
+                },
+                "ipRange": {
+                    "type": "string",
+                    "description": "Optional comma-separated IPv4 ranges/CIDRs (e.g. '192.168.20.180-199')",
+                },
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=create_ip_group,
+        read_only=False,
+        destructive=False,
+        idempotent=False,
+    ),
+    Tool(
+        name="replace_ip_group",
+        title="Replace IPv4 IP group",
+        description=(
+            "Replace an IPv4 IP group via delete+recreate, automatically running the 6-step "
+            "temporary-group swap when ACL rules reference the group (-33717). "
+            "Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS allowlist."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "group": {"type": "string", "description": "IP group ID or exact name"},
+                "cidrs": {
+                    "type": "array",
+                    "description": "Replacement IPv4 CIDRs, IPs, ranges, or {ip, mask} objects",
+                },
+                "ipRange": {
+                    "type": "string",
+                    "description": "Replacement comma-separated IPv4 ranges/CIDRs",
+                },
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["group"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=replace_ip_group,
+        read_only=False,
+        destructive=True,
+        idempotent=False,
+    ),
+    Tool(
+        name="create_gateway_acl",
+        title="Create gateway ACL rule",
+        description=(
+            "Create a gateway ACL rule (POST setting/firewall/acls?type=0) with anti-stranding "
+            "checks for management hosts. Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Unique gateway ACL rule name"},
+                "policy": {
+                    "type": ["string", "integer"],
+                    "description": "Rule policy: 'deny' (0) or 'permit' (1)",
+                },
+                "source": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": ["string", "integer"]},
+                        "ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["type", "ids"],
+                    "description": "Source selector: {'type': 'network'|'ip_group'|'port_group'|0|1|2, 'ids': [...]}",
+                },
+                "destination": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": ["string", "integer"]},
+                        "ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["type", "ids"],
+                    "description": "Destination selector: {'type': 'network'|'ip_group'|'port_group'|0|1|2, 'ids': [...]}",
+                },
+                "direction": {
+                    "type": "object",
+                    "properties": {
+                        "lanToWan": {"type": "boolean"},
+                        "lanToLan": {"type": "boolean"},
+                        "wanInIds": {"type": "array", "items": {"type": "string"}},
+                        "vpnInIds": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "description": "Direction flags (at least one enabled, e.g. {'lanToWan': true, 'lanToLan': false})",
+                },
+                "status": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Enable rule immediately (default true)",
+                },
+                "protocols": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Protocol codes (default [256] for any)",
+                },
+                "biDirectional": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Apply rule in both directions (default false)",
+                },
+                "syslog": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Log matching packets to syslog (default false)",
+                },
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name", "policy", "source", "destination", "direction"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=create_gateway_acl,
+        read_only=False,
+        destructive=True,
+        idempotent=False,
+    ),
+    Tool(
+        name="set_acl_rule_status",
+        title="Enable or disable gateway ACL rule",
+        description=(
+            "Toggle a single gateway ACL rule status (PATCH setting/firewall/acls/{id}?type=0); "
+            "never relies on or flips aclDisable. Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "rule": {"type": "string", "description": "Gateway ACL rule ID or exact name"},
+                "status": {"type": "boolean", "description": "True to enable, false to disable"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["rule", "status"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=set_acl_rule_status,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
 )
 
 TOOL_MAP: Dict[str, Tool] = {tool.name: tool for tool in TOOLS}
@@ -874,5 +1373,21 @@ def get_tool(name: str) -> Optional[Tool]:
     return TOOL_MAP.get(str(name or ""))
 
 
-def tool_descriptors() -> List[Dict[str, Any]]:
-    return [tool.descriptor() for tool in TOOLS]
+def tool_descriptors(
+    config: Optional[Config] = None,
+    include_all: bool = False,
+    write_tools: Optional[Sequence[str]] = None,
+) -> List[Dict[str, Any]]:
+    if include_all:
+        return [tool.descriptor() for tool in TOOLS]
+    enabled_writes = set()
+    if config is not None:
+        if not config.read_only:
+            enabled_writes = set(config.write_tools)
+    elif write_tools is not None:
+        enabled_writes = set(write_tools)
+    return [
+        tool.descriptor()
+        for tool in TOOLS
+        if tool.read_only or tool.name in enabled_writes
+    ]

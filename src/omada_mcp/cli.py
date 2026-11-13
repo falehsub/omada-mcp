@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import List, Optional
 
 from . import __version__
-from .config import ConfigError, load_config
+from .config import ConfigError, load_config, parse_bool, parse_write_tools
 from .doctor import run_doctor
 from .server import Server
 from .tools import tool_descriptors
@@ -45,7 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--list-tools", action="store_true",
-        help="print tool descriptors (name, schema, MCP annotations) as JSON, then exit",
+        help="print active tool descriptors (name, schema, MCP annotations) as JSON, then exit",
+    )
+    parser.add_argument(
+        "--all", action="store_true",
+        help="with --list-tools, include all write tools regardless of OMADA_WRITE_TOOLS",
     )
     return parser
 
@@ -71,7 +76,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_doctor(json_output=args.json)
 
     if args.list_tools:
-        print(json.dumps({"tools": tool_descriptors()}, indent=2, ensure_ascii=False))
+        if args.all:
+            descriptors = tool_descriptors(include_all=True)
+        else:
+            try:
+                read_only = parse_bool(
+                    os.environ.get("OMADA_READ_ONLY"), "OMADA_READ_ONLY", False
+                )
+                write_tools = parse_write_tools(os.environ.get("OMADA_WRITE_TOOLS"))
+            except ConfigError as exc:
+                print(f"omada-mcp: configuration error: {exc}", file=sys.stderr)
+                return 2
+            descriptors = tool_descriptors(
+                write_tools=() if read_only else write_tools
+            )
+        print(json.dumps({"tools": descriptors}, indent=2, ensure_ascii=False))
         return 0
 
     if args.show_config:
