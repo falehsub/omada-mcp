@@ -1346,7 +1346,7 @@ TOOLS: Tuple[Tool, ...] = (
         name="set_acl_rule_status",
         title="Enable or disable gateway ACL rule",
         description=(
-            "Toggle a single gateway ACL rule status (PATCH setting/firewall/acls/{id}?type=0); "
+            "Toggle a single gateway ACL rule status (PUT setting/firewall/acls/{id}?type=0); "
             "never relies on or flips aclDisable. Requires OMADA_READ_ONLY=false and OMADA_WRITE_TOOLS."
         ),
         input_schema={

@@ -100,13 +100,24 @@ ERROR_CATALOG: Dict[int, Dict[str, Any]] = {
     -1001: {
         "title": "Bean validation failure",
         "meaning": ("Bean-validation failure: the body is missing a mandatory field "
-                    "(e.g. lanNetworkIpv6Config.proto when PATCHing a LAN network)."),
+                    "(e.g. lanNetworkIpv6Config.proto and lanNetworkIpv6Config.enable when PATCHing a LAN network)."),
         "fix": ("Send the complete object obtained from GET .../networks/interface and ensure "
-                "nested fields like lanNetworkIpv6Config.proto='none' are present."),
+                "nested fields like lanNetworkIpv6Config={'proto': 'none', 'enable': 0} are present."),
         "ambiguous": False,
         "causes": [
             "Partial PATCH body missing mandatory nested fields.",
-            "lanNetworkIpv6Config.proto omitted on LAN network update.",
+            "lanNetworkIpv6Config.proto or lanNetworkIpv6Config.enable omitted on LAN network update.",
+        ],
+    },
+    -1007: {
+        "title": "Insufficient user permissions",
+        "meaning": ("The current user account does not have permission for this endpoint or operation "
+                    "(for example, a Viewer account attempting a write on Omada 6.x)."),
+        "fix": "Use a dedicated Admin account for write operations; keep Viewer accounts for read-only mode.",
+        "ambiguous": False,
+        "causes": [
+            "Viewer or read-only role calling an Admin-only write endpoint.",
+            "Account privilege lacks permission for the target site setting.",
         ],
     },
     -1505: {
@@ -158,6 +169,28 @@ ERROR_CATALOG: Dict[int, Dict[str, Any]] = {
         "causes": [
             "Incorrect username or password on /api/v2/login.",
             "Expired or evicted server-side session token/cookie on subsequent API calls.",
+        ],
+    },
+    -33598: {
+        "title": "Device does not support Network Isolation",
+        "meaning": ("The controller refused enabling VLAN network isolation because no adopting/capable "
+                    "gateway or switch on the site supports Network Isolation on that network."),
+        "fix": ("Adopt an isolation-capable Omada gateway/switch or use gateway ACL rules on "
+                "controller-only/standalone sites instead."),
+        "ambiguous": False,
+        "causes": [
+            "Site has no adopted Omada gateway/switch supporting VLAN isolation (existNetworkIsolation=false).",
+        ],
+    },
+    -33601: {
+        "title": "Invalid ACL destination type",
+        "meaning": ("Invalid gateway ACL destination type for the chosen rule direction (for example, "
+                    "using destinationType=0 'network' on a LAN->WAN rule)."),
+        "fix": ("For LAN->WAN rules, use destination.type='ip_group' (e.g. 'IPGroup_Any') or "
+                "'port_group'; destination.type='network' is only valid when direction.lanToLan is enabled."),
+        "ambiguous": False,
+        "causes": [
+            "destinationType=0 (network) selected on a LAN->WAN gateway ACL without lanToLan.",
         ],
     },
     -33717: {
@@ -233,7 +266,7 @@ def _endpoint_context(code: int, endpoint: Optional[str], method: Optional[str])
                 "temporary group before deleting.")
     if code == -1001 and "lan/networks" in ep:
         return ("PATCHing a LAN network requires the complete object from setting/lan/networks/"
-                "interface with lanNetworkIpv6Config.proto present (e.g. 'none').")
+                "interface with lanNetworkIpv6Config={'proto': 'none', 'enable': 0} present.")
     if code == -1 and "clients" in ep:
         return ("PATCHing clients/{MAC} requires ipSetting.netId (the LAN network hex id) and "
                 "Admin privileges.")

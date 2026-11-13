@@ -163,13 +163,14 @@ class MockController:
         self.silent_noop_for: set[Any] = set()
         self.corrupt_dhcp_on_patch: bool = False
         self.drop_collection_isolation_sync: bool = False
+        self.omada62_lan_normalization: bool = False
         self.next_fault_hook: Optional[
             Callable[[str, str, Any], Optional[Tuple[int, Dict[str, Any]]]]
         ] = None
 
     @property
     def write_request_count(self) -> int:
-        return sum(1 for req in self.requests if req["method"] in ("POST", "PATCH", "DELETE")
+        return sum(1 for req in self.requests if req["method"] in ("POST", "PATCH", "PUT", "DELETE")
                    and not req["path"].endswith("/api/v2/login"))
 
     def _next_id(self, prefix: str) -> str:
@@ -307,9 +308,9 @@ class MockController:
                 status, payload = custom
                 return self._json_response(payload, status=status)
 
-        if method.upper() in ("POST", "PATCH", "DELETE"):
+        if method.upper() in ("POST", "PATCH", "PUT", "DELETE"):
             if "viewer" in self.role.lower():
-                return self._err(-41011, "No permission for Viewer role.")
+                return self._err(-1007, "The current user does not have permissions to access this page.")
 
         if self._match_fault_set(self.silent_noop_for, method, full_path) and method.upper() != "GET":
             return self._ok({})
@@ -417,12 +418,19 @@ class MockController:
                     return self._err(-1001, "PATCH body must be JSON object.")
                 v6 = body.get("lanNetworkIpv6Config")
                 if not isinstance(v6, Mapping) or not v6.get("proto"):
-                    return self._err(-1001, "lanNetworkIpv6Config.proto is required.")
+                    return self._err(-1001, "Parameter [proto] should not be null.")
+                if v6.get("enable") is None:
+                    return self._err(-1001, "Parameter [enable] should not be null.")
                 idx = next((i for i, item in enumerate(self.lan_interfaces) if str(item["id"]) == nid), None)
                 if idx is None:
                     return self._err(-1600, "Network not found.")
                 new_iface = copy.deepcopy(dict(body))
                 new_iface["id"] = nid
+                if self.omada62_lan_normalization:
+                    new_v6 = dict(new_iface.get("lanNetworkIpv6Config") or {})
+                    new_v6.pop("proto", None)
+                    new_iface["lanNetworkIpv6Config"] = new_v6
+                    new_iface["qosQueueEnable"] = False
                 if self.corrupt_dhcp_on_patch and isinstance(new_iface.get("dhcpSettings"), dict):
                     new_iface["dhcpSettings"]["leaseTime"] = 999
                 self.lan_interfaces[idx] = new_iface
@@ -457,9 +465,9 @@ class MockController:
                     return self._err(-1, "Group name already exists.")
                 new_id = self._next_id("grp-new")
                 created = copy.deepcopy(dict(body))
-                created["id"] = new_id
+                created["groupId"] = new_id
                 self.groups.append(created)
-                return self._ok({"id": new_id})
+                return self._ok(new_id)
             return self._err(-1600, "No PATCH support on setting/profiles/groups.")
 
         # DELETE without {type} segment returns -1600
@@ -481,7 +489,8 @@ class MockController:
                     return self._err(-33717, f"Group {gid} is referenced by ACL {acl.get('id')}.")
             before_len = len(self.groups)
             self.groups = [
-                g for g in self.groups if not (str(g.get("id")) == gid and int(g.get("type", 0)) == gtype)
+                g for g in self.groups
+                if not (str(g.get("groupId") or g.get("id")) == gid and int(g.get("type", 0)) == gtype)
             ]
             if len(self.groups) == before_len:
                 return self._err(-1600, "Group not found.")
@@ -498,6 +507,9 @@ class MockController:
             if method == "POST":
                 if not isinstance(body, Mapping):
                     return self._err(-1001, "Invalid ACL body.")
+                direction = body.get("direction") if isinstance(body.get("direction"), Mapping) else {}
+                if direction.get("lanToWan") and not direction.get("lanToLan") and int(body.get("destinationType", -1)) == 0:
+                    return self._err(-33601, "Invalid Destination Type.")
                 new_id = self._next_id("acl-new")
                 created = copy.deepcopy(dict(body))
                 created["id"] = new_id
@@ -507,20 +519,23 @@ class MockController:
             return self._err(-1600, "Method not supported.")
 
         m_acl_id = re.fullmatch(r"sites/([^/]+)/setting/firewall/acls/([^/]+)", ep)
-        if m_acl_id and method == "PATCH":
-            if params.get("type", [""])[0] != "0":
-                return self._err(-1600, "Gateway ACL PATCH requires ?type=0.")
-            acl_id = m_acl_id.group(2)
-            idx = next((i for i, a in enumerate(self.acls) if str(a.get("id")) == acl_id), None)
-            if idx is None:
-                return self._err(-1600, "ACL rule not found.")
-            updated = copy.deepcopy(self.acls[idx])
-            if isinstance(body, Mapping):
-                for k, v in body.items():
-                    updated[k] = copy.deepcopy(v)
-            updated["id"] = acl_id
-            self.acls[idx] = updated
-            return self._ok({})
+        if m_acl_id:
+            if method == "PATCH":
+                return self._err(-1600, "Unsupported request path.")
+            if method == "PUT":
+                if params.get("type", [""])[0] != "0":
+                    return self._err(-1600, "Gateway ACL PUT requires ?type=0.")
+                acl_id = m_acl_id.group(2)
+                idx = next((i for i, a in enumerate(self.acls) if str(a.get("id")) == acl_id), None)
+                if idx is None:
+                    return self._err(-1600, "ACL rule not found.")
+                updated = copy.deepcopy(self.acls[idx])
+                if isinstance(body, Mapping):
+                    for k, v in body.items():
+                        updated[k] = copy.deepcopy(v)
+                updated["id"] = acl_id
+                self.acls[idx] = updated
+                return self._ok({})
 
         m_wlans = re.fullmatch(r"sites/([^/]+)/setting/wlans", ep)
         if m_wlans and method == "GET":

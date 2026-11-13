@@ -561,6 +561,21 @@ def _endpoint_covers_ip(
     return covers, is_any
 
 
+def _group_id(group: Mapping[str, Any]) -> str:
+    """Return a group ID across real Omada (``groupId``) and legacy/mock (``id``) shapes."""
+    return str(group.get("groupId") or group.get("id") or "").strip()
+
+
+def _normalize_group_output(group_obj: Mapping[str, Any]) -> Dict[str, Any]:
+    """Ensure tool output exposes both ``groupId`` and ``id`` without altering snapshots."""
+    out = dict(group_obj)
+    gid = _group_id(out)
+    if gid:
+        out.setdefault("groupId", gid)
+        out.setdefault("id", gid)
+    return out
+
+
 def _check_acl_safety(
     client: OmadaClient,
     *,
@@ -586,7 +601,7 @@ def _check_acl_safety(
         return
 
     networks_by_id = {str(n.get("id")): n for n in networks if n.get("id")}
-    groups_by_id = {str(g.get("id")): g for g in groups if g.get("id")}
+    groups_by_id = {_group_id(g): g for g in groups if _group_id(g)}
     lan_to_lan = bool(direction.get("lanToLan"))
     lan_to_wan = bool(direction.get("lanToWan"))
 
@@ -748,17 +763,38 @@ def _strip_client_volatiles(client_obj: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _ensure_lan_patch_body(iface_obj: Mapping[str, Any]) -> Tuple[Dict[str, Any], bool]:
-    """Return a deep copy with ``lanNetworkIpv6Config.proto`` guaranteed non-null."""
+    """Return a deep copy with ``lanNetworkIpv6Config.proto`` and ``enable`` guaranteed non-null."""
     body = copy.deepcopy(dict(iface_obj))
     ipv6 = body.get("lanNetworkIpv6Config")
     defaulted_ipv6 = False
     if not isinstance(ipv6, dict):
-        body["lanNetworkIpv6Config"] = {"proto": "none"}
+        body["lanNetworkIpv6Config"] = {"proto": "none", "enable": 0}
         defaulted_ipv6 = True
-    elif ipv6.get("proto") in (None, ""):
-        ipv6["proto"] = "none"
-        defaulted_ipv6 = True
+    else:
+        if ipv6.get("proto") in (None, ""):
+            ipv6["proto"] = "none"
+            defaulted_ipv6 = True
+        if ipv6.get("enable") is None:
+            proto_val = str(ipv6.get("proto") or "none").strip().lower()
+            ipv6["enable"] = 0 if proto_val == "none" else 1
+            defaulted_ipv6 = True
     return body, defaulted_ipv6
+
+
+def _lan_drift_ignore_keys(
+    iface_before: Mapping[str, Any],
+    iface_after: Mapping[str, Any],
+    base_keys: Sequence[str],
+    *,
+    defaulted_ipv6: bool,
+) -> List[str]:
+    """Ignore expected intent keys plus benign defaults populated by Omada on LAN PATCH."""
+    ignored = list(base_keys)
+    if defaulted_ipv6:
+        ignored.append("lanNetworkIpv6Config")
+    if "qosQueueEnable" not in iface_before and iface_after.get("qosQueueEnable") is False:
+        ignored.append("qosQueueEnable")
+    return ignored
 
 
 def _diff_mappings(
@@ -1126,9 +1162,6 @@ def set_vlan_isolation(
         )
 
     endpoint = f"sites/{site.site_id}/setting/lan/networks/{target_id}"
-    ignore_keys = ["isolation"]
-    if defaulted_ipv6:
-        ignore_keys.append("lanNetworkIpv6Config")
 
     def _read_back() -> Dict[str, Any]:
         col_after, iface_after = _fetch_lan_pair(client, site, net_id=target_id)
@@ -1145,6 +1178,12 @@ def set_vlan_isolation(
         if "isolation" in col_after and bool(col_after.get("isolation")) != desired:
             return False, (f"collection isolation expected {desired}, "
                            f"got {col_after.get('isolation')!r}")
+        ignore_keys = _lan_drift_ignore_keys(
+            iface_before,
+            iface_after,
+            ["isolation"],
+            defaulted_ipv6=defaulted_ipv6,
+        )
         drifts = _diff_mappings(iface_before, iface_after, ignore_keys=ignore_keys)
         if drifts:
             return False, "unexpected field drift on LAN interface after PATCH: " + ", ".join(drifts)
@@ -1257,10 +1296,20 @@ def set_vlan_dhcp_pools(
     warnings: List[str] = []
     if not dhcp_before.get("enable"):
         warnings.append("dhcpSettings.enable is currently false on this network; leases will not be served until enabled")
-    rollback = {
-        "tool": "set_vlan_dhcp_pools",
-        "arguments": {"netId": target_id, "pools": before_pools, "dryRun": True},
-    } if before_pools else None
+    rollback: Optional[Dict[str, Any]] = None
+    if before_pools:
+        try:
+            _check_dhcp_pools_safety(client, iface_before, before_pools, devices)
+        except OmadaError:
+            warnings.append(
+                "previous controller dhcpSettings.ipRangePool overlapped the gateway or controller IP; "
+                "automatic rollback via set_vlan_dhcp_pools was omitted"
+            )
+        else:
+            rollback = {
+                "tool": "set_vlan_dhcp_pools",
+                "arguments": {"netId": target_id, "pools": before_pools, "dryRun": True},
+            }
 
     if dryRun:
         return _dry_run_result(
@@ -1274,15 +1323,13 @@ def set_vlan_dhcp_pools(
         )
 
     endpoint = f"sites/{site.site_id}/setting/lan/networks/{target_id}"
-    ignore_keys = [
+    dhcp_ignore_base = [
         "dhcpSettings.ipRangePool",
         "dhcpSettings.ipaddrStart",
         "dhcpSettings.ipaddrEnd",
         "dhcpSettings.ipRangeStart",
         "dhcpSettings.ipRangeEnd",
     ]
-    if defaulted_ipv6:
-        ignore_keys.append("lanNetworkIpv6Config")
 
     def _read_back() -> Dict[str, Any]:
         col_after, iface_after = _fetch_lan_pair(client, site, net_id=target_id)
@@ -1302,6 +1349,12 @@ def set_vlan_dhcp_pools(
             if col_dhcp.get("ipRangePool") != normalized_pools:
                 return False, (f"collection dhcpSettings.ipRangePool expected {normalized_pools!r}, "
                                f"got {col_dhcp.get('ipRangePool')!r}")
+        ignore_keys = _lan_drift_ignore_keys(
+            iface_before,
+            iface_after,
+            dhcp_ignore_base,
+            defaulted_ipv6=defaulted_ipv6,
+        )
         drifts = _diff_mappings(iface_before, iface_after, ignore_keys=ignore_keys)
         if drifts:
             return False, "unexpected field drift on LAN interface after PATCH: " + ", ".join(drifts)
@@ -1373,14 +1426,14 @@ def set_vlan_dhcp_pools(
 def _find_ip_group(groups: Sequence[Mapping[str, Any]], needle: str) -> Dict[str, Any]:
     ip_groups = [dict(g) for g in groups if int(g.get("type", 0)) == 0]
     key = str(needle or "").strip()
-    by_id = [g for g in ip_groups if str(g.get("id")) == key]
+    by_id = [g for g in ip_groups if _group_id(g) == key]
     if by_id:
         return by_id[0]
     by_name = [g for g in ip_groups if str(g.get("name", "")).strip().lower() == key.lower()]
     if len(by_name) == 1:
         return by_name[0]
     if len(by_name) > 1:
-        ids = ", ".join(str(g.get("id")) for g in by_name)
+        ids = ", ".join(_group_id(g) for g in by_name)
         raise OmadaError(f"group {needle!r} matched multiple IP groups ({ids}); specify id")
     raise OmadaError(f"no IPv4 IP group (type=0) matches {needle!r}")
 
@@ -1409,7 +1462,7 @@ def create_ip_group(
     )
     if existing is not None:
         raise OmadaError(
-            f"IP group {group_name!r} already exists (id={existing.get('id')})",
+            f"IP group {group_name!r} already exists (id={_group_id(existing)})",
             hint="use replace_ip_group to update an existing group's entries",
         )
 
@@ -1467,9 +1520,13 @@ def create_ip_group(
         reauth_prepare=_reauth_prepare,
         fields_changed=["name", "type", "ipList"],
     )
-    created_obj = next(
-        (g for g in write_res["after"] if str(g.get("name")) == group_name),
-        {"id": write_res.get("result"), **body},
+    raw_res = write_res.get("result")
+    fallback_id = (raw_res.get("groupId") or raw_res.get("id")) if isinstance(raw_res, Mapping) else raw_res
+    created_obj = _normalize_group_output(
+        next(
+            (g for g in write_res["after"] if str(g.get("name")) == group_name),
+            {"groupId": fallback_id, **body},
+        )
     )
     return _committed_result(
         tool_name="create_ip_group",
@@ -1515,7 +1572,7 @@ def replace_ip_group(
             f"refusing to replace built-in/protected group {target_group.get('name')!r}",
         )
 
-    old_id = str(target_group["id"])
+    old_id = _group_id(target_group)
     group_name = str(target_group["name"])
     group_type = int(target_group.get("type", 0))
     _require_confirm("replace_ip_group", old_id, dryRun, confirm)
@@ -1532,7 +1589,7 @@ def replace_ip_group(
     # Check anti-stranding against any active deny ACL rules referencing this group.
     if ref_rules:
         simulated_groups = [
-            ({**g, "ipList": new_ip_list} if str(g.get("id")) == old_id else g)
+            ({**g, "ipList": new_ip_list} if _group_id(g) == old_id else g)
             for g in groups_before
         ]
         for rule in ref_rules:
@@ -1575,6 +1632,7 @@ def replace_ip_group(
         ]
 
     proposed_after = {
+        "groupId": "<new-group-id>",
         "id": "<new-group-id>",
         "name": group_name,
         "type": group_type,
@@ -1624,7 +1682,7 @@ def replace_ip_group(
             snapshot_payload=snap_extra,
             read_back=_read_ip_groups,
             verify_fn=lambda _b, groups_now: (
-                (all(str(g.get("id")) != gid for g in groups_now),
+                (all(_group_id(g) != gid for g in groups_now),
                  f"group {gid} still present after DELETE")
             ),
             fields_changed=[step_label],
@@ -1664,7 +1722,7 @@ def replace_ip_group(
         )
         snapshots.append(str(res["snapshot"]))
         created = next(g for g in res["after"] if str(g.get("name")) == gname)
-        completed.append({"action": step_label, "groupId": created.get("id"), "snapshot": res["snapshot"]})
+        completed.append({"action": step_label, "groupId": _group_id(created), "snapshot": res["snapshot"]})
         return created
 
     def _repoint_rule(rule: Dict[str, Any], from_id: str, to_id: str, step_label: str) -> None:
@@ -1700,7 +1758,7 @@ def replace_ip_group(
 
         res = client.write(
             acl_ep,
-            method="PATCH",
+            method="PUT",
             data=patched_rule,
             tool_name="replace_ip_group",
             target=rid,
@@ -1718,7 +1776,7 @@ def replace_ip_group(
         if not ref_rules:
             _delete_group(old_id, "delete_old_group", {"targetGroup": target_group})
             created = _create_group(group_name, new_ip_list, "recreate_group")
-            new_id = str(created.get("id") or "")
+            new_id = _group_id(created)
         else:
             existing_names = {str(g.get("name")) for g in groups_before}
             tmp_name = f"{group_name}__tmp"
@@ -1727,12 +1785,12 @@ def replace_ip_group(
                 suffix += 1
                 tmp_name = f"{group_name}__tmp_{suffix}"
             tmp_group = _create_group(tmp_name, old_ip_list, "create_temp_group")
-            tmp_id = str(tmp_group["id"])
+            tmp_id = _group_id(tmp_group)
             for rule in ref_rules:
                 _repoint_rule(rule, old_id, tmp_id, "repoint_acls_to_temp")
             _delete_group(old_id, "delete_old_group", {"targetGroup": target_group, "tmpId": tmp_id})
             created = _create_group(group_name, new_ip_list, "recreate_group")
-            new_id = str(created["id"])
+            new_id = _group_id(created)
             for rule in ref_rules:
                 # Re-fetch rule with tmp_id so full object reflects live rule state.
                 _, live_acls = _fetch_acls(client, site)
@@ -1753,7 +1811,7 @@ def replace_ip_group(
 
     # Final verification of the recreated group and any referencing ACLs.
     final_groups = _read_ip_groups()
-    final_group = next((g for g in final_groups if str(g.get("id")) == new_id), None)
+    final_group = next((g for g in final_groups if _group_id(g) == new_id), None)
     if final_group is None or _ip_list_canonical(final_group.get("ipList") or []) != expected_new_pairs:
         raise OmadaError("final IP group verification failed after replace_ip_group")
     if ref_rules:
@@ -1778,7 +1836,7 @@ def replace_ip_group(
         tool_name="replace_ip_group",
         target_id=old_id,
         before=target_group,
-        after=final_group,
+        after=_normalize_group_output(final_group),
         diff=diff,
         snapshot=snapshots[0] if snapshots else None,
         warnings=warnings,
@@ -1845,13 +1903,15 @@ def _resolve_acl_endpoint(
             resolved.append(str(found["id"]))
         elif ep_type == 1:
             found_g = next(
-                (g for g in groups if str(g.get("id")) == needle
-                 or str(g.get("name", "")).strip().lower() == needle.lower()),
+                (g for g in groups
+                 if int(g.get("type", 0)) == 0
+                 and (_group_id(g) == needle
+                      or str(g.get("name", "")).strip().lower() == needle.lower())),
                 None,
             )
             if found_g is None:
                 raise OmadaError(f"{label}: no IP group matches {needle!r}")
-            resolved.append(str(found_g["id"]))
+            resolved.append(_group_id(found_g))
         else:
             resolved.append(needle)
     return ep_type, resolved
@@ -1910,6 +1970,18 @@ def create_gateway_acl(
     groups = _fetch_groups(client, site)
     src_type, src_ids = _resolve_acl_endpoint(source, label="source", networks=networks, groups=groups)
     dst_type, dst_ids = _resolve_acl_endpoint(destination, label="destination", networks=networks, groups=groups)
+    if (
+        norm_direction["lanToWan"]
+        and not norm_direction["lanToLan"]
+        and not norm_direction["wanInIds"]
+        and not norm_direction["vpnInIds"]
+        and dst_type == 0
+    ):
+        raise OmadaError(
+            "LAN->WAN gateway ACL rules do not accept destination.type='network' (controller returns -33601)",
+            code=-33601,
+            hint="use destination.type='ip_group' (e.g. 'IPGroup_Any') or 'port_group' for LAN->WAN rules",
+        )
 
     _check_acl_safety(
         client,
@@ -2133,7 +2205,7 @@ def set_acl_rule_status(
 
     write_res = client.write(
         endpoint,
-        method="PATCH",
+        method="PUT",
         data=patch_body,
         tool_name="set_acl_rule_status",
         target=target_id,

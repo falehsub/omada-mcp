@@ -1,6 +1,6 @@
 [
   {
-    "id": "grp-devices-01",
+    "groupId": "grp-devices-01",
     "name": "lab-devices",
     "type": 0,
     "resource": 0,

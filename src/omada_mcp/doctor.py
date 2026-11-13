@@ -325,9 +325,9 @@ def _phase_write(client: OmadaClient, config: Config, report: Report) -> None:
         report.add(PhaseResult(
             "write", WARN,
             f"enabled tools={tools_label} account={username} role={privilege} "
-            f"snapshotDir={snap_label}{mgmt_suffix} — Viewer role cannot execute writes (-41011)",
+            f"snapshotDir={snap_label}{mgmt_suffix} — Viewer role cannot execute writes (-1007 / -41011)",
             hint=("switch OMADA_USERNAME to a dedicated Admin account separate from your web UI "
-                  "and read-only sessions to avoid -41011 and session eviction"),
+                  "and read-only sessions to avoid -1007/-41011 write rejections and session eviction"),
         ))
         return
     if not privilege:

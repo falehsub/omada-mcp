@@ -366,8 +366,11 @@ table below maps the symptoms it cannot see.
 | `-1600` everywhere | Wrong path shape (`GET /networks/{id}`, missing `/{type}` on group DELETE, no PATCH on groups) **or** burst rate-limiting | Reads retry once after 0.8 s; writes never auto-retry `-1600` |
 | `-33717` on group delete | Group is referenced by one or more ACL rules | Use `replace_ip_group`, which performs the 6-step temp-group ACL swap automatically |
 | `-33726` on an IP group write | The group holds at most **16** entries | Store ranges as network-aligned CIDRs (packed automatically by `create_ip_group`/`replace_ip_group`) |
-| `-1001` "bean validation" | A mandatory field missing from a PATCH body — for LAN networks it is `lanNetworkIpv6Config.proto: "none"` | Send the whole object (handled automatically by LAN write tools) |
-| `-41011` | Client endpoints are **Admin-only**, client does not exist, **or MAC belongs to a managed device** | Use `insight/clients` or `list_devices` to inspect; use a dedicated Admin account for writes |
+| `-1001` "bean validation" | A mandatory field missing from a PATCH body — for LAN networks it is `lanNetworkIpv6Config` (`proto: "none"`, `enable: 0`) | Send the whole object (handled automatically by LAN write tools) |
+| `-1007` "no permission" | Current user role lacks write permission (e.g. Viewer account on Omada 6.2.x) | Use a dedicated Admin account for writes; keep Viewer for read-only mode |
+| `-33598` "network isolation" | No adopted gateway/switch on the site supports Network Isolation | Adopt an isolation-capable gateway/switch or use gateway ACLs instead |
+| `-33601` "invalid destination type" | `destinationType: 0` (`network`) used on a `LAN->WAN` gateway ACL | Use an IP group (e.g. `IPGroup_Any`) or port group on `LAN->WAN` rules |
+| `-41011` | Client does not exist, MAC belongs to a managed device, **or** Viewer role on `/clients/*` | Use `insight/clients` or `list_devices` to inspect; use a dedicated Admin account for writes |
 | `-44116` | You are on the Open API without Platform Integration | Use this server (Web API) instead |
 | HTTP 200 with HTML in response | The controller's **server-side** session died (cookie is still valid for 15 days) — another login for the same account, or a restart | Automatic: the client re-authenticates once and replays |
 | `CERTIFICATE_VERIFY_FAILED` | Self-signed controller cert, IP/SAN mismatch, or Python 3.13+ strict X509 | Set `OMADA_CA_BUNDLE` to the controller CA, `OMADA_STRICT_X509=false`, and `OMADA_TLS_SERVER_NAME=Omada` when connecting by IP; `OMADA_VERIFY_SSL=false` only as a last resort |
@@ -381,8 +384,12 @@ table below maps the symptoms it cannot see.
 See [`docs/compatibility.md`](docs/compatibility.md) for the full compatibility table.
 
 * **Software controller v6.x** — read-only path (`--doctor --json` and read tools)
-  verified live on v6.2.10.17 (`TPOMADA_SESSIONID`); write flows verified against
-  the stateful mock controller seeded from probed v6.x payloads.
+  verified live on v6.2.10.17 (`TPOMADA_SESSIONID`), and write flows (`create_ip_group`,
+  `replace_ip_group`, `create_gateway_acl`, `set_acl_rule_status`, `set_vlan_dhcp_pools`,
+  `set_vlan_isolation`, `get_config_snapshot`, plus Viewer `-1007` and missing-client
+  `-41011` handling) verified live against an isolated Docker Omada Controller v6.2.14.11;
+  client fixed-IP lease-delayed behavior (`set_client_fixed_ip`/`release_client_fixed_ip`)
+  and adopted-gateway isolation verified against the stateful mock controller.
 * **Software controller v5.x** — expected (v5.13.30.8 core auth/list shapes
   supported; awaiting a `--doctor --json` capture via the issue template).
 * **OC200 / OC300 hardware & `TPEAP_SESSIONID` builds** — expected (`--doctor`

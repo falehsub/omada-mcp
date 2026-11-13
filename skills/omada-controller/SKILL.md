@@ -179,7 +179,7 @@ were unreachable through the Web API is wrong):
 |---|---|
 | List gateway ACLs | `GET .../setting/firewall/acls?type=0&currentPage=1&currentPageSize=100` |
 | Create gateway ACL | `POST .../setting/firewall/acls?type=0` |
-| Toggle single ACL rule | `PATCH .../setting/firewall/acls/{aclId}?type=0` |
+| Update / toggle single ACL rule | `PUT .../setting/firewall/acls/{aclId}?type=0` |
 | List groups | `GET .../setting/profiles/groups` |
 | Create group | `POST .../setting/profiles/groups` |
 | Delete group | `DELETE .../setting/profiles/groups/{type}/{groupId}` |
@@ -203,7 +203,7 @@ Group object (`type: 0` = IP group):
  "ipList": [{"ip": "192.168.20.180", "mask": 32, "description": ""}]}
 ```
 
-* `POST` returns the new `groupId`.
+* `POST` returns the new `groupId` (bare string on 6.2.14+, `{"id": ...}` on older builds). `GET .../setting/profiles/groups` returns `groupId` on 6.2.x.
 * `DELETE` **requires the type segment**: `/groups/0/{groupId}`. Without it,
   `-1600 Unsupported request path`.
 * There is no `PATCH`/`PUT` on groups — delete and recreate.
@@ -236,13 +236,16 @@ group used for "to WAN".
 | Code | Meaning | What to do |
 |---|---|---|
 | `-1` | General error — usually a mandatory field missing from the body | Compare against a full `GET` of the object |
-| `-1001` | Bean validation (`Parameter [x] should not be null`) | For LAN networks: nest `lanNetworkIpv6Config.proto: "none"` |
+| `-1001` | Bean validation (`Parameter [x] should not be null`) | For LAN networks: include `lanNetworkIpv6Config: {"proto": "none", "enable": 0}` |
+| `-1007` | Current user does not have permission for this endpoint/operation | Use a dedicated Admin account for writes (observed when Viewer attempts writes on 6.2.14+) |
 | `-1505` | No permission for this site | Use the hex site id, not the name |
-| `-1600` | Unsupported request path **or** burst rate-limiting | See below — the same code means both |
+| `-1600` | Unsupported request path **or** burst rate-limiting | See below — the same code means both (`PATCH .../acls/{id}` also returns `-1600`; use `PUT`) |
 | `-30109` | Session expired | Re-authenticate |
+| `-33598` | Device does not support Network Isolation | Site has no isolation-capable adopted gateway/switch (`existNetworkIsolation=false`) |
+| `-33601` | Invalid ACL destination type | `destinationType=0` (`network`) is disallowed on `LAN->WAN` rules; use `IPGroup_Any` (`type=1`) |
 | `-33717` | IP/port group is referenced by an ACL rule | Re-point ACL rule(s) to a temporary group first, delete/recreate, re-point back |
 | `-33726` | IP group full (16 entries max) | Use aligned CIDRs |
-| `-41011` | Client does not exist, target MAC is a managed device, or Viewer role | Use `insight/clients` or `/devices` for read; use a dedicated Admin account for writes |
+| `-41011` | Client does not exist, target MAC is a managed device, or Viewer role on `/clients/*` | Use `insight/clients` or `/devices` for read; use a dedicated Admin account for writes |
 | `-44116` | Open API not enabled | Use the Web API |
 
 ### `-1600` is overloaded

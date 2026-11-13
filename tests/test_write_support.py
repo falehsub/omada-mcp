@@ -217,6 +217,15 @@ class PackIpEntriesTests(unittest.TestCase):
         info_perm = explain_error_code(-41011)
         self.assertIn("device", info_perm["meaning"].lower())
 
+    def test_error_catalog_includes_v62_real_controller_codes(self):
+        for code in (-1007, -33598, -33601):
+            self.assertIn(code, ERROR_CATALOG)
+            info = explain_error_code(code)
+            self.assertTrue(info["known"])
+        self.assertIn("viewer", explain_error_code(-1007)["meaning"].lower())
+        self.assertIn("isolation", explain_error_code(-33598)["meaning"].lower())
+        self.assertIn("destination", explain_error_code(-33601)["meaning"].lower())
+
 
 class GateAndProtocolTests(unittest.TestCase):
     def test_read_only_gate_refuses_before_arg_validation_and_transport(self):
@@ -511,7 +520,29 @@ class FlowBVlanTests(unittest.TestCase):
             iface_40 = next(n for n in ctrl.lan_interfaces if n["id"] == "net-lab-40")
             self.assertTrue(col_40["isolation"])
             self.assertTrue(iface_40["isolation"])
-            self.assertEqual(iface_40["lanNetworkIpv6Config"], {"proto": "none"})
+            self.assertEqual(iface_40["lanNetworkIpv6Config"], {"proto": "none", "enable": 0})
+
+    def test_omada62_lan_normalization_and_overlapping_before_pool_rollback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, ctrl, _ = make_write_env(tmp)
+            ctrl.omada62_lan_normalization = True
+            # Simulate factory-default DHCP pool overlapping gateway 192.168.40.1
+            iface_40 = next(n for n in ctrl.lan_interfaces if n["id"] == "net-lab-40")
+            iface_40["dhcpSettings"]["ipRangePool"] = [
+                {"ipaddrStart": "192.168.40.1", "ipaddrEnd": "192.168.40.254"}
+            ]
+            new_pools = [{"ipaddrStart": "192.168.40.50", "ipaddrEnd": "192.168.40.200"}]
+            res = unwrap_ok(call_tool(server, "set_vlan_dhcp_pools", {
+                "vlan": 40,
+                "pools": new_pools,
+                "dryRun": False,
+                "confirm": "set_vlan_dhcp_pools:net-lab-40",
+            }))
+            self.assertTrue(res["applied"])
+            self.assertTrue(res["verified"])
+            self.assertEqual(res["after"]["ipRangePool"], new_pools)
+            self.assertIsNone(res["rollback"])
+            self.assertTrue(any("rollback" in w.lower() for w in res["warnings"]))
 
     def test_silent_noop_and_collection_desync_fail_verification(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -654,13 +685,13 @@ class FlowCIpGroupsAndAclTests(unittest.TestCase):
     def test_replace_ip_group_mid_swap_failure_reports_recovery_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, ctrl, _ = make_write_env(tmp)
-            # Fail on 2nd ACL PATCH (re-pointing acl-002 from tmp group back to recreated group)
-            patch_count = [0]
+            # Fail on 2nd ACL PUT (re-pointing acl-002 from tmp group back to recreated group)
+            put_count = [0]
 
             def fail_repoint_final(method: str, path: str, _body):
-                if method == "PATCH" and "setting/firewall/acls/acl-002" in path:
-                    patch_count[0] += 1
-                    if patch_count[0] == 2:
+                if method == "PUT" and "setting/firewall/acls/acl-002" in path:
+                    put_count[0] += 1
+                    if put_count[0] == 2:
                         return 200, {"errorCode": -1600, "msg": "Simulated mid-swap ACL failure"}
                 return None
 
@@ -797,7 +828,56 @@ class SnapshotAndDoctorTests(unittest.TestCase):
             doc_v = json.loads(stream_v.getvalue())
             write_phase_v = next(p for p in doc_v["phases"] if p["name"] == "write")
             self.assertEqual(write_phase_v["status"], "WARN")
+            self.assertIn("-1007", write_phase_v["detail"])
             self.assertIn("-41011", write_phase_v["detail"])
+
+    def test_viewer_write_returns_minus_1007(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, ctrl, _ = make_write_env(tmp)
+            ctrl.role = "Viewer"
+            resp = call_tool(server, "create_ip_group", {
+                "name": "viewer-denied",
+                "cidrs": ["192.168.20.200/32"],
+                "dryRun": False,
+                "confirm": "create_ip_group:viewer-denied",
+            })
+            self.assertTrue(resp["result"]["isError"])
+            self.assertIn("-1007", resp["result"]["content"][0]["text"])
+
+    def test_create_gateway_acl_rejects_network_dest_on_lan_to_wan_and_uses_put(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, _client, ctrl, _ = make_write_env(tmp)
+            bad = call_tool(server, "create_gateway_acl", {
+                "name": "invalid-wan-dest",
+                "policy": "deny",
+                "source": {"type": "ip_group", "ids": ["lab-devices"]},
+                "destination": {"type": "network", "ids": ["Default"]},
+                "direction": {"lanToWan": True, "lanToLan": False},
+            })
+            self.assertTrue(bad["result"]["isError"])
+            self.assertIn("-33601", bad["result"]["content"][0]["text"])
+            self.assertEqual(ctrl.write_request_count, 0)
+
+            created_grp = unwrap_ok(call_tool(server, "create_ip_group", {
+                "name": "v62-group-id-only",
+                "cidrs": ["192.168.20.210/32"],
+                "dryRun": False,
+                "confirm": "create_ip_group:v62-group-id-only",
+            }))
+            gid = created_grp["after"]["groupId"]
+            self.assertEqual(created_grp["after"]["id"], gid)
+
+            toggled = unwrap_ok(call_tool(server, "set_acl_rule_status", {
+                "rule": "acl-002",
+                "status": False,
+                "dryRun": False,
+                "confirm": "set_acl_rule_status:acl-002",
+            }))
+            self.assertTrue(toggled["applied"])
+            self.assertIs(toggled["after"]["status"], False)
+            acl_writes = [r for r in ctrl.requests if "setting/firewall/acls/acl-002" in r["path"]]
+            self.assertTrue(any(r["method"] == "PUT" for r in acl_writes))
+            self.assertFalse(any(r["method"] == "PATCH" for r in acl_writes))
 
     def test_loopback_http_server_e2e(self):
         with tempfile.TemporaryDirectory() as tmp:
