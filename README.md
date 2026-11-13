@@ -390,6 +390,13 @@ document the parts of the controller that are not in any public reference:
 session expiry semantics, CIDR packing limits, dual-pool DHCP bodies, and the
 endpoints that are Admin-only.
 
+## Write support (planned for v1.2)
+
+Nothing in this release writes, and read-only remains the default. The implementation
+brief — verified endpoints and payloads, the read-modify-write flows, the safety contract
+(allowlist, two-phase apply, snapshot-before/verify-after) and a mock-controller test plan —
+lives in [`docs/write-support.md`](docs/write-support.md).
+
 ## Roadmap
 
 v1.0 is deliberately read-only. The next releases, in priority order, are listed

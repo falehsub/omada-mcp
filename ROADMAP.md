@@ -82,7 +82,13 @@ silent capability.
   `ipSetting.netId` (omitting it is `-1 General error`) and re-reads the object to
   prove the change.
 * Group writes respect `-33726`: refuse to create a 17th entry and explain the
-  CIDR packing alternative (`references/skill` documents the arithmetic).
+  CIDR packing alternative (aligned-CIDR arithmetic is specified in
+  [`docs/write-support.md`](docs/write-support.md), section 3.2).
+
+**Brief for the implementer:** [`docs/write-support.md`](docs/write-support.md) — the
+verified write surface, payloads, the read-modify-write flows, the traps that cost hours
+(two different VLAN read endpoints, `aclDisable` semantics, delete-needs-type, lease delay),
+the safety contract, and a mock-controller test plan.
 
 **Acceptance:** with `OMADA_READ_ONLY=true` a write tool is refused `-32003`;
 with the allowlist empty it is refused `-32601`-class; with both set, `dry_run`
