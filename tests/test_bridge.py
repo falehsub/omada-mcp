@@ -919,6 +919,91 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(fake.logins, 1)
 
 
+class ClientSourceTests(unittest.TestCase):
+    """Regressions for issues #1 and #2.
+
+    #1: list_clients and friends read only insight/clients, which omits ssid, ip,
+        apName and signal on 6.2.10.x, so monitoring showed blanks the controller
+        could have filled.
+    #2: search_clients documented VLAN/SSID filtering but rejected both arguments.
+    """
+
+    def _server(self, controller=None):
+        fake = controller or FakeController()
+        client = OmadaClient(make_config(), transport=fake, sleep=lambda _s: None,
+                             clock=lambda: 0.0, log_fn=lambda _m: None)
+        return Server(client.config, client=client), fake
+
+    def _call(self, server, name, arguments=None):
+        response = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                  "params": {"name": name, "arguments": arguments or {}}})
+        return response
+
+    def _items(self, server, name, arguments=None):
+        result = self._call(server, name, arguments)["result"]
+        self.assertFalse(result.get("isError"), result)
+        return result["structuredContent"]["items"]
+
+    def test_list_clients_reads_the_rich_endpoint(self):
+        server, fake = self._server()
+        items = self._items(server, "list_clients")
+        wifi = next(c for c in items if c["wireless"])
+        self.assertEqual(wifi["ssid"], "lab")
+        self.assertEqual(wifi["apName"], "ap1")
+        self.assertEqual(wifi["ip"], "192.168.20.31")
+        urls = [r["url"] for r in fake.requests]
+        self.assertTrue(any("/clients" in u and "insight" not in u for u in urls), urls)
+        self.assertFalse(any("insight/clients" in u for u in urls), urls)
+
+    def test_list_clients_falls_back_to_insight_when_rich_endpoint_is_denied(self):
+        class DeniedRich(FakeController):
+            """Admin-denied /clients, working insight/clients — a Viewer account."""
+
+            def request(self, method, url, headers=None, data=None, timeout=None):
+                path = url.split("?", 1)[0]
+                if path.endswith("/clients") and "/insight/" not in path:
+                    return 200, json.dumps({"errorCode": -1007, "msg": "no permission"}).encode()
+                return super().request(method, url, headers=headers, data=data, timeout=timeout)
+
+        server, fake = self._server(DeniedRich())
+        items = self._items(server, "list_clients")
+        self.assertEqual(len(items), 2)
+        self.assertTrue(any("insight/clients" in r["url"] for r in fake.requests))
+
+    def test_search_clients_filters_by_vlan(self):
+        server, _ = self._server()
+        self.assertEqual([c["name"] for c in self._items(server, "search_clients", {"vlan": 20})],
+                         ["laptop"])
+        self.assertEqual([c["name"] for c in self._items(server, "search_clients", {"vlan": 1})],
+                         ["desktop"])
+        self.assertEqual(self._items(server, "search_clients", {"vlan": 99}), [])
+        # the declared schema is an integer, so a string is refused before the handler
+        self.assertIn("error", self._call(server, "search_clients", {"vlan": "20"}))
+
+    def test_search_clients_filters_by_ssid(self):
+        server, _ = self._server()
+        self.assertEqual([c["name"] for c in self._items(server, "search_clients", {"ssid": "LAB"})],
+                         ["laptop"])
+        self.assertEqual([c["name"] for c in self._items(server, "search_clients", {"ssid": "la"})],
+                         ["laptop"])
+        self.assertEqual(self._items(server, "search_clients", {"ssid": "nope"}), [])
+
+    def test_search_clients_rejects_an_invalid_vlan(self):
+        client, _, _ = make_client()
+        handler = TOOL_MAP["search_clients"].handler
+        for bad in ("abc", True, 9999, -1):
+            with self.assertRaises(OmadaError, msg=bad) as ctx:
+                handler(client, vlan=bad)
+            self.assertIn("vlan", str(ctx.exception).lower())
+
+    def test_search_clients_filters_compose(self):
+        server, _ = self._server()
+        self.assertEqual(len(self._items(server, "search_clients",
+                                        {"vlan": 20, "wireless": True, "guest": False})), 1)
+        self.assertEqual(self._items(server, "search_clients",
+                                     {"vlan": 20, "wireless": False}), [])
+
+
 class DoctorTests(unittest.TestCase):
     def _run(self, config=None, factory=None, client_factory=None, stream=None):
         stream = stream or io.StringIO()

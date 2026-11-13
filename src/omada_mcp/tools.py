@@ -265,21 +265,40 @@ def _list_devices(client: OmadaClient) -> List[Dict[str, Any]]:
     return [project_device(row) for row in rows]
 
 
-def _fetch_clients(client: OmadaClient, limit: int = 500) -> List[Dict[str, Any]]:
-    site = _site(client)
+def _coerce_vlan(value: Any) -> Optional[int]:
+    """Validate a caller-supplied VLAN id, refusing the ambiguous cases."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise OmadaError("vlan must be an integer, not a boolean")
+    try:
+        vlan = int(str(value).strip())
+    except (TypeError, ValueError):
+        raise OmadaError(
+            f"vlan must be an integer, got {value!r}",
+            hint="pass the VLAN id, e.g. 20",
+        )
+    if not 0 <= vlan <= 4094:
+        raise OmadaError(f"vlan {vlan} is outside the valid range 0-4094")
+    return vlan
+
+
+def _paginate_client_rows(client: OmadaClient, site: Any, endpoint: str) -> List[Dict[str, Any]]:
+    """Page a single client endpoint, deduping by normalised MAC."""
     collected: List[Dict[str, Any]] = []
     seen = set()
+    separator = "&" if "?" in endpoint else "?"
     for page in range(1, _MAX_CLIENT_PAGES + 1):
         payload = client.api(
-            f"sites/{site.site_id}/insight/clients"
-            f"?currentPage={page}&currentPageSize=100"
+            f"sites/{site.site_id}/{endpoint}"
+            f"{separator}currentPage={page}&currentPageSize=100"
         )
         if payload.get("errorCode") != 0:
             raise OmadaError(
                 f"client query failed: {payload.get('msg', 'unknown')}",
                 code=payload.get("errorCode"),
-                hint="insight/clients needs any role; clients/{mac} needs Admin",
-                endpoint="sites/{id}/insight/clients",
+                hint="clients needs Admin; insight/clients accepts any role",
+                endpoint=f"sites/{{id}}/{endpoint}",
             )
         result = payload.get("result") or {}
         rows = result.get("data") or []
@@ -289,12 +308,48 @@ def _fetch_clients(client: OmadaClient, limit: int = 500) -> List[Dict[str, Any]
             mac = normalize_mac(row.get("mac", ""))
             if mac and mac in seen:
                 continue
-            seen.add(mac)
-            collected.append(project_client(row))
-            if limit and len(collected) >= limit:
-                return collected
+            if mac:
+                seen.add(mac)
+            collected.append(row)
         total = int(result.get("totalRows") or 0)
-        if len(collected) >= total:
+        if total and len(collected) >= total:
+            break
+    return collected
+
+
+def _fetch_client_rows(client: OmadaClient, site: Any) -> List[Dict[str, Any]]:
+    """Client rows from the richest endpoint this account may use.
+
+    ``clients?filters.active=true`` carries ``ssid``, ``ip``, ``apName`` and
+    ``signalLevel``. ``insight/clients`` is the role-safe fallback, but on
+    6.2.10.x it omits all four, which left list_clients and friends with blank
+    columns while the controller held the data (issue #1).
+    """
+    first_error: Optional[OmadaError] = None
+    for endpoint in ("clients?filters.active=true", "insight/clients"):
+        try:
+            return _paginate_client_rows(client, site, endpoint)
+        except OmadaError as exc:
+            if first_error is None:
+                first_error = exc
+            continue
+    if first_error is not None:
+        raise first_error
+    return []
+
+
+def _fetch_clients(client: OmadaClient, limit: int = 500) -> List[Dict[str, Any]]:
+    site = _site(client)
+    collected: List[Dict[str, Any]] = []
+    seen = set()
+    for row in _fetch_client_rows(client, site):
+        mac = normalize_mac(row.get("mac", ""))
+        if mac and mac in seen:
+            continue
+        if mac:
+            seen.add(mac)
+        collected.append(project_client(row))
+        if limit and len(collected) >= limit:
             break
     return collected
 
@@ -1988,9 +2043,15 @@ def _search_clients(
     active: Optional[bool] = None,
     wireless: Optional[bool] = None,
     guest: Optional[bool] = None,
+    vlan: Optional[Any] = None,
+    ssid: Optional[str] = None,
     limit: int = 500,
 ) -> List[Dict[str, Any]]:
     site = _site(client)
+    vlan = _coerce_vlan(vlan)
+    ssid_needle = str(ssid).strip().lower() if ssid is not None else None
+    if ssid_needle == "":
+        ssid_needle = None
     try:
         raw_rows = _fetch_clients_filtered(client, site, active=active)
     except OmadaError as exc:
@@ -2028,6 +2089,12 @@ def _search_clients(
             continue
         if guest is not None and proj["guest"] != bool(guest):
             continue
+        if vlan is not None and _as_int(proj.get("vlan"), -1) != vlan:
+            continue
+        if ssid_needle is not None:
+            have = str(proj.get("ssid") or "").strip().lower()
+            if not have or (have != ssid_needle and ssid_needle not in have):
+                continue
         if q_norm:
             mac_val = proj["mac"].lower()
             mac_norm = normalize_mac(mac_val)
@@ -3033,8 +3100,9 @@ TOOLS: Tuple[Tool, ...] = (
         title="Search clients",
         description=(
             "Search online and offline/historical clients by MAC, name, hostname, IP, SSID, or "
-            "VLAN/network, with active/wireless/guest filters. Automatically falls back to "
-            "insight/clients for Viewer accounts."
+            "VLAN/network, with active/wireless/guest filters plus exact vlan and ssid "
+            "filters. Prefers the rich clients endpoint (ssid, ip, apName, signal) and falls "
+            "back to insight/clients for Viewer accounts."
         ),
         input_schema={
             "type": "object",
@@ -3054,6 +3122,14 @@ TOOLS: Tuple[Tool, ...] = (
                 "guest": {
                     "type": "boolean",
                     "description": "Filter by guest flag",
+                },
+                "vlan": {
+                    "type": "integer",
+                    "description": "Filter by VLAN id (exact), e.g. 20",
+                },
+                "ssid": {
+                    "type": "string",
+                    "description": "Filter by SSID name (case-insensitive; exact match preferred)",
                 },
                 "limit": _LIMIT_PROP,
             },
