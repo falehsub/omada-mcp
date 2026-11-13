@@ -474,7 +474,7 @@ See [`docs/compatibility.md`](docs/compatibility.md) for the full compatibility 
 
 ```bash
 git clone https://github.com/falehsub/omada-mcp && cd omada-mcp
-python -m unittest discover -s tests -v     # 148 tests, no network, no deps
+python -m unittest discover -s tests -v     # 165 tests, no network, no deps
 python -m omada_mcp.cli --help              # after: pip install -e .
 uvx --from . omada-mcp --doctor             # what an external user does
 
@@ -508,6 +508,17 @@ The API notes in [`skills/omada-controller/SKILL.md`](skills/omada-controller/SK
 document the parts of the controller that are not in any public reference:
 session expiry semantics, CIDR packing limits, dual-pool DHCP bodies, and the
 endpoints that are Admin-only.
+
+### Contributing & releasing
+
+* **Pull requests only**: Develop changes on a branch and open a Pull Request targeting
+  `main` rather than pushing directly to `main`. Every PR runs the CI matrix across
+  Ubuntu and Windows (Python `3.10`–`3.14`) via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+* **PyPI publishing (Trusted Publishing / OIDC)**: Releases publish to PyPI via
+  [`.github/workflows/publish.yml`](.github/workflows/publish.yml) using GitHub
+  Actions OIDC tokens (bound to the `pypi` GitHub Environment) on published GitHub
+  Releases or manual `workflow_dispatch` runs for a release tag, without stored PyPI
+  API tokens.
 
 ## Write support
 
