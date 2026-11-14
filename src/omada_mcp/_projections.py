@@ -59,7 +59,8 @@ _SHAPES = {
     },
     'lanDnsRules': {
         **_fields('id', 'name', 'enable', 'domain', 'type', 'customTtl', 'ttl', 'cname', 'server'),
-        'aliases': [None], 'ipAddresses': [None], 'ipv6Addresses': [None], 'lanNetworkIds': [None],
+        'aliases': [None], 'ipAddresses': [None], 'ipv6Addresses': [None],
+        'dnsServers': [None], 'lanNetworkIds': [None],
     },
 }
 

@@ -202,10 +202,10 @@ class Server:
             return self._error(None, -32600, "invalid request: expected a JSON object")
 
         msg_id = message.get("id")
-        if message.get("jsonrpc") != "2.0":
-            return self._error(None, -32600, "invalid request: jsonrpc must be '2.0'")
         if "id" in message and (isinstance(msg_id, bool) or not isinstance(msg_id, (str, int))):
             return self._error(None, -32600, "invalid request: id must be a string or integer")
+        if message.get("jsonrpc") != "2.0":
+            return self._error(msg_id, -32600, "invalid request: jsonrpc must be '2.0'")
         method = message.get("method")
         params = message.get("params", {})
 

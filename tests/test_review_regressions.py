@@ -70,11 +70,20 @@ class ReviewRegressionTests(unittest.TestCase):
     def test_invalid_envelopes_are_rejected_before_controller_io(self):
         cfg = make_config()
         server = Server(cfg, client=OmadaClient(cfg, transport=FakeController(), log_fn=lambda _: None))
-        for updates, code in (({'jsonrpc':'1.0'}, -32600), ({'id':True}, -32600), ({'id':[]}, -32600), ({'id':None}, -32600), ({'params':[]}, -32602), ({'params':False}, -32602)):
+        for updates, code, expected_id in (
+            ({'jsonrpc':'1.0'}, -32600, 1),
+            ({'id':True}, -32600, None),
+            ({'id':[]}, -32600, None),
+            ({'id':None}, -32600, None),
+            ({'params':[]}, -32602, 1),
+            ({'params':False}, -32602, 1),
+        ):
             request = dict(jsonrpc='2.0', id=1, method='ping')
             request.update(updates)
             with self.subTest(updates=updates):
-                self.assertEqual(server.handle(request)['error']['code'], code)
+                resp = server.handle(request)
+                self.assertEqual(resp['error']['code'], code)
+                self.assertEqual(resp['id'], expected_id)
 
     def test_complete_oversized_frame_is_rejected_and_reader_recovers(self):
         class SmallServer(Server):
@@ -146,10 +155,18 @@ class ReviewRegressionTests(unittest.TestCase):
                 obj['futureCredential'] = 'future-controller-secret'
             for rows in (ctrl.mdns_rules, ctrl.mdns_profiles, ctrl.policy_routes, ctrl.lan_dns_rules):
                 rows.append({'id':'test', 'name':'test', 'futureCredential':'future-controller-secret'})
+            ctrl.lan_dns_rules.append({
+                'id': 'dns-fwd-test', 'name': 'fwd-test', 'type': 2,
+                'dnsServers': ['1.1.1.1', '9.9.9.9'],
+                'futureCredential': 'future-controller-secret',
+            })
             for tool in ('get_network_services', 'list_policy_routes', 'list_lan_dns_rules'):
                 with self.subTest(tool=tool):
                     result = unwrap_ok(call_tool(server, tool, {}))
                     self.assertNotIn('future-controller-secret', json.dumps(result))
+                    if tool == 'list_lan_dns_rules':
+                        fwd = next(item for item in result['items'] if item.get('id') == 'dns-fwd-test')
+                        self.assertEqual(fwd['dnsServers'], ['1.1.1.1', '9.9.9.9'])
 
     def test_redirect_recovery_is_bounded_and_never_replays_writes(self):
         from omada_mcp.client import OmadaSessionExpiredError
