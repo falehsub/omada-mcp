@@ -134,7 +134,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" SHA256SUMS.txt --clobber
+          gh release upload "${{ github.event.release.tag_name }}" SHA256SUMS.txt --repo "${{ github.repository }}" --clobber
 
   docker-publish:
     name: Publish multi-arch container to GHCR
