@@ -1,0 +1,141 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.falehsub/omada-mcp",
+  "title": "TP-Link Omada SDN MCP Server",
+  "description": "Read-only-first MCP server for TP-Link Omada SDN controllers (Web API v2, zero dependencies).",
+  "version": "2.0.0",
+  "websiteUrl": "https://github.com/falehsub/omada-mcp",
+  "repository": {
+    "url": "https://github.com/falehsub/omada-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "omada-mcp",
+      "version": "2.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "OMADA_BASE_URL",
+          "description": "Omada controller web UI root URL (https://<host>:8043 or http://<host>:8088)",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_USERNAME",
+          "description": "Dedicated local controller username (Viewer for read-only, Admin for opt-in writes)",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_PASSWORD",
+          "description": "Password for the local Omada controller account",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "OMADA_SITE_NAME",
+          "description": "Optional default Omada site display name (pins site unless OMADA_ALLOW_CROSS_SITE=true)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_SITE_ID",
+          "description": "Optional default Omada site hex ID (alternative to OMADA_SITE_NAME)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_ALLOW_CROSS_SITE",
+          "description": "Allow per-call site overrides to target other visible sites when a default site is pinned (default false)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_READ_ONLY",
+          "description": "Fail-closed read-only mode (default true; set false only with explicit OMADA_WRITE_TOOLS)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_WRITE_TOOLS",
+          "description": "Comma-separated explicit allowlist of write tool names when OMADA_READ_ONLY=false",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_VERIFY_SSL",
+          "description": "Verify TLS certificate chain and hostname (default true)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_CA_BUNDLE",
+          "description": "Optional path to a controller CA PEM bundle",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_SCHEMA_MODE",
+          "description": "tools/list descriptor mode: slim (default) or full",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_TOOL_CATEGORIES",
+          "description": "Optional comma-separated category filter: core,diagnostics,switch,wifi,routing,security,rollback",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_SNAPSHOT_DIR",
+          "description": "Directory for pre-write snapshots and JSONL write audit logs",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    },
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/falehsub/omada-mcp:2.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "OMADA_BASE_URL",
+          "description": "Omada controller web UI root URL (https://<host>:8043 or http://<host>:8088)",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_USERNAME",
+          "description": "Dedicated local controller username (Viewer for read-only, Admin for opt-in writes)",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_PASSWORD",
+          "description": "Password for the local Omada controller account",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "OMADA_READ_ONLY",
+          "description": "Fail-closed read-only mode (default true)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OMADA_VERIFY_SSL",
+          "description": "Verify TLS certificate chain and hostname (default true)",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

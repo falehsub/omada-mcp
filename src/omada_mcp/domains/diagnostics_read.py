@@ -324,6 +324,14 @@ def _diagnose_client_impl(
         })
         next_steps.append("Check physical link/Wi-Fi radio availability or review recent pastConnection entries.")
 
+    if client_summary["lockToApMac"] and ap_mac and client_summary["lockToApMac"] != ap_mac:
+        findings.append({
+            "code": "LOCK_TO_AP_MISMATCH",
+            "severity": "warning",
+            "detail": f"Client is locked to AP {client_summary['lockToApMac']} but currently associated with {ap_mac}.",
+        })
+        next_steps.append("Verify lock-to-AP binding or clear/update it via set_client_lock_to_ap.")
+
     if is_wireless:
         rssi_val = _as_float(rssi)
         if rssi_val is not None and rssi_val < 0:
@@ -404,8 +412,156 @@ def _diagnose_client_impl(
             "detail": "A client bandwidth rate limit is active on this client.",
         })
 
+    # Correlate pastConnections + recentLogs for roaming / disconnect history.
+    sessions_chrono: list[tuple[int, dict[str, Any]]] = []
+    for row in past_connections:
+        ts_val = _as_int(
+            _pick(row, "firstSeen", "associationTime", "connectTime", "time", "lastSeen", default=0),
+            0,
+        )
+        sessions_chrono.append((ts_val, row))
+    if any(ts > 0 for ts, _ in sessions_chrono):
+        sessions_chrono.sort(key=lambda item: item[0])
+    else:
+        sessions_chrono.reverse()
+
+    ap_transitions: list[dict[str, Any]] = []
+    unique_aps: set[str] = set()
+    short_sessions = 0
+    prev_ap_id = ""
+    prev_ap_label = ""
+    for _ts, row in sessions_chrono:
+        row_ap_mac = normalize_mac(str(_pick(row, "apMac", default="") or ""))
+        row_ap_name = str(_pick(row, "apName", default="") or "")
+        ap_id = row_ap_mac or row_ap_name.lower()
+        ap_label = row_ap_name or row_ap_mac
+        if ap_id:
+            unique_aps.add(ap_id)
+            if prev_ap_id and ap_id != prev_ap_id:
+                ap_transitions.append({
+                    "fromAp": prev_ap_label,
+                    "toAp": ap_label,
+                    "time": _iso(_pick(row, "firstSeen", "associationTime", "time", "lastSeen")),
+                    "ssid": str(_pick(row, "ssid", default="") or ""),
+                })
+            prev_ap_id = ap_id
+            prev_ap_label = ap_label
+        dur = as_int_or_none(_pick(row, "duration", "uptime"))
+        if dur is not None and 0 < dur < 120:
+            short_sessions += 1
+
+    roam_log_events: list[dict[str, Any]] = []
+    disconnect_log_events: list[dict[str, Any]] = []
+    connect_log_count = 0
+    for entry in recent_logs:
+        text = f"{entry.get('target', '')} {entry.get('content', '')}".lower()
+        if any(tok in text for tok in ("roam", "handoff", "steer")):
+            roam_log_events.append({
+                "time": entry.get("time", ""),
+                "category": entry.get("category", ""),
+                "content": entry.get("content", ""),
+            })
+        elif any(tok in text for tok in ("disconnect", "deauth", "offline", "dropped", "disassociat")):
+            disconnect_log_events.append({
+                "time": entry.get("time", ""),
+                "category": entry.get("category", ""),
+                "content": entry.get("content", ""),
+            })
+        elif any(tok in text for tok in ("connect", "joined", "associat")):
+            connect_log_count += 1
+
+    logs_alerts_missing = any("logs/alerts: unavailable" in w for w in warnings)
+    logs_events_missing = any("logs/events: unavailable" in w for w in warnings)
+    if logs_alerts_missing and logs_events_missing:
+        logs_state = "unavailable"
+    elif logs_alerts_missing or logs_events_missing:
+        logs_state = "partial"
+    elif all_logs:
+        logs_state = "available"
+    else:
+        logs_state = "empty"
+
+    if not ok_past:
+        past_state = "unavailable"
+    elif past_connections:
+        past_state = "available"
+    else:
+        past_state = "empty"
+
+    if parent_radio is not None or parent_switch_port is not None:
+        parent_state = "available"
+    elif (is_wireless and (ap_mac or ap_name)) or (not is_wireless and (switch_mac or switch_name)):
+        parent_state = "unavailable"
+    else:
+        parent_state = "not_applicable"
+
+    telemetry_availability = {
+        "clientDetail": "available" if detail_raw else "unavailable",
+        "pastConnections": past_state,
+        "logs": logs_state,
+        "parentTelemetry": parent_state,
+    }
+
+    roaming_summary = {
+        "sessionCount": len(past_connections),
+        "uniqueApCount": len(unique_aps),
+        "apTransitionCount": len(ap_transitions),
+        "shortSessionCount": short_sessions,
+        "apTransitions": ap_transitions[:20],
+        "roamLogEvents": roam_log_events[:20],
+        "disconnectLogCount": len(disconnect_log_events),
+        "connectLogCount": connect_log_count,
+        "historyAvailable": bool(past_connections or roam_log_events or disconnect_log_events),
+    }
+
+    if len(disconnect_log_events) >= 3 or (short_sessions >= 3 and len(past_connections) >= 3):
+        findings.append({
+            "code": "FREQUENT_DISCONNECTS",
+            "severity": "warning",
+            "detail": (
+                f"Observed {len(disconnect_log_events)} disconnect log event(s) and "
+                f"{short_sessions} short session(s) (<120s) for {c_name}."
+            ),
+        })
+        next_steps.append("Check RSSI/SNR stability, AP channel interference, and client power-saving / band-steering behavior.")
+
+    if len(ap_transitions) >= 3 or len(roam_log_events) >= 3:
+        findings.append({
+            "code": "FREQUENT_AP_ROAMING",
+            "severity": "warning" if short_sessions >= 2 else "info",
+            "detail": (
+                f"Observed {len(ap_transitions)} AP transition(s) across {len(unique_aps)} AP(s) and "
+                f"{len(roam_log_events)} roam log event(s)."
+            ),
+        })
+        next_steps.append("Review AP TX power overlap / RSSI threshold to avoid sticky or ping-pong roaming.")
+
+    missing_sources = [k for k, v in telemetry_availability.items() if v in ("unavailable", "partial")]
+    if missing_sources:
+        findings.append({
+            "code": "TELEMETRY_PARTIAL",
+            "severity": "info",
+            "detail": "Some diagnostic telemetry sources were unavailable or partial: " + ", ".join(missing_sources) + ".",
+        })
+
+    if is_wireless and not past_connections and not roam_log_events:
+        findings.append({
+            "code": "ROAM_HISTORY_UNAVAILABLE",
+            "severity": "info",
+            "detail": (
+                "No pastConnection entries or roam log events were returned for this wireless client; "
+                "roaming stability cannot be confirmed from current history."
+            ),
+        })
+
     if not next_steps:
-        next_steps.append("No critical link faults detected; monitor recentLogs and pastConnections for intermittent drops.")
+        if roaming_summary["historyAvailable"] and not missing_sources:
+            next_steps.append("Live link and observed connection/roam history show no faults.")
+        else:
+            next_steps.append(
+                "No live link faults detected, but connection/roam history is incomplete or empty; "
+                "enable controller history/logs or inspect again after roaming activity."
+            )
 
     return {
         "client": client_summary,
@@ -413,6 +569,8 @@ def _diagnose_client_impl(
         "parentSwitchPort": parent_switch_port,
         "pastConnections": past_connections,
         "recentLogs": recent_logs,
+        "roamingSummary": roaming_summary,
+        "telemetryAvailability": telemetry_availability,
         "findings": findings,
         "nextSteps": next_steps,
         "warnings": warnings,
@@ -575,11 +733,43 @@ _DIAGNOSE_CLIENT_SCHEMA: dict[str, Any] = {
         "parentSwitchPort": {"type": ["object", "null"]},
         "pastConnections": {"type": "array", "items": {"type": "object"}},
         "recentLogs": {"type": "array", "items": {"type": "object"}},
+        "roamingSummary": {
+            "type": "object",
+            "properties": {
+                "sessionCount": {"type": "integer", "minimum": 0},
+                "uniqueApCount": {"type": "integer", "minimum": 0},
+                "apTransitionCount": {"type": "integer", "minimum": 0},
+                "shortSessionCount": {"type": "integer", "minimum": 0},
+                "apTransitions": {"type": "array", "items": {"type": "object"}},
+                "roamLogEvents": {"type": "array", "items": {"type": "object"}},
+                "disconnectLogCount": {"type": "integer", "minimum": 0},
+                "connectLogCount": {"type": "integer", "minimum": 0},
+                "historyAvailable": {"type": "boolean"},
+            },
+            "required": [
+                "sessionCount", "uniqueApCount", "apTransitionCount",
+                "shortSessionCount", "apTransitions", "roamLogEvents",
+                "disconnectLogCount", "connectLogCount", "historyAvailable",
+            ],
+        },
+        "telemetryAvailability": {
+            "type": "object",
+            "properties": {
+                "clientDetail": {"type": "string"},
+                "pastConnections": {"type": "string"},
+                "logs": {"type": "string"},
+                "parentTelemetry": {"type": "string"},
+            },
+            "required": ["clientDetail", "pastConnections", "logs", "parentTelemetry"],
+        },
         "findings": {"type": "array", "items": _DIAGNOSTIC_FINDING_SCHEMA},
         "nextSteps": {"type": "array", "items": {"type": "string"}},
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["client", "pastConnections", "recentLogs", "findings", "nextSteps", "warnings"],
+    "required": [
+        "client", "pastConnections", "recentLogs", "roamingSummary",
+        "telemetryAvailability", "findings", "nextSteps", "warnings",
+    ],
 }
 
 

@@ -41,10 +41,17 @@ def run_checks(client):
     server = Server(config, client=client)
     results = []
     devices, clients = [], []
+    snapshot_baseline = None
     for tool in (tool for tool in TOOLS if tool.read_only):
         arguments = {}
         if tool.name == 'explain_error':
             arguments['code'] = -1600
+        elif tool.name == 'diff_config_snapshots':
+            if snapshot_baseline is None:
+                results.append({'tool': tool.name, 'status': 'skip', 'reason': 'no baseline snapshot captured'})
+                continue
+            arguments['baseline'] = snapshot_baseline
+            arguments['current'] = snapshot_baseline
         if 'mac' in tool.input_schema.get('required', []):
             targets = clients if tool.name in ('get_client', 'diagnose_client') else devices
             if tool.name == 'get_switch_ports':
@@ -72,11 +79,14 @@ def run_checks(client):
             # No controller messages, IDs, credentials, or payloads in shareable reports.
             row['reason'] = 'RPC error' if 'error' in response else 'tool execution error'
         results.append(row)
-        items = result.get('structuredContent', {}).get('items', [])
+        structured = result.get('structuredContent', {})
+        items = structured.get('items', [])
         if tool.name == 'list_devices':
             devices = items
         elif tool.name == 'list_clients':
             clients = items
+        elif tool.name == 'get_config_snapshot' and not failed:
+            snapshot_baseline = structured
     return {
         'controllerVersion': getattr(client.auth_info, 'controller_version', None),
         'readOnly': True,

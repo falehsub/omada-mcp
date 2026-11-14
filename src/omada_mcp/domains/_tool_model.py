@@ -22,8 +22,10 @@ _TOOL_CATEGORIES: dict[str, str] = {
     "get_client": "core",
     "list_wlans": "core",
     "get_site_info": "core",
+    "list_sites": "core",
     "explain_error": "core",
     "get_config_snapshot": "core",
+    "diff_config_snapshots": "core",
     "search_clients": "core",
     "list_lan_networks": "core",
     "list_dhcp_reservations": "core",
@@ -292,6 +294,12 @@ def _slim_description(text: str, limit: int = 110) -> str:
     return _snap_words(first_sentence, limit)
 
 
+_SITE_PROP: dict[str, Any] = {
+    "type": "string",
+    "description": "Optional target site name or ID (defaults to configured site)",
+}
+
+
 @dataclass(frozen=True)
 class Tool:
     """A tool plus the MCP annotations and outputSchema describing it."""
@@ -307,6 +315,17 @@ class Tool:
     idempotent: bool = True
     open_world: bool = True
     requires_auth: bool = True
+    site_scoped: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.site_scoped:
+            return
+        schema = dict(self.input_schema or {"type": "object", "properties": {}})
+        props = dict(schema.get("properties") or {})
+        if "site" not in props:
+            props["site"] = dict(_SITE_PROP)
+            schema["properties"] = props
+            object.__setattr__(self, "input_schema", schema)
 
     @property
     def category(self) -> str:
@@ -442,12 +461,8 @@ def as_int_or_none(val: Any) -> int | None:
 
 
 def _site(client: OmadaClient) -> SiteInfo:
-    """Authenticate if needed and return the resolved site (never ``None``)."""
-    client.authenticate()
-    site = client.site
-    if site is None:  # pragma: no cover - authenticate() guarantees a site
-        raise OmadaError("site resolution failed", hint="run `omada-mcp --doctor`")
-    return site
+    """Authenticate if needed and return the active site (never ``None``)."""
+    return client.current_site()
 
 
 def _coerce_vlan(value: Any) -> int | None:
