@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-11-14
+
+Patch release addressing findings verified against a live Omada 6.2 hardware deployment
+(**190 passing tests**).
+
+### Fixed
+
+- **`list_logs(hours=0)` full-history window**: Send `filters.timeStart=1&filters.timeEnd=<now_ms>`
+  when `hours=0` instead of `0&0`, which Omada 6.2 treated as an empty range (`0` rows)
+  while rejecting missing time parameters.
+- **Session-level `-1600` negative cache**: After an uncached `GET` fails with `-1600`
+  twice across the burst-backoff retry (e.g. firmware-unsupported endpoints such as
+  `cmd/getSpeedTestResult` or `dashboard/wireguardtunnels`), cache the negative result
+  for `300s` (bypassed during write verification read-backs and invalidated on mutations),
+  eliminating repeated `0.8s` + double-request stalls on `diagnose_wan`, `diagnose_client`,
+  and `list_vpn_tunnels`.
+
+### Added
+
+- **`get_ap_radios` per-band client counts**: Derive `clientCount` per radio (`2g`, `5g`,
+  `5g2`, `6g`) by grouping active wireless clients via `radioId` when AP/radio telemetry is
+  available (returning `None` honestly when `insight/clients` strips those fields under
+  Viewer accounts).
+- **Extended client telemetry fields**: Preserve `rssi`, `signalLevel`, `snr`, `txRate`,
+  `rxRate`, `uptime`, `connectType`, `radioId`, and `channel` as optional/nullable fields
+  in `project_client` (`list_clients`, `list_wifi_clients`, `list_wired_clients`,
+  `get_client`, `search_clients`).
+- Clarified `includeCableTest` and `get_rf_scan` descriptions to explicitly note cached /
+  previously-triggered scan/test semantics.
+
 ## [1.3.0] - 2026-11-14
 
 80-tool minor release (33 read-only diagnostics/discovery + 47 opt-in write
