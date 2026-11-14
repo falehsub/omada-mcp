@@ -4,37 +4,48 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.0] - 2026-11-14
+
+80-tool minor release (33 read-only diagnostics/discovery + 47 opt-in write
+controls) combining live Omada 6.2 Docker audit improvements with security,
+protocol recovery, allowlist export, and packaging hardening (**186 passing tests**).
 
 ### Security
 
 - Remove query strings from ambiguous write-disconnect errors so session tokens cannot
   appear in tool responses or audit logs. Writes are still never replayed blindly.
-- Use explicit nested field allowlists for configuration snapshots, services, IP-group
-  entries, policy routes, and LAN DNS rules. Unknown controller fields are omitted.
+- Use explicit nested field allowlists (`project_controller_row`) for configuration snapshots,
+  services, IP-group entries, policy routes, and LAN DNS rules (including forward
+  `dnsServers`). Unknown controller fields are omitted.
 - Prevent the system-proxy transport from following redirects with authentication headers.
 - Create rollback snapshots exclusively with private POSIX permissions and unique names
   across processes, preventing another session from overwriting recovery state.
 
+### Added
+
+- `delete_port_profile` write tool (`OMADA_WRITE_TOOLS` allowlisted), bringing total tool
+  surface to **80 tools** (`33` read-only + `47` write).
+- Adaptive `-1600` pacing and a gateway-absent fast-path (`hasGateway=false`) across
+  gateway/routing diagnostics.
+- `scripts/read_selftest.py`: an explicit-config, read-only live tool sweep with mutation
+  blocking, timings, request counts, and payload-free pass/fail/skip JSON reports.
+- A static correctness CI gate (`ruff check src --select E9,F`) and `.dockerignore`.
+- A local review report and prioritized adoption/feature roadmap in
+  `docs/review-2026-11-14.md`.
+
 ### Fixed
 
 - Recover once from HTTP redirect session expiry, verified against Docker Omada 6.2.14.11.
+- Preserve valid string/integer JSON-RPC request IDs on `jsonrpc != "2.0"` `-32600` errors,
+  reject invalid IDs and parameter shapes before dispatch, ignore notifications without
+  a request ID, and bound stdio frames while streaming.
+- Harden v6.2 ACL read-back, UTF-8 BOM `.env` parsing, schema parameter bounds, and
+  `scripts/write_selftest.py` preflight checks.
 - Apply Wi-Fi/wired client limits after filtering; stop repeated client pagination pages.
-- Reject invalid JSON-RPC versions, IDs, and parameter shapes before dispatch; do not
-  execute tool calls or reply to notifications without a request ID.
-- Bound complete and incomplete stdio frames before decoding, and recover on the next line.
 - Report malformed URL/port configuration cleanly and reject non-finite or invalid timing
   values, including CLI polling intervals.
 - Include mock-controller fixtures, schemas, scripts, and Docker packaging files in sdists
   so the source archive can run the complete test suite.
-
-### Added
-
-- `scripts/read_selftest.py`: an explicit-config, read-only live tool sweep with mutation
-  blocking, timings, request counts, and payload-free pass/fail/skip JSON reports.
-- A static correctness CI gate and a Docker build-context exclusion file.
-- A local review report and prioritized adoption/feature roadmap in
-  `docs/review-2026-11-14.md`.
 
 ### Compatibility
 

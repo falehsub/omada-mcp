@@ -15,7 +15,7 @@ acceptance criteria. The next sequence is:
 1. Automate disposable Docker controller compatibility tests and retain
    payload-free results across supported versions.
 2. Publish a validated MCP Registry listing and generate setup/tool documentation
-   from the actual descriptors. PyPI 1.2.2 is already available.
+   from the actual descriptors. Published on PyPI via Trusted Publishing.
 3. Add site discovery and safe, explicit per-call site selection.
 4. Add deterministic configuration drift comparisons over redacted snapshots.
 5. Add client connection/roaming history diagnostics backed by captured endpoints.
