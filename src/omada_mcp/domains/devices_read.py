@@ -15,7 +15,7 @@ _DEVICE_FIELDS: tuple[tuple[str, tuple[str, ...], Any], ...] = (
     ("mac", ("mac",), ""),
     ("name", ("name",), ""),
     ("type", ("type",), ""),
-    ("model", ("showModel", "model"), ""),
+    ("model", ("showModel", "compoundModel", "model"), ""),
     ("ip", ("ip",), ""),
     ("firmware", ("firmwareVersion",), ""),
     ("uptime", ("uptime", "uptimeLong"), ""),

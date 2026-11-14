@@ -35,6 +35,7 @@ _ACL = {
     **_fields('id', 'index', 'name', 'status', 'policy', 'sourceType',
               'destinationType', 'biDirectional', 'syslog', 'bindingType', 'networkId'),
     'sourceIds': [None], 'destinationIds': [None], 'protocols': [None],
+    'sourceFilter': [None], 'destinationFilter': [None], 'protocol': None,
     'direction': {**_fields('lanToWan', 'lanToLan'), 'wanInIds': [None], 'vpnInIds': [None]},
     'customAclPorts': [_fields('portStart', 'portEnd', 'protocol')],
 }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..client import OmadaClient, OmadaError
+from ._common import as_mapping
 from ._tool_model import (
     _as_int,
     _as_num_or_none,
@@ -27,7 +28,7 @@ def project_client(client: dict[str, Any]) -> dict[str, Any]:
         "mac": str(client.get("mac") or ""),
         "name": str(_pick(client, "name", "hostName", default="") or ""),
         "hostName": str(client.get("hostName") or ""),
-        "ip": str(client.get("ip") or ""),
+        "ip": str(client.get("ip") or as_mapping(client.get("ipSetting")).get("ip") or ""),
         "wireless": wireless,
         "guest": bool(client.get("guest")),
         "active": bool(client.get("active", True)),
@@ -35,9 +36,9 @@ def project_client(client: dict[str, Any]) -> dict[str, Any]:
         "apName": str(_pick(client, "apName", "switchName", default="") or ""),
         "networkName": str(_pick(client, "networkName", "network", default="") or ""),
         "vlan": _as_int(_pick(client, "vid", "vlan", default=0), 0),
-        "download": _as_int(client.get("download"), 0),
-        "upload": _as_int(client.get("upload"), 0),
-        "duration": _as_int(client.get("duration"), 0),
+        "download": _as_int(_pick(client, "download", "trafficDown", default=0), 0),
+        "upload": _as_int(_pick(client, "upload", "trafficUp", default=0), 0),
+        "duration": _as_int(_pick(client, "duration", "uptime", default=0), 0),
         "lastSeen": _iso(client.get("lastSeen")),
         "signal": _pick(client, "signalLevel", "rssi", default=None),
         "rssi": _as_num_or_none(client.get("rssi")),
