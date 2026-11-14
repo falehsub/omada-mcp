@@ -569,29 +569,69 @@ class OmadaClient:
         last_meta: dict[str, Any] | None = None
         prev_rows: list[dict[str, Any]] | None = None
         sep = "&" if "?" in endpoint else "?"
+        pages_fetched = 0
+        total_int: int | None = None
+        exhausted_loop = False
+        stopped_duplicate = False
+
         for page in range(1, max_pages + 1):
             paged = f"{endpoint}{sep}currentPage={page}&currentPageSize={page_size}"
             result = self.api_result(paged)
+            pages_fetched += 1
             if isinstance(result, list):
                 collected.extend(dict(r) for r in result if isinstance(r, Mapping))
-                return collected, None
+                return collected, {
+                    "_pagination": {
+                        "pagesFetched": pages_fetched,
+                        "maxPages": max_pages,
+                        "totalRows": len(collected),
+                        "truncated": False,
+                        "truncationReason": None,
+                    },
+                }
             if not isinstance(result, Mapping):
                 break
             last_meta = dict(result)
             raw_rows = result.get("data")
             if not isinstance(raw_rows, list) or not raw_rows:
+                total_val = result.get("totalRows")
+                if total_val is not None:
+                    total_int = int(total_val)
                 break
             rows = [dict(r) for r in raw_rows if isinstance(r, Mapping)]
             if prev_rows is not None and rows == prev_rows:
+                stopped_duplicate = True
                 break
             prev_rows = rows
             collected.extend(rows)
-            total = result.get("totalRows")
-            if total is not None:
-                if len(collected) >= int(total):
+            total_val = result.get("totalRows")
+            if total_val is not None:
+                total_int = int(total_val)
+                if len(collected) >= total_int:
                     break
             elif len(rows) < page_size:
                 break
+            if page == max_pages:
+                exhausted_loop = True
+
+        truncated = False
+        reason: str | None = None
+        if exhausted_loop and (total_int is None or len(collected) < total_int):
+            truncated = True
+            reason = f"pagination reached maxPages={max_pages}"
+        elif total_int is not None and len(collected) < total_int and not stopped_duplicate:
+            truncated = True
+            reason = f"controller returned {len(collected)} of {total_int} totalRows"
+
+        if last_meta is None:
+            last_meta = {}
+        last_meta["_pagination"] = {
+            "pagesFetched": pages_fetched,
+            "maxPages": max_pages,
+            "totalRows": total_int if total_int is not None else len(collected),
+            "truncated": truncated,
+            "truncationReason": reason,
+        }
         return collected, last_meta
 
     # -- write plumbing (gated, paced, snapshotted, verified, audited) --------

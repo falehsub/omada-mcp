@@ -9,6 +9,7 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from ..client import OmadaClient, OmadaError, SiteInfo, redact_secrets
+from ._common import deep_redact
 
 MAX_IP_GROUP_ENTRIES = 16
 
@@ -285,15 +286,15 @@ def _dry_run_result(
         "verified": False,
         "target": target_id,
         "confirmToken": f"{tool_name}:{target_id}",
-        "before": before,
-        "after": after,
-        "diff": diff,
+        "before": deep_redact(before),
+        "after": deep_redact(after),
+        "diff": deep_redact(diff),
         "snapshot": None,
-        "warnings": warnings,
-        "rollback": rollback,
+        "warnings": list(warnings),
+        "rollback": deep_redact(rollback) if rollback is not None else None,
     }
     if steps is not None:
-        out["steps"] = steps
+        out["steps"] = deep_redact(steps)
     return out
 
 
@@ -315,15 +316,15 @@ def _committed_result(
         "verified": True,
         "target": target_id,
         "confirmToken": f"{tool_name}:{target_id}",
-        "before": before,
-        "after": after,
-        "diff": diff,
+        "before": deep_redact(before),
+        "after": deep_redact(after),
+        "diff": deep_redact(diff),
         "snapshot": snapshot,
-        "warnings": warnings,
-        "rollback": rollback,
+        "warnings": list(warnings),
+        "rollback": deep_redact(rollback) if rollback is not None else None,
     }
     if steps is not None:
-        out["steps"] = steps
+        out["steps"] = deep_redact(steps)
     return out
 
 

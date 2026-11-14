@@ -67,11 +67,67 @@ def _resolve_snapshot_file(client: OmadaClient, snapshot_id: str) -> Path:
     return resolved
 
 
+def _check_rollback_not_superseded(
+    client: OmadaClient,
+    sid: str,
+    orig_target: str,
+    snap_timestamp: str,
+    *,
+    force: bool,
+) -> None:
+    """Refuse rolling back a snapshot superseded by a newer write on the same target."""
+    if force or not orig_target:
+        return
+    audit_path = client._snapshot_dir() / "audit.jsonl"
+    if not audit_path.exists():
+        return
+    try:
+        lines = audit_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+
+    entries: list[dict[str, Any]] = []
+    for raw_line in lines:
+        text = raw_line.strip()
+        if not text:
+            continue
+        try:
+            row = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            entries.append(row)
+
+    sid_idx = next((idx for idx, row in enumerate(entries) if row.get("snapshot") == sid), None)
+    newer: list[dict[str, Any]] = []
+    if sid_idx is not None:
+        candidates = entries[sid_idx + 1:]
+    else:
+        candidates = [row for row in entries if snap_timestamp and str(row.get("timestamp") or "") > snap_timestamp]
+
+    for row in candidates:
+        if row.get("result") != "success":
+            continue
+        if str(row.get("tool") or "") == "rollback_from_snapshot":
+            continue
+        if str(row.get("target") or "") == orig_target:
+            newer.append(row)
+
+    if newer:
+        latest = newer[-1]
+        raise OmadaError(
+            f"stale snapshot {sid!r}: newer committed write {latest.get('snapshot')!r} "
+            f"({latest.get('tool')}) modified target {orig_target!r}",
+            hint="roll back the newer snapshot first or set force=true to override",
+        )
+
+
 def rollback_from_snapshot(
     client: OmadaClient,
     snapshotId: str,
     dryRun: bool = True,
     confirm: str | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Restore pre-mutation state from a saved snapshot in ``OMADA_SNAPSHOT_DIR``."""
     snap_path = _resolve_snapshot_file(client, snapshotId)
@@ -87,12 +143,15 @@ def rollback_from_snapshot(
 
     orig_tool = str(envelope["tool"] or "")
     orig_target = str(envelope.get("target") or "")
+    snap_timestamp = str(envelope.get("timestamp") or "")
     snap_data = envelope.get("data")
 
     if orig_tool in _NON_REVERSIBLE_SNAPSHOT_TOOLS:
         raise OmadaError(
             f"snapshot {sid!r} was captured by non-reversible action {orig_tool!r} and cannot be rolled back",
         )
+
+    _check_rollback_not_superseded(client, sid, orig_target, snap_timestamp, force=bool(force))
 
     site = _site(client)
     warnings: list[str] = [f"Rolling back snapshot {sid} created by {orig_tool} (target={orig_target})."]
@@ -311,6 +370,11 @@ def rollback_from_snapshot(
         if nid:
             body, _ = _ensure_lan_patch_body(lan_obj)
             live = next((n for n in _fetch_lan_collection(client, site) if str(n.get("id")) == nid), {})
+            if not live:
+                raise OmadaError(
+                    f"cannot roll back {orig_tool}: LAN network {nid!r} no longer exists on controller",
+                    hint="create the network again or inspect current site networks first",
+                )
             return _run_restore(
                 method="PATCH",
                 endpoint=f"sites/{site.site_id}/setting/lan/networks/{nid}",

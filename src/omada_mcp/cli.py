@@ -11,10 +11,13 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
+import signal
 import sys
+from typing import Any
 
 from . import __version__
 from .client import OmadaError
@@ -106,6 +109,31 @@ def _configure_console() -> None:
     configure_streams(stdin=None, stdout=sys.stdout, stderr=sys.stderr)
 
 
+@contextlib.contextmanager
+def _sigterm_as_interrupt():
+    """Raise ``KeyboardInterrupt`` on ``SIGTERM`` in the main thread for graceful cleanup."""
+    sigterm = getattr(signal, "SIGTERM", None)
+    if sigterm is None:
+        yield
+        return
+    try:
+        prev = signal.getsignal(sigterm)
+
+        def _handler(_signum: int, _frame: Any) -> None:
+            raise KeyboardInterrupt
+
+        signal.signal(sigterm, _handler)
+    except ValueError:
+        # Not running on the main thread (e.g. embedded tests).
+        yield
+        return
+    try:
+        yield
+    finally:
+        with contextlib.suppress(ValueError):
+            signal.signal(sigterm, prev)
+
+
 def main(argv: list[str] | None = None) -> int:
     _configure_console()
     args = build_parser().parse_args(argv)
@@ -182,7 +210,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.watch:
         try:
-            return run_watch(config, interval=args.interval, iterations=args.iterations)
+            with _sigterm_as_interrupt():
+                return run_watch(config, interval=args.interval, iterations=args.iterations)
         except KeyboardInterrupt:
             return 0
         except OmadaError as exc:
@@ -201,7 +230,8 @@ def main(argv: list[str] | None = None) -> int:
                     flush=True,
                 )
                 try:
-                    httpd.serve_forever()
+                    with _sigterm_as_interrupt():
+                        httpd.serve_forever()
                 except KeyboardInterrupt:
                     return 0
                 finally:
@@ -214,7 +244,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"omada-mcp metrics error: {exc}", file=sys.stderr)
             return 1
 
-    return Server(config).serve()
+    with _sigterm_as_interrupt():
+        return Server(config).serve()
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -6,8 +6,8 @@ import datetime
 from typing import Any
 
 from ..client import OmadaClient, OmadaError, explain_error_code, redact_secrets
+from ._common import PaginatedList, as_mapping, deep_redact, omada_mac, try_api_result, try_paginate
 from ._common import as_float as _as_float
-from ._common import as_mapping, deep_redact, omada_mac, try_api_result, try_paginate
 from ._device_helpers import collect_ap_radios_data, collect_switch_ports_data
 from ._network_helpers import collect_vpn_tunnels_data, collect_wan_status_data
 from ._tool_model import (
@@ -62,14 +62,14 @@ def _list_logs(
     else:
         endpoint = f"sites/{site.site_id}/audit/logs"
 
-    rows, _ = client.paginate(
+    rows, meta = client.paginate(
         endpoint,
         page_size=min(100, cap),
         max_pages=max(1, (cap + 99) // 100),
     )
 
     level_needle = str(level).strip().lower() if level is not None and str(level).strip() != "" else None
-    out: list[dict[str, Any]] = []
+    matched_rows: list[dict[str, Any]] = []
     for row in rows:
         raw_time = row.get("time") or row.get("timestamp") or row.get("createTime")
         if cat == "audit" and hours > 0 and isinstance(raw_time, (int, float)) and raw_time < start_ms:
@@ -90,7 +90,7 @@ def _list_logs(
             "target", "deviceName", "clientName", "operator", "userName", "mac",
             default="",
         )
-        out.append({
+        matched_rows.append({
             "id": str(cleaned.get("id") or cleaned.get("logId") or ""),
             "category": cat,
             "time": _iso(raw_time),
@@ -101,9 +101,26 @@ def _list_logs(
             "target": str(target or ""),
             "resolved": bool(cleaned.get("resolved", False)),
         })
-        if len(out) >= cap:
-            break
-    return out
+
+    upstream_meta = (meta or {}).get("_pagination") or {}
+    out = matched_rows[:cap]
+    hit_cap = len(matched_rows) > cap
+    upstream_truncated = bool(upstream_meta.get("truncated", False))
+    truncated = hit_cap or upstream_truncated
+    reason = (
+        f"logs capped at limit={cap}"
+        if hit_cap
+        else upstream_meta.get("truncationReason")
+    )
+    return PaginatedList(
+        out,
+        truncated=truncated,
+        total_rows=upstream_meta.get("totalRows") if upstream_truncated else len(matched_rows),
+        pages_fetched=upstream_meta.get("pagesFetched"),
+        max_pages=upstream_meta.get("maxPages"),
+        limit=cap,
+        truncation_reason=reason,
+    )
 
 
 def _safe_recent_logs(

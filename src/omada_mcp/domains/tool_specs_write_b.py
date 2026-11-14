@@ -150,6 +150,7 @@ WRITE_TOOLS_B: list[Tool] = [
             "type": "object",
             "properties": {
                 "snapshotId": {"type": "string", "description": "Snapshot filename (.json) inside OMADA_SNAPSHOT_DIR"},
+                "force": {"type": "boolean", "default": False, "description": "Allow rolling back even if newer snapshots touched this target"},
                 **_WRITE_CONTROL_PROPS,
             },
             "required": ["snapshotId"],

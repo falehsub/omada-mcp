@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..client import OmadaClient, OmadaError
-from ._common import as_mapping
+from ._common import PaginatedList, as_mapping
 from ._tool_model import (
     _as_int,
     _as_num_or_none,
@@ -53,17 +53,26 @@ def project_client(client: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _paginate_client_rows(client: OmadaClient, site: Any, endpoint: str) -> list[dict[str, Any]]:
-    """Page a single client endpoint, deduping by normalised MAC."""
+def _paginate_client_rows_with_meta(
+    client: OmadaClient,
+    site: Any,
+    endpoint: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Page a single client endpoint, deduping by normalised MAC with pagination metadata."""
     collected: list[dict[str, Any]] = []
     seen = set()
     previous_rows = None
     separator = "&" if "?" in endpoint else "?"
+    pages_fetched = 0
+    total_int: int | None = None
+    exhausted_loop = False
+    stopped_duplicate = False
     for page in range(1, _MAX_CLIENT_PAGES + 1):
         payload = client.api(
             f"sites/{site.site_id}/{endpoint}"
             f"{separator}currentPage={page}&currentPageSize=100"
         )
+        pages_fetched += 1
         if payload.get("errorCode") != 0:
             raise OmadaError(
                 f"client query failed: {payload.get('msg', 'unknown')}",
@@ -73,7 +82,11 @@ def _paginate_client_rows(client: OmadaClient, site: Any, endpoint: str) -> list
             )
         result = payload.get("result") or {}
         rows = result.get("data") or []
+        total_raw = result.get("totalRows")
+        if total_raw is not None:
+            total_int = int(total_raw)
         if not rows or rows == previous_rows:
+            stopped_duplicate = bool(rows)
             break
         previous_rows = rows
         for row in rows:
@@ -83,12 +96,50 @@ def _paginate_client_rows(client: OmadaClient, site: Any, endpoint: str) -> list
             if mac:
                 seen.add(mac)
             collected.append(row)
-        total = int(result.get("totalRows") or 0)
-        if total and len(collected) >= total:
+        if total_int is not None:
+            if len(collected) >= total_int:
+                break
+        elif len(rows) < 100:
             break
-        if not total and len(rows) < 100:
-            break
-    return collected
+        if page == _MAX_CLIENT_PAGES:
+            exhausted_loop = True
+
+    truncated = False
+    reason: str | None = None
+    if exhausted_loop and (total_int is None or len(collected) < total_int):
+        truncated = True
+        reason = f"client pagination reached maxPages={_MAX_CLIENT_PAGES}"
+    elif total_int is not None and len(collected) < total_int and not stopped_duplicate:
+        truncated = True
+        reason = f"controller returned {len(collected)} of {total_int} totalRows"
+
+    return collected, {
+        "pagesFetched": pages_fetched,
+        "maxPages": _MAX_CLIENT_PAGES,
+        "totalRows": total_int if total_int is not None else len(collected),
+        "truncated": truncated,
+        "truncationReason": reason,
+    }
+
+
+def _paginate_client_rows(client: OmadaClient, site: Any, endpoint: str) -> list[dict[str, Any]]:
+    """Page a single client endpoint, deduping by normalised MAC."""
+    rows, _ = _paginate_client_rows_with_meta(client, site, endpoint)
+    return rows
+
+
+def _fetch_client_rows_with_meta(client: OmadaClient, site: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    first_error: OmadaError | None = None
+    for endpoint in ("clients?filters.active=true", "insight/clients"):
+        try:
+            return _paginate_client_rows_with_meta(client, site, endpoint)
+        except OmadaError as exc:
+            if first_error is None:
+                first_error = exc
+            continue
+    if first_error is not None:
+        raise first_error
+    return [], {"pagesFetched": 0, "maxPages": _MAX_CLIENT_PAGES, "totalRows": 0, "truncated": False, "truncationReason": None}
 
 
 def _fetch_client_rows(client: OmadaClient, site: Any) -> list[dict[str, Any]]:
@@ -99,46 +150,94 @@ def _fetch_client_rows(client: OmadaClient, site: Any) -> list[dict[str, Any]]:
     6.2.10.x it omits all four, which left list_clients and friends with blank
     columns while the controller held the data (issue #1).
     """
-    first_error: OmadaError | None = None
-    for endpoint in ("clients?filters.active=true", "insight/clients"):
-        try:
-            return _paginate_client_rows(client, site, endpoint)
-        except OmadaError as exc:
-            if first_error is None:
-                first_error = exc
-            continue
-    if first_error is not None:
-        raise first_error
-    return []
+    rows, _ = _fetch_client_rows_with_meta(client, site)
+    return rows
 
 
-def _fetch_clients(client: OmadaClient, limit: int = 500) -> list[dict[str, Any]]:
+def _fetch_clients(client: OmadaClient, limit: int = 500) -> PaginatedList:
     site = _site(client)
     collected: list[dict[str, Any]] = []
     seen = set()
-    for row in _fetch_client_rows(client, site):
+    raw_rows, page_meta = _fetch_client_rows_with_meta(client, site)
+    all_projected: list[dict[str, Any]] = []
+    for row in raw_rows:
         mac = normalize_mac(row.get("mac", ""))
         if mac and mac in seen:
             continue
         if mac:
             seen.add(mac)
-        collected.append(project_client(row))
-        if limit and len(collected) >= limit:
-            break
-    return collected
+        all_projected.append(project_client(row))
+
+    if limit and len(all_projected) > limit:
+        collected = all_projected[:limit]
+        truncated = True
+        reason: str | None = f"results capped at limit={limit}"
+    else:
+        collected = all_projected
+        truncated = bool(page_meta.get("truncated", False))
+        reason = page_meta.get("truncationReason")
+
+    total_rows = max(len(all_projected), int(page_meta.get("totalRows") or len(all_projected)))
+    return PaginatedList(
+        collected,
+        truncated=truncated,
+        total_rows=total_rows,
+        pages_fetched=page_meta.get("pagesFetched"),
+        max_pages=page_meta.get("maxPages"),
+        limit=limit or None,
+        truncation_reason=reason,
+    )
 
 
-def _list_clients(client: OmadaClient, limit: int = 500) -> list[dict[str, Any]]:
+def _list_clients(client: OmadaClient, limit: int = 500) -> PaginatedList:
     client.authenticate()
     return _fetch_clients(client, limit=limit)
 
 
-def _list_wifi_clients(client: OmadaClient, limit: int = 500) -> list[dict[str, Any]]:
-    return [c for c in _list_clients(client, limit=0) if c.get("wireless")][:limit or None]
+def _list_wifi_clients(client: OmadaClient, limit: int = 500) -> PaginatedList:
+    all_clients = _list_clients(client, limit=0)
+    matched = [c for c in all_clients if c.get("wireless")]
+    capped = matched[:limit] if limit else matched
+    hit_limit = bool(limit and len(matched) > limit)
+    upstream_truncated = all_clients.truncated
+    truncated = hit_limit or upstream_truncated
+    reason = (
+        f"results capped at limit={limit}"
+        if hit_limit
+        else all_clients.pagination.get("truncationReason")
+    )
+    return PaginatedList(
+        capped,
+        truncated=truncated,
+        total_rows=len(matched) if not upstream_truncated else None,
+        pages_fetched=all_clients.pagination.get("pagesFetched"),
+        max_pages=all_clients.pagination.get("maxPages"),
+        limit=limit or None,
+        truncation_reason=reason,
+    )
 
 
-def _list_wired_clients(client: OmadaClient, limit: int = 500) -> list[dict[str, Any]]:
-    return [c for c in _list_clients(client, limit=0) if not c.get("wireless")][:limit or None]
+def _list_wired_clients(client: OmadaClient, limit: int = 500) -> PaginatedList:
+    all_clients = _list_clients(client, limit=0)
+    matched = [c for c in all_clients if not c.get("wireless")]
+    capped = matched[:limit] if limit else matched
+    hit_limit = bool(limit and len(matched) > limit)
+    upstream_truncated = all_clients.truncated
+    truncated = hit_limit or upstream_truncated
+    reason = (
+        f"results capped at limit={limit}"
+        if hit_limit
+        else all_clients.pagination.get("truncationReason")
+    )
+    return PaginatedList(
+        capped,
+        truncated=truncated,
+        total_rows=len(matched) if not upstream_truncated else None,
+        pages_fetched=all_clients.pagination.get("pagesFetched"),
+        max_pages=all_clients.pagination.get("maxPages"),
+        limit=limit or None,
+        truncation_reason=reason,
+    )
 
 
 def _get_client(client: OmadaClient, mac: str) -> dict[str, Any]:
@@ -232,9 +331,22 @@ def _search_clients(
             if not any(q_norm in field or (q_mac and q_mac in field) for field in haystack):
                 continue
         results.append(proj)
-        if limit and len(results) >= limit:
-            break
-    return results
+    total_matching = len(results)
+    if limit and len(results) > limit:
+        capped = results[:limit]
+        truncated = True
+        reason: str | None = f"results capped at limit={limit}"
+    else:
+        capped = results
+        truncated = False
+        reason = None
+    return PaginatedList(
+        capped,
+        truncated=truncated,
+        total_rows=total_matching,
+        limit=limit or None,
+        truncation_reason=reason,
+    )
 
 
 _CLIENT_SCHEMA: dict[str, Any] = {

@@ -108,13 +108,16 @@ def _collect_telemetry_snapshot_impl(
     retry_spike_pct: float = 15.0,
 ) -> dict[str, Any]:
     warnings: list[str] = []
-    raw_devices, _, _ = try_paginate(
+    raw_devices, _, ok_dev = try_paginate(
         client, f"sites/{site.site_id}/devices", warnings, label="devices",
     )
     clients_raw = _fetch_active_clients_safe(client, site.site_id, warnings)
-    lan_networks, _, _ = try_paginate(
+    lan_networks, _, ok_lan = try_paginate(
         client, f"sites/{site.site_id}/setting/lan/networks", warnings, label="LAN networks",
     )
+    if not ok_dev and not ok_lan:
+        summary = "; ".join(warnings[:3]) or "core inventory endpoints unreachable"
+        raise OmadaError(f"controller telemetry collection failed: {summary}")
 
     devices: list[dict[str, Any]] = []
     for dev in raw_devices:
@@ -523,6 +526,12 @@ def _emit_line(stream: TextIO, payload: Mapping[str, Any]) -> None:
     stream.flush()
 
 
+def _close_client_safe(client: Any) -> None:
+    close_fn = getattr(client, "close", None)
+    if callable(close_fn):
+        close_fn()
+
+
 def run_watch(
     config: Config,
     *,
@@ -533,38 +542,61 @@ def run_watch(
     client_factory: Callable[[Config], OmadaClient] | None = None,
     weak_rssi_dbm: float = -75.0,
     retry_spike_pct: float = 15.0,
+    max_backoff: float = 60.0,
 ) -> int:
     """Poll telemetry on a single persistent session and emit structured JSON diffs."""
     stream = out if out is not None else sys.stdout
     eff_interval = max(MIN_POLL_INTERVAL_SECONDS, float(interval), float(config.min_interval))
+    eff_max_backoff = max(eff_interval, float(max_backoff))
     client = (client_factory or OmadaClient)(config)
-    client.authenticate()
-
     prev: dict[str, Any] | None = None
     tick = 0
-    while True:
-        snap = collect_telemetry_snapshot(
-            client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
-        )
-        tick += 1
-        if prev is None:
-            _emit_line(stream, {
-                "event": "snapshot",
-                "iteration": tick,
-                "pollIntervalSeconds": eff_interval,
-                **snap,
-            })
-        else:
-            diff_evt = diff_telemetry_snapshots(
-                prev, snap, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
-            )
-            diff_evt["iteration"] = tick
-            _emit_line(stream, diff_evt)
-        prev = snap
+    consecutive_errors = 0
+    try:
+        client.authenticate()
+        while True:
+            tick += 1
+            try:
+                snap = collect_telemetry_snapshot(
+                    client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
+                )
+            except (OmadaError, OSError) as exc:
+                consecutive_errors += 1
+                backoff = min(eff_max_backoff, eff_interval * (2 ** min(consecutive_errors - 1, 5)))
+                _emit_line(stream, {
+                    "event": "degraded",
+                    "timestamp": _utc_now_iso(),
+                    "iteration": tick,
+                    "consecutiveErrors": consecutive_errors,
+                    "backoffSeconds": round(backoff, 3),
+                    "error": str(exc),
+                })
+                if iterations > 0 and tick >= iterations:
+                    return 1 if prev is None else 0
+                sleep_fn(backoff)
+                continue
 
-        if iterations > 0 and tick >= iterations:
-            return 0
-        sleep_fn(eff_interval)
+            consecutive_errors = 0
+            if prev is None:
+                _emit_line(stream, {
+                    "event": "snapshot",
+                    "iteration": tick,
+                    "pollIntervalSeconds": eff_interval,
+                    **snap,
+                })
+            else:
+                diff_evt = diff_telemetry_snapshots(
+                    prev, snap, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
+                )
+                diff_evt["iteration"] = tick
+                _emit_line(stream, diff_evt)
+            prev = snap
+
+            if iterations > 0 and tick >= iterations:
+                return 0
+            sleep_fn(eff_interval)
+    finally:
+        _close_client_safe(client)
 
 
 def export_metrics_once(
@@ -578,13 +610,16 @@ def export_metrics_once(
     """Authenticate once, capture a telemetry snapshot, and write Prometheus metrics."""
     stream = out if out is not None else sys.stdout
     client = (client_factory or OmadaClient)(config)
-    client.authenticate()
-    snap = collect_telemetry_snapshot(
-        client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
-    )
-    stream.write(format_prometheus_metrics(snap))
-    stream.flush()
-    return 0
+    try:
+        client.authenticate()
+        snap = collect_telemetry_snapshot(
+            client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
+        )
+        stream.write(format_prometheus_metrics(snap))
+        stream.flush()
+        return 0
+    finally:
+        _close_client_safe(client)
 
 
 def serve_metrics_http(
@@ -596,45 +631,102 @@ def serve_metrics_http(
     client_factory: Callable[[Config], OmadaClient] | None = None,
     weak_rssi_dbm: float = -75.0,
     retry_spike_pct: float = 15.0,
+    stale_after: float | None = None,
 ) -> http.server.ThreadingHTTPServer:
     """Create and return an HTTP server serving ``/metrics`` using one persistent session."""
     client = (client_factory or OmadaClient)(config)
-    client.authenticate()
+    try:
+        client.authenticate()
+    except Exception:
+        _close_client_safe(client)
+        raise
+
     cache_ttl = max(MIN_POLL_INTERVAL_SECONDS, float(min_scrape_interval), float(config.min_interval))
+    stale_threshold = max(cache_ttl * 3.0, 60.0) if stale_after is None else max(1.0, float(stale_after))
     lock = threading.Lock()
-    state: dict[str, Any] = {"ts": 0.0, "body": b""}
+    state: dict[str, Any] = {
+        "ts": 0.0,
+        "body": b"",
+        "lastSuccessAt": None,
+        "lastError": None,
+        "consecutiveFailures": 0,
+    }
 
     def _render() -> bytes:
         with lock:
             now = time.monotonic()
             if not state["body"] or (now - state["ts"]) >= cache_ttl:
-                snap = collect_telemetry_snapshot(
-                    client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
-                )
+                try:
+                    snap = collect_telemetry_snapshot(
+                        client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
+                    )
+                except (OmadaError, OSError) as exc:
+                    state["consecutiveFailures"] += 1
+                    state["lastError"] = str(exc)
+                    raise
                 state["body"] = format_prometheus_metrics(snap).encode("utf-8")
                 state["ts"] = time.monotonic()
+                state["lastSuccessAt"] = _utc_now_iso()
+                state["lastError"] = None
+                state["consecutiveFailures"] = 0
             return state["body"]
+
+    def _health_payload() -> tuple[int, dict[str, Any], bytes]:
+        with lock:
+            failures = int(state["consecutiveFailures"])
+            last_ts = float(state["ts"])
+            age = round(time.monotonic() - last_ts, 3) if last_ts > 0 else None
+            last_err = state["lastError"]
+            last_ok_at = state["lastSuccessAt"]
+        if failures > 0:
+            code = 503
+            label = "degraded"
+            plain = f"degraded: {last_err}\n".encode()
+        elif age is not None and age > stale_threshold:
+            code = 503
+            label = "stale"
+            plain = f"stale: {age}s\n".encode()
+        else:
+            code = 200
+            label = "ok"
+            plain = b"ok\n"
+        payload = {
+            "status": label,
+            "consecutiveFailures": failures,
+            "lastSuccessAt": last_ok_at,
+            "lastError": last_err,
+            "cacheAgeSeconds": age,
+            "staleAfterSeconds": stale_threshold,
+        }
+        return code, payload, plain
 
     class _MetricsHandler(http.server.BaseHTTPRequestHandler):
         def log_message(self, _format: str, *_args: Any) -> None:
             return
 
         def do_GET(self) -> None:  # noqa: N802
-            if self.path.split("?", 1)[0] == "/healthz":
-                body = b"ok\n"
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
+            route = self.path.split("?", 1)[0]
+            if route == "/healthz":
+                code, health_json, plain_body = _health_payload()
+                wants_json = (
+                    "format=json" in self.path
+                    or "application/json" in str(self.headers.get("Accept") or "").lower()
+                )
+                body = (json.dumps(health_json) + "\n").encode("utf-8") if wants_json else plain_body
+                ctype = "application/json; charset=utf-8" if wants_json else "text/plain; charset=utf-8"
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if self.path.split("?", 1)[0] != "/metrics":
+            if route != "/metrics":
                 self.send_response(404)
                 self.end_headers()
                 return
             try:
                 body = _render()
-            except OmadaError as exc:
+            except (OmadaError, OSError) as exc:
                 err_body = f"# ERROR: {exc}\n".encode()
                 self.send_response(503)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -648,4 +740,11 @@ def serve_metrics_http(
             self.end_headers()
             self.wfile.write(body)
 
-    return http.server.ThreadingHTTPServer((host, int(port)), _MetricsHandler)
+    class _MetricsHTTPServer(http.server.ThreadingHTTPServer):
+        def server_close(self) -> None:
+            try:
+                super().server_close()
+            finally:
+                _close_client_safe(client)
+
+    return _MetricsHTTPServer((host, int(port)), _MetricsHandler)

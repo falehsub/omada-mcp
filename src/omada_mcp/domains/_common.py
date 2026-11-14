@@ -147,6 +147,41 @@ def as_float(value: Any, default: float | None = None) -> float | None:
         return default
 
 
+class PaginatedList(list[dict[str, Any]]):
+    """``list`` subclass carrying explicit pagination and truncation metadata."""
+
+    def __init__(
+        self,
+        items: Any = (),
+        *,
+        truncated: bool = False,
+        total_rows: int | None = None,
+        pages_fetched: int | None = None,
+        max_pages: int | None = None,
+        limit: int | None = None,
+        truncation_reason: str | None = None,
+    ) -> None:
+        super().__init__(items)
+        meta: dict[str, Any] = {
+            "truncated": bool(truncated),
+        }
+        if total_rows is not None:
+            meta["totalRows"] = int(total_rows)
+        if pages_fetched is not None:
+            meta["pagesFetched"] = int(pages_fetched)
+        if max_pages is not None:
+            meta["maxPages"] = int(max_pages)
+        if limit:
+            meta["limit"] = int(limit)
+        if truncation_reason and truncated:
+            meta["truncationReason"] = truncation_reason
+        self.pagination: dict[str, Any] = meta
+
+    @property
+    def truncated(self) -> bool:
+        return bool(self.pagination.get("truncated", False))
+
+
 def as_mapping(value: Any) -> Mapping[str, Any]:
     """Return ``value`` if it is a mapping, else an empty dict."""
     return value if isinstance(value, Mapping) else {}

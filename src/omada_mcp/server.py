@@ -24,6 +24,7 @@ from typing import Any, TextIO
 from . import __version__
 from .client import OmadaClient, OmadaError, log
 from .config import Config
+from .schema_validation import SchemaValidationError, validate_tool_arguments
 from .tools import TOOL_MAP, Tool, get_tool, tool_descriptors
 
 __all__ = ["PROTOCOL_VERSIONS", "DEFAULT_PROTOCOL_VERSION", "Server",
@@ -124,11 +125,16 @@ class Server:
         configure_streams(stdin, self.out)
         log(f"omada-mcp {__version__} ready on stdio "
             f"(read_only={self.config.read_only}, site={self.config.site_id or self.config.site_name or 'first'})")
-        for message in self._read_messages(stdin):
-            response = self.handle(message)
-            if response is not None:
-                self._write(response)
-        return 0
+        try:
+            for message in self._read_messages(stdin):
+                response = self.handle(message)
+                if response is not None:
+                    self._write(response)
+            return 0
+        finally:
+            close_fn = getattr(self.client, "close", None)
+            if callable(close_fn):
+                close_fn()
 
     def _write(self, payload: dict[str, Any]) -> None:
         assert self.out is not None
@@ -381,147 +387,28 @@ class Server:
             result["structuredContent"] = data
         elif isinstance(data, list) and all(isinstance(item, dict) for item in data):
             # Keep structuredContent an object, as the spec requires.
-            result["structuredContent"] = {"items": data, "count": len(data)}
+            structured: dict[str, Any] = {"items": data, "count": len(data)}
+            page_meta = getattr(data, "pagination", None)
+            if isinstance(page_meta, dict):
+                structured.update(page_meta)
+                if page_meta.get("truncated"):
+                    reason = page_meta.get("truncationReason") or "result set truncated"
+                    total_rows = page_meta.get("totalRows")
+                    detail = (
+                        f" ({len(data)} of {total_rows} rows)"
+                        if total_rows is not None
+                        else f" ({len(data)} rows)"
+                    )
+                    result["content"].append({
+                        "type": "text",
+                        "text": f"Note: {reason}{detail}. Pass a higher limit or narrow filters to inspect remaining entries.",
+                    })
+            result["structuredContent"] = structured
         return result
 
     @staticmethod
     def _check_arguments(spec: Tool, arguments: dict[str, Any]) -> None:
-        schema = spec.input_schema or {}
-        props = schema.get("properties") or {}
-
-        unknown = sorted(k for k in arguments if k not in props)
-        if unknown:
-            camel_lookup = {
-                "".join(ch for ch in prop.lower() if ch.isalnum()): prop
-                for prop in props
-            }
-            fixes = []
-            for k in unknown:
-                norm_k = "".join(ch for ch in k.lower() if ch.isalnum())
-                if norm_k in camel_lookup:
-                    fixes.append(f"use {camel_lookup[norm_k]!r} instead of {k!r}")
-            hint = "; ".join(fixes) if fixes else "allowed arguments: " + ", ".join(sorted(props))
-            raise RpcError(
-                -32602,
-                f"{spec.name}: unexpected argument(s): {', '.join(unknown)}",
-                hint=hint,
-            )
-
-        if not spec.read_only and "dryRun" in props and "dryRun" not in arguments:
-            arguments["dryRun"] = True
-
-        required = schema.get("required") or []
-        missing = [
-            key for key in required
-            if key not in arguments or arguments[key] is None or arguments[key] == ""
-        ]
-        if missing:
-            raise RpcError(
-                -32602,
-                f"{spec.name}: missing required argument(s): {', '.join(missing)}",
-                hint="inputSchema: " + json.dumps(props),
-            )
-
-        for key, val in list(arguments.items()):
-            prop_schema = props.get(key) or {}
-            ptype = prop_schema.get("type")
-            if val is None:
-                if ptype == "boolean" or key in required:
-                    raise RpcError(-32602, f"{spec.name}: {key} must not be null")
-                continue
-
-            if key == "limit":
-                if isinstance(val, bool):
-                    raise RpcError(-32602, "limit must be an integer between 1 and 5000")
-                try:
-                    arguments["limit"] = max(1, min(5000, int(val)))
-                except (TypeError, ValueError):
-                    raise RpcError(-32602, "limit must be an integer between 1 and 5000") from None
-                continue
-
-            if key == "code":
-                if isinstance(val, bool):
-                    raise RpcError(-32602, "code must be an integer")
-                try:
-                    arguments["code"] = int(val)
-                except (TypeError, ValueError):
-                    raise RpcError(-32602, "code must be an integer") from None
-                continue
-
-            if ptype == "boolean":
-                if not isinstance(val, bool):
-                    raise RpcError(
-                        -32602,
-                        f"{spec.name}: {key} must be a boolean",
-                        hint=f"pass JSON true or false for {key} (not a string)",
-                    )
-            elif ptype == "integer":
-                if isinstance(val, bool) or not isinstance(val, int):
-                    raise RpcError(-32602, f"{spec.name}: {key} must be an integer")
-                if "minimum" in prop_schema and val < prop_schema["minimum"]:
-                    raise RpcError(
-                        -32602,
-                        f"{spec.name}: {key} must be >= {prop_schema['minimum']}",
-                    )
-                if "maximum" in prop_schema and val > prop_schema["maximum"]:
-                    raise RpcError(
-                        -32602,
-                        f"{spec.name}: {key} must be <= {prop_schema['maximum']}",
-                    )
-            elif ptype == "number":
-                if isinstance(val, bool) or not isinstance(val, (int, float)):
-                    raise RpcError(-32602, f"{spec.name}: {key} must be a number")
-            elif ptype == "string":
-                if not isinstance(val, str):
-                    raise RpcError(-32602, f"{spec.name}: {key} must be a string")
-                if "enum" in prop_schema:
-                    allowed_enum = {str(e).lower() for e in prop_schema["enum"]}
-                    # Allow handler-supported aliases alongside schema enum values
-                    if key == "security":
-                        allowed_enum |= {"none", "wpa3"}
-                    elif key == "aclType":
-                        allowed_enum |= {"0", "1", "2"}
-                    elif key == "category":
-                        allowed_enum |= {"alert", "event", "audits"}
-                    if val.strip().lower() not in allowed_enum:
-                        raise RpcError(
-                            -32602,
-                            f"{spec.name}: {key} must be one of {prop_schema['enum']}",
-                            hint=f"Allowed values for {key}: {', '.join(map(str, prop_schema['enum']))}",
-                        )
-            elif ptype == "array":
-                if not isinstance(val, list):
-                    raise RpcError(-32602, f"{spec.name}: {key} must be an array")
-                item_type = (prop_schema.get("items") or {}).get("type")
-                if item_type == "integer" and any(isinstance(x, bool) or not isinstance(x, int) for x in val):
-                    raise RpcError(-32602, f"{spec.name}: {key} items must be integers")
-                if item_type == "string" and any(not isinstance(x, str) for x in val):
-                    raise RpcError(-32602, f"{spec.name}: {key} items must be strings")
-                if item_type == "object" and any(not isinstance(x, dict) for x in val):
-                    raise RpcError(-32602, f"{spec.name}: {key} items must be objects")
-            elif ptype == "object":
-                if not isinstance(val, dict):
-                    raise RpcError(-32602, f"{spec.name}: {key} must be an object")
-            elif isinstance(ptype, list):
-                allowed_primitives = set(ptype)
-                ok = (
-                    ("string" in allowed_primitives and isinstance(val, str))
-                    or ("integer" in allowed_primitives and isinstance(val, int) and not isinstance(val, bool))
-                    or ("boolean" in allowed_primitives and isinstance(val, bool))
-                    or ("array" in allowed_primitives and isinstance(val, list))
-                    or ("object" in allowed_primitives and isinstance(val, dict))
-                )
-                if not ok:
-                    raise RpcError(
-                        -32602,
-                        f"{spec.name}: {key} must match type {' or '.join(ptype)}",
-                    )
-
-        if not spec.read_only and arguments.get("dryRun") is False:
-            conf = arguments.get("confirm")
-            if not isinstance(conf, str) or not conf.strip():
-                raise RpcError(
-                    -32602,
-                    f"{spec.name}: confirm is required when dryRun is false",
-                    hint="run with dryRun=true first to inspect the diff and obtain confirmToken",
-                )
+        try:
+            validate_tool_arguments(spec, arguments)
+        except SchemaValidationError as exc:
+            raise RpcError(-32602, exc.message, hint=exc.hint) from None
