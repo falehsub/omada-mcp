@@ -1,0 +1,100 @@
+name: compat
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/compat.yml"
+      - "scripts/docker_lab_init.py"
+      - "scripts/read_selftest.py"
+      - "src/omada_mcp/client.py"
+      - "src/omada_mcp/transport.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-compat:
+    name: Docker compat (Omada ${{ matrix.label }})
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'compat') ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: "5.15.24.19"
+            tag: "5.15.24.19"
+          - label: "6.2.14.11"
+            tag: "6.2.14.11"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install omada-mcp
+        run: python -m pip install .
+
+      - name: Start disposable Omada Controller (${{ matrix.tag }})
+        run: |
+          docker run -d --rm --name omada-lab \
+            -p 8043:8043 -p 8088:8088 \
+            -e TZ=UTC \
+            -e SMALL_FILES=true \
+            -e MANAGE_HTTP_PORT=8088 \
+            -e MANAGE_HTTPS_PORT=8043 \
+            mbentley/omada-controller:${{ matrix.tag }}
+
+      - name: Initialize lab site, TLS CA, Viewer and Admin accounts
+        run: |
+          mkdir -p "${{ runner.temp }}/lab" reports
+          python scripts/docker_lab_init.py \
+            --base-url https://127.0.0.1:8043 \
+            --out-dir "${{ runner.temp }}/lab" \
+            --timeout 240
+
+      - name: Run --doctor --json (Viewer and Admin, CA verified)
+        run: |
+          OMADA_ENV_FILE="${{ runner.temp }}/lab/viewer.env" omada-mcp --doctor --json > "reports/doctor-viewer-${{ matrix.label }}.json"
+          OMADA_ENV_FILE="${{ runner.temp }}/lab/admin.env" omada-mcp --doctor --json > "reports/doctor-admin-${{ matrix.label }}.json"
+          python -c "
+          import json
+          for p in ('reports/doctor-viewer-${{ matrix.label }}.json', 'reports/doctor-admin-${{ matrix.label }}.json'):
+              d = json.load(open(p, encoding='utf-8'))
+              assert d['ready'] is True, f'{p}: {d}'
+              assert d['controller']['controllerVer'].startswith('${{ matrix.label }}'.rsplit('.', 2)[0]), d['controller']
+          "
+
+      - name: Run read-only tool sweep (Viewer and Admin)
+        run: |
+          python scripts/read_selftest.py --env-file "${{ runner.temp }}/lab/viewer.env" > "reports/selftest-viewer-${{ matrix.label }}.json"
+          python scripts/read_selftest.py --env-file "${{ runner.temp }}/lab/admin.env" > "reports/selftest-admin-${{ matrix.label }}.json"
+          python -c "
+          import json
+          for p in ('reports/selftest-viewer-${{ matrix.label }}.json', 'reports/selftest-admin-${{ matrix.label }}.json'):
+              r = json.load(open(p, encoding='utf-8'))
+              assert r['failed'] == 0, f'{p}: {r}'
+              assert r['passed'] >= 27, f'{p}: expected >=27 passed, got {r}'
+          "
+
+      - name: Tear down disposable controller
+        if: always()
+        run: docker rm -f omada-lab || true
+
+      - name: Upload payload-free compatibility reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compat-reports-${{ matrix.label }}
+          path: reports/*.json

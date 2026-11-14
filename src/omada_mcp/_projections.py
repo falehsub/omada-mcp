@@ -5,7 +5,8 @@ These exports are diagnostic snapshots, not controller backup/restore payloads.
 """
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 def _fields(*names: str) -> dict:
@@ -34,6 +35,7 @@ _ACL = {
     **_fields('id', 'index', 'name', 'status', 'policy', 'sourceType',
               'destinationType', 'biDirectional', 'syslog', 'bindingType', 'networkId'),
     'sourceIds': [None], 'destinationIds': [None], 'protocols': [None],
+    'sourceFilter': [None], 'destinationFilter': [None], 'protocol': None,
     'direction': {**_fields('lanToWan', 'lanToLan'), 'wanInIds': [None], 'vpnInIds': [None]},
     'customAclPorts': [_fields('portStart', 'portEnd', 'protocol')],
 }

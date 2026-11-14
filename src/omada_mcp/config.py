@@ -23,9 +23,9 @@ import math
 import os
 import re
 import urllib.parse
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Tuple
 
 __all__ = [
     "Config",
@@ -57,7 +57,7 @@ DEFAULT_MIN_INTERVAL = 0.05
 DEFAULT_WRITE_MIN_INTERVAL = 1.0
 
 #: Exact allowlistable write tool names (kept in sync with tools.TOOLS).
-WRITE_TOOL_NAMES: Tuple[str, ...] = (
+WRITE_TOOL_NAMES: tuple[str, ...] = (
     "set_client_fixed_ip",
     "release_client_fixed_ip",
     "upsert_dhcp_reservation",
@@ -156,7 +156,7 @@ class ConfigError(RuntimeError):
     print the exact fix instead of a traceback.
     """
 
-    def __init__(self, message: str, hint: Optional[str] = None, key: Optional[str] = None):
+    def __init__(self, message: str, hint: str | None = None, key: str | None = None):
         super().__init__(message)
         self.message = message
         self.hint = hint
@@ -173,36 +173,36 @@ class Config:
     base_url: str
     username: str
     password: str = field(repr=False)
-    site_id: Optional[str] = None
-    site_name: Optional[str] = None
-    ca_bundle: Optional[Path] = None
+    site_id: str | None = None
+    site_name: str | None = None
+    ca_bundle: Path | None = None
     verify_ssl: bool = True
     strict_x509: bool = True
-    tls_server_name: Optional[str] = None
+    tls_server_name: str | None = None
     read_only: bool = True
-    write_tools: Tuple[str, ...] = ()
-    snapshot_dir: Optional[Path] = None
+    write_tools: tuple[str, ...] = ()
+    snapshot_dir: Path | None = None
     snapshot_origin: str = "default"
     write_min_interval: float = DEFAULT_WRITE_MIN_INTERVAL
-    management_cidrs: Tuple[str, ...] = ()
+    management_cidrs: tuple[str, ...] = ()
     use_system_proxy: bool = False
     timeout: float = DEFAULT_TIMEOUT
     min_interval: float = DEFAULT_MIN_INTERVAL
     schema_mode: str = "slim"
-    tool_categories: Tuple[str, ...] = ()
+    tool_categories: tuple[str, ...] = ()
     compact_output: bool = True
-    env_file: Optional[Path] = None
+    env_file: Path | None = None
     env_origin: str = "environment"
-    sources: Dict[str, str] = field(default_factory=dict)
+    sources: dict[str, str] = field(default_factory=dict)
 
     # -- presentation helpers -------------------------------------------------
 
-    def masked(self) -> Dict[str, object]:
+    def masked(self) -> dict[str, object]:
         """Config as a dict safe to print: never exposes the password."""
         return {
             "base_url": self.base_url,
             "username": self.username,
-            "password": "set (%d chars)" % len(self.password) if self.password else "missing",
+            "password": f"set ({len(self.password)} chars)" if self.password else "missing",
             "site_id": self.site_id,
             "site_name": self.site_name,
             "ca_bundle": str(self.ca_bundle) if self.ca_bundle else None,
@@ -222,7 +222,7 @@ class Config:
         }
 
 
-def parse_write_tools(raw: Optional[str]) -> Tuple[str, ...]:
+def parse_write_tools(raw: str | None) -> tuple[str, ...]:
     """Parse ``OMADA_WRITE_TOOLS`` as an explicit comma-separated allowlist.
 
     Wildcards (``*``, ``?``, ``[``) and ``all`` are refused so writes are always
@@ -233,7 +233,7 @@ def parse_write_tools(raw: Optional[str]) -> Tuple[str, ...]:
         return ()
     valid = set(WRITE_TOOL_NAMES)
     seen = set()
-    tools: List[str] = []
+    tools: list[str] = []
     for part in text.split(","):
         name = part.strip()
         if not name:
@@ -269,12 +269,12 @@ def parse_write_tools(raw: Optional[str]) -> Tuple[str, ...]:
     return tuple(tools)
 
 
-def parse_management_cidrs(raw: Optional[str]) -> Tuple[str, ...]:
+def parse_management_cidrs(raw: str | None) -> tuple[str, ...]:
     """Parse ``OMADA_MANAGEMENT_CIDRS`` into canonical IPv4 network strings."""
     text = (raw or "").strip()
     if not text:
         return ()
-    cidrs: List[str] = []
+    cidrs: list[str] = []
     for part in text.split(","):
         item = part.strip()
         if not item:
@@ -293,7 +293,7 @@ def parse_management_cidrs(raw: Optional[str]) -> Tuple[str, ...]:
     return tuple(cidrs)
 
 
-def default_snapshot_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
+def default_snapshot_dir(environ: Mapping[str, str] | None = None) -> Path:
     """Default per-user snapshot directory (``~/.local/state/omada-mcp/snapshots``)."""
     env = os.environ if environ is None else environ
     state_home = (env.get("XDG_STATE_HOME") or "").strip()
@@ -311,13 +311,13 @@ def default_snapshot_dir(environ: Optional[Mapping[str, str]] = None) -> Path:
     return Path.home() / ".local" / "state" / "omada-mcp" / "snapshots"
 
 
-VALID_SCHEMA_MODES: Tuple[str, ...] = ("slim", "full")
-VALID_TOOL_CATEGORIES: Tuple[str, ...] = (
+VALID_SCHEMA_MODES: tuple[str, ...] = ("slim", "full")
+VALID_TOOL_CATEGORIES: tuple[str, ...] = (
     "core", "diagnostics", "switch", "wifi", "routing", "security", "rollback",
 )
 
 
-def parse_schema_mode(raw: Optional[str]) -> str:
+def parse_schema_mode(raw: str | None) -> str:
     """Parse ``OMADA_SCHEMA_MODE`` (``slim`` [default] or ``full``)."""
     text = (raw or "").strip().lower()
     if not text:
@@ -331,12 +331,12 @@ def parse_schema_mode(raw: Optional[str]) -> str:
     )
 
 
-def parse_tool_categories(raw: Optional[str]) -> Tuple[str, ...]:
+def parse_tool_categories(raw: str | None) -> tuple[str, ...]:
     """Parse ``OMADA_TOOL_CATEGORIES`` comma-separated filter list."""
     if not raw or not str(raw).strip():
         return ()
     seen: set[str] = set()
-    parsed: List[str] = []
+    parsed: list[str] = []
     for part in str(raw).split(","):
         item = part.strip().lower()
         if not item:
@@ -398,9 +398,9 @@ def _unquote(value: str) -> str:
     return value
 
 
-def parse_env_text(text: str) -> Dict[str, str]:
+def parse_env_text(text: str) -> dict[str, str]:
     """Parse dotenv text into a dict (last assignment wins)."""
-    values: Dict[str, str] = {}
+    values: dict[str, str] = {}
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -415,7 +415,7 @@ def parse_env_text(text: str) -> Dict[str, str]:
     return values
 
 
-def parse_env_file(path: os.PathLike | str) -> Dict[str, str]:
+def parse_env_file(path: os.PathLike | str) -> dict[str, str]:
     """Parse a dotenv file; missing or unreadable files yield ``{}``.
 
     ``utf-8-sig`` strips a leading BOM: Windows PowerShell 5.1
@@ -424,13 +424,13 @@ def parse_env_file(path: os.PathLike | str) -> Dict[str, str]:
     a misleading "missing OMADA_BASE_URL" error.
     """
     try:
-        with open(path, "r", encoding="utf-8-sig") as handle:
+        with open(path, encoding="utf-8-sig") as handle:
             return parse_env_text(handle.read())
     except (OSError, UnicodeDecodeError):
         return {}
 
 
-def _xdg_config_home(environ: Optional[Mapping[str, str]] = None) -> Path:
+def _xdg_config_home(environ: Mapping[str, str] | None = None) -> Path:
     env = os.environ if environ is None else environ
     explicit = env.get("XDG_CONFIG_HOME")
     if explicit:
@@ -445,7 +445,7 @@ def _xdg_config_home(environ: Optional[Mapping[str, str]] = None) -> Path:
     return Path.home() / ".config"
 
 
-def _appdata_dir(environ: Optional[Mapping[str, str]] = None) -> Optional[Path]:
+def _appdata_dir(environ: Mapping[str, str] | None = None) -> Path | None:
     """``%APPDATA%`` on Windows, else ``None``.
 
     Kept separate from :func:`candidate_env_files` so the Windows branch is
@@ -459,9 +459,9 @@ def _appdata_dir(environ: Optional[Mapping[str, str]] = None) -> Optional[Path]:
 
 
 def candidate_env_files(
-    cwd: Optional[os.PathLike | str] = None,
-    environ: Optional[Mapping[str, str]] = None,
-) -> List[Tuple[str, Path]]:
+    cwd: os.PathLike | str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> list[tuple[str, Path]]:
     """Ordered ``(origin, path)`` candidates, highest priority first.
 
     On Windows ``%APPDATA%\\omada-mcp\\.env`` comes before the POSIX-style
@@ -470,7 +470,7 @@ def candidate_env_files(
     checkout shared with WSL keeps working.
     """
     env = os.environ if environ is None else environ
-    candidates: List[Tuple[str, Path]] = []
+    candidates: list[tuple[str, Path]] = []
     explicit = env.get("OMADA_ENV_FILE")
     if explicit:
         candidates.append(("OMADA_ENV_FILE", Path(explicit).expanduser()))
@@ -536,7 +536,7 @@ def normalize_base_url(raw: str) -> str:
     return f"{scheme}://{netloc}{path}"
 
 
-_ORIGIN_LABELS: Dict[str, str] = {
+_ORIGIN_LABELS: dict[str, str] = {
     "OMADA_ENV_FILE": "OMADA_ENV_FILE",
     "cwd/.env": "cwd",
     "%APPDATA%/omada-mcp/.env": "appdata",
@@ -544,7 +544,7 @@ _ORIGIN_LABELS: Dict[str, str] = {
 }
 
 
-def _origin_label(origin: Optional[str]) -> str:
+def _origin_label(origin: str | None) -> str:
     if not origin:
         return "environment"
     return _ORIGIN_LABELS.get(origin, "environment")
@@ -552,17 +552,17 @@ def _origin_label(origin: Optional[str]) -> str:
 
 def _merged_environment(
     environ: Mapping[str, str],
-    cwd: Optional[os.PathLike | str] = None,
-) -> Tuple[Dict[str, str], Dict[str, str], Optional[Path], str]:
+    cwd: os.PathLike | str | None = None,
+) -> tuple[dict[str, str], dict[str, str], Path | None, str]:
     """Merge dotenv values with the process environment.
 
     Returns ``(values, sources, env_file, env_origin)`` where ``sources`` maps each
     key to a human-readable origin and ``env_origin`` is a path-free label
     (``OMADA_ENV_FILE``, ``cwd``, ``appdata``, ``xdg``, or ``environment``).
     """
-    values: Dict[str, str] = {}
-    sources: Dict[str, str] = {}
-    env_file: Optional[Path] = None
+    values: dict[str, str] = {}
+    sources: dict[str, str] = {}
+    env_file: Path | None = None
     env_origin = "environment"
 
     for origin, path in candidate_env_files(cwd, environ):
@@ -593,8 +593,8 @@ def _merged_environment(
 
 
 def load_config(
-    environ: Optional[Mapping[str, str]] = None,
-    cwd: Optional[os.PathLike | str] = None,
+    environ: Mapping[str, str] | None = None,
+    cwd: os.PathLike | str | None = None,
 ) -> Config:
     """Build a validated :class:`Config` from the environment and dotenv files."""
     environ = dict(os.environ if environ is None else environ)
@@ -606,13 +606,13 @@ def load_config(
         where = str(env_file) if env_file else str(Path(cwd or Path.cwd()) / DEFAULT_ENV_FILENAME)
         raise ConfigError(
             "missing required variable(s): " + ", ".join(missing),
-            hint=("add them to %s, or export them, or point OMADA_ENV_FILE at your "
-                  "dotenv file" % where),
+            hint=(f"add them to {where}, or export them, or point OMADA_ENV_FILE at your "
+                  "dotenv file"),
             key=missing[0],
         )
 
     ca_raw = (values.get("OMADA_CA_BUNDLE") or "").strip()
-    ca_bundle: Optional[Path] = None
+    ca_bundle: Path | None = None
     if ca_raw:
         ca_bundle = Path(ca_raw).expanduser()
         if not ca_bundle.is_file():

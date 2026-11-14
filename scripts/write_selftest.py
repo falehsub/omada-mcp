@@ -34,7 +34,7 @@ from omada_mcp.config import ConfigError, load_config  # noqa: E402
 from omada_mcp.server import Server  # noqa: E402
 
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
-results = []
+results: list[tuple[str, str, str]] = []
 
 #: Every write tool a scenario calls, including its cleanup step. A scenario
 #: runs only when all of them are allowlisted, so it can always undo itself.
@@ -56,7 +56,7 @@ def record(status, label, detail=""):
 class Runner:
     def __init__(self, server: Server):
         self.server = server
-        self.notes = []
+        self.notes: list[tuple[str, str]] = []
 
     def call(self, name, arguments=None):
         response = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",

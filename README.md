@@ -502,10 +502,13 @@ Layout:
 
 ```
 src/omada_mcp/config.py         dotenv discovery, validation, base-URL normalisation, write allowlist
-src/omada_mcp/client.py         Web API v2 client: auth, pagination, write gate, snapshots/audit, errors
-src/omada_mcp/_helpers.py       shared v5/v6 diagnostics, secret redaction, topology & capability helpers
-src/omada_mcp/tools.py          33 read-only tools + 47 write descriptors, projections, outputSchema
-src/omada_mcp/write_tools.py    read-modify-write handlers, CIDR packer, anti-stranding, rollback, 6-step swap
+src/omada_mcp/errors.py         OmadaError taxonomy, ERROR_CATALOG, explain_error_code, redaction
+src/omada_mcp/transport.py      pooled keep-alive HTTP/1.1 transport, TLS context, SiteInfo/AuthInfo
+src/omada_mcp/client.py         Web API v2 client: auth, pagination, write gate, snapshots/audit
+src/omada_mcp/domains/          cohesive read, write, diagnostic, rollback & schema modules
+src/omada_mcp/tools.py          tool registry facade (33 read-only + 47 write = 80 tools)
+src/omada_mcp/write_tools.py    backward-compatible write handler & validator facade
+src/omada_mcp/_helpers.py       backward-compatible shared diagnostic helper facade
 src/omada_mcp/monitor.py        single-session --watch JSON diff streamer & --export-metrics Prometheus exporter
 src/omada_mcp/server.py         JSON-RPC stdio server, fail-closed gates, strict arg/bool checks
 src/omada_mcp/doctor.py         6-phase self-test (env, tls, login, site, tools, write) with --json
@@ -514,8 +517,8 @@ schemas/doctor.schema.json      JSON Schema for --doctor --json
 docs/compatibility.md           controller family and cookie compatibility matrix
 docs/write-support.md           write-support contract, verified endpoints, and controller traps
 tests/mock_controller.py        stateful Web API v2 mock controller with fault injection
-tests/test_bridge.py            read-only bridge, M1 diagnostics, M3 watch/metrics & protocol tests
-tests/test_write_support.py     write-gate, RMW flows, anti-stranding, rollback & fault-injection tests
+tests/fake_controller.py        lightweight FakeController & offline unit fixtures
+tests/test_*.py                 domain-split read, protocol, monitor, write & regression tests
 skills/omada-controller/        agent skill: field notes for the Omada API itself
 ```
 

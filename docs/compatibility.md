@@ -13,9 +13,26 @@
 
 | Controller Family | Target `controllerVer` / Models | Expected Cookie | Known Shape Differences | What to Report |
 |---|---|---|---|---|
-| `software-5.x` | `5.13.30.8` / Software Controller 5.x | `TPOMADA_SESSIONID` | Core Web API v2 auth, `sites`, `devices`, `insight/clients`, and `setting/wlans` shapes implemented; legacy integer `privilege` shape supported. | Expected (awaiting reproducible `--doctor --json` capture). |
-| `hardware-5.x` | OC200 / OC300 (v5.x) | `TPOMADA_SESSIONID` or `TPEAP_SESSIONID` | Older v5.x builds may issue `TPEAP_SESSIONID`, return `result.omadacId` in `/api/v2/login`, or wrap `devices` in `result.data`. All three are handled automatically. | Run `omada-mcp --doctor --json` and submit via the [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml) template. |
-| `hardware-6.x` | OC200 / OC300 / OC400 (v6.x) | `TPOMADA_SESSIONID` | Same Web API v2 family as `software-6.x`; `setting/wlans/{groupId}/ssids` expansion and `roleName` privilege shape supported. | Run `omada-mcp --doctor --json` and submit via the [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml) template. |
+| `software-5.x` | `5.13.30.8` / `5.15.24.19` | `TPOMADA_SESSIONID` | Core Web API v2 auth, `sites`, `devices`, `insight/clients`, and `setting/wlans` shapes implemented; legacy integer `privilege` and v5 `sourceFilter`/`destinationFilter`/`protocol` shapes covered in offline tests; `5.15.24.19` is configured in [the compat CI workflow](../.github/workflows/compat.yml) (scheduled/manual, awaiting first CI artifact run). | Run `omada-mcp --doctor --json` and attach CI/local summary if testing another 5.x build. |
+| `hardware-5.x` | OC200 / OC300 (v5.x) | `TPOMADA_SESSIONID` or `TPEAP_SESSIONID` | Older v5.x builds may issue `TPEAP_SESSIONID`, return `result.omadacId` in `/api/v2/login`, or wrap `devices` in `result.data`. All three are handled and covered against synthetic/fixture shapes in unit tests; awaiting direct live hardware capture. | Run `omada-mcp --doctor --json` and submit via the [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml) template. |
+| `hardware-6.x` | OC200 / OC300 / OC400 (v6.x) | `TPOMADA_SESSIONID` | Same Web API v2 family as `software-6.x`; `setting/wlans/{groupId}/ssids` expansion and `roleName` privilege shape supported; anonymized `ER7206 v2.20`, `ES220GMP v1.0`, and `EAP725-Wall(EU) v1.0` payloads verified in `tests/fixtures/` and `MockController`. | Run `omada-mcp --doctor --json` and submit via the [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml) template. |
+
+## Automated Compatibility CI & Fixture Captures
+
+### Disposable Docker Matrix (`.github/workflows/compat.yml`)
+
+[`.github/workflows/compat.yml`](../.github/workflows/compat.yml) defines a weekly (`cron`), manual (`workflow_dispatch`), and `compat`-labeled PR workflow that boots disposable `mbentley/omada-controller` containers (`5.15.24.19` and `6.2.14.11`), bootstraps a throwaway lab site with dedicated **Viewer** and **Admin** accounts plus leaf-CA pinning via [`scripts/docker_lab_init.py`](../scripts/docker_lab_init.py), runs `omada-mcp --doctor --json` and [`scripts/read_selftest.py`](../scripts/read_selftest.py) for both accounts, and uploads payload-free JSON status reports as CI artifacts.
+
+### Capturing & Anonymizing Hardware Fixtures
+
+Maintainers and contributors testing real adopted switches, gateways, or APs can produce shareable anonymized test bundles with zero writes using:
+
+```bash
+python scripts/capture_fixtures.py --env-file /path/to/isolated.env -o capture.json
+python scripts/anonymize_capture.py capture.json --verify-clean --strict-private
+```
+
+[`scripts/capture_fixtures.py`](../scripts/capture_fixtures.py) enforces GET-only HTTP requests (aside from `/api/v2/login`), scrubs MACs, IPs, CIDRs, IPv6 prefixes, `omadacId`/`site` IDs, serial numbers, SSIDs, hostnames, emails, tokens, and cookies via [`scripts/anonymize_capture.py`](../scripts/anonymize_capture.py), and verifies with `--verify-clean --strict-private` before writing output. Existing anonymized hardware fixtures under `tests/fixtures/` (`ER7206 v2.20`, `ES220GMP v1.0`, `EAP725-Wall(EU) v1.0`) exercise all 33 read tools (0 skipped on `MockController`) and all hardware-gated write dry-runs/confirmations.
 
 ## Reporting a New Controller Build
 

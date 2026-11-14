@@ -15,7 +15,8 @@ import json
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Mapping, Optional, TextIO
+from collections.abc import Callable, Mapping
+from typing import Any, TextIO
 
 from ._helpers import (
     as_float,
@@ -59,7 +60,7 @@ def _prom_labels(labels: Mapping[str, Any]) -> str:
     return "{" + ",".join(parts) + "}"
 
 
-def _fetch_active_clients_safe(client: OmadaClient, site_id: str, warnings: List[str]) -> List[Dict[str, Any]]:
+def _fetch_active_clients_safe(client: OmadaClient, site_id: str, warnings: list[str]) -> list[dict[str, Any]]:
     rows, _, ok = try_paginate(
         client,
         f"sites/{site_id}/clients?filters.active=true",
@@ -83,7 +84,7 @@ def collect_telemetry_snapshot(
     *,
     weak_rssi_dbm: float = -75.0,
     retry_spike_pct: float = 15.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Collect a single secret-safe read-only telemetry snapshot from an authenticated session."""
     if client.site is None:
         client.authenticate()
@@ -105,17 +106,20 @@ def _collect_telemetry_snapshot_impl(
     *,
     weak_rssi_dbm: float = -75.0,
     retry_spike_pct: float = 15.0,
-) -> Dict[str, Any]:
-    warnings: List[str] = []
-    raw_devices, _, _ = try_paginate(
+) -> dict[str, Any]:
+    warnings: list[str] = []
+    raw_devices, _, ok_dev = try_paginate(
         client, f"sites/{site.site_id}/devices", warnings, label="devices",
     )
     clients_raw = _fetch_active_clients_safe(client, site.site_id, warnings)
-    lan_networks, _, _ = try_paginate(
+    lan_networks, _, ok_lan = try_paginate(
         client, f"sites/{site.site_id}/setting/lan/networks", warnings, label="LAN networks",
     )
+    if not ok_dev and not ok_lan:
+        summary = "; ".join(warnings[:3]) or "core inventory endpoints unreachable"
+        raise OmadaError(f"controller telemetry collection failed: {summary}")
 
-    devices: List[Dict[str, Any]] = []
+    devices: list[dict[str, Any]] = []
     for dev in raw_devices:
         mac = normalize_mac(str(dev.get("mac") or ""))
         if not mac:
@@ -134,7 +138,7 @@ def _collect_telemetry_snapshot_impl(
     )
     warnings.extend(wan.get("warnings") or [])
 
-    ap_radios: List[Dict[str, Any]] = []
+    ap_radios: list[dict[str, Any]] = []
     for dev in raw_devices:
         if str(dev.get("type") or "").lower() != "ap" or not is_device_online(dev):
             continue
@@ -165,10 +169,10 @@ def _collect_telemetry_snapshot_impl(
     # Client RSSI tracking + per-VLAN client counting (deduplicated by MAC)
     seen_macs: set[str] = set()
     active_count = 0
-    wireless_clients: List[Dict[str, Any]] = []
-    weak_clients: List[Dict[str, Any]] = []
-    clients_by_net_id: Dict[str, int] = {}
-    clients_by_vlan: Dict[int, int] = {}
+    wireless_clients: list[dict[str, Any]] = []
+    weak_clients: list[dict[str, Any]] = []
+    clients_by_net_id: dict[str, int] = {}
+    clients_by_vlan: dict[int, int] = {}
 
     for row in clients_raw:
         cmac = normalize_mac(str(row.get("mac") or ""))
@@ -187,8 +191,8 @@ def _collect_telemetry_snapshot_impl(
         if bool(row.get("wireless")):
             raw_rssi = row.get("rssi")
             sig_lvl = row.get("signalLevel")
-            rssi_dbm: Optional[float] = None
-            signal_pct: Optional[float] = None
+            rssi_dbm: float | None = None
+            signal_pct: float | None = None
             if raw_rssi is not None:
                 rv = as_float(raw_rssi)
                 if rv is not None and rv < 0:
@@ -201,9 +205,7 @@ def _collect_telemetry_snapshot_impl(
                     elif 0 <= sv <= 100:
                         signal_pct = sv
             is_weak = False
-            if rssi_dbm is not None and rssi_dbm <= weak_rssi_dbm:
-                is_weak = True
-            elif rssi_dbm is None and signal_pct is not None and 0 < signal_pct <= 25:
+            if rssi_dbm is not None and rssi_dbm <= weak_rssi_dbm or rssi_dbm is None and signal_pct is not None and 0 < signal_pct <= 25:
                 is_weak = True
 
             c_rec = {
@@ -220,7 +222,7 @@ def _collect_telemetry_snapshot_impl(
             if is_weak:
                 weak_clients.append(c_rec)
 
-    dhcp_pools: List[Dict[str, Any]] = []
+    dhcp_pools: list[dict[str, Any]] = []
     for net in lan_networks:
         dhcp = net.get("dhcpSettings")
         if not isinstance(dhcp, Mapping) or not dhcp.get("enable"):
@@ -284,9 +286,9 @@ def diff_telemetry_snapshots(
     *,
     weak_rssi_dbm: float = -75.0,
     retry_spike_pct: float = 15.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute structured anomaly/transition diffs between consecutive snapshots."""
-    changes: List[Dict[str, Any]] = []
+    changes: list[dict[str, Any]] = []
 
     # 1. Device availability transitions
     prev_devs = {d["mac"]: d for d in prev.get("devices") or () if d.get("mac")}
@@ -331,8 +333,8 @@ def diff_telemetry_snapshots(
     # 3. AP TX/RX retry spike transitions
     p_radios = {(r.get("mac"), r.get("band")): r for r in prev.get("apRadios") or ()}
     for rad in curr.get("apRadios") or ():
-        key = (rad.get("mac"), rad.get("band"))
-        old_r = p_radios.get(key)
+        radio_key = (rad.get("mac"), rad.get("band"))
+        old_r = p_radios.get(radio_key)
         was_spike = bool(old_r.get("retrySpike")) if old_r else False
         now_spike = bool(rad.get("retrySpike"))
         if now_spike != was_spike or (
@@ -410,7 +412,7 @@ def diff_telemetry_snapshots(
 
 def format_prometheus_metrics(snapshot: Mapping[str, Any]) -> str:
     """Render a telemetry snapshot as Prometheus text exposition format v0.0.4."""
-    lines: List[str] = []
+    lines: list[str] = []
     site = snapshot.get("site") or {}
     site_name = str(site.get("name") or "")
 
@@ -524,68 +526,100 @@ def _emit_line(stream: TextIO, payload: Mapping[str, Any]) -> None:
     stream.flush()
 
 
+def _close_client_safe(client: Any) -> None:
+    close_fn = getattr(client, "close", None)
+    if callable(close_fn):
+        close_fn()
+
+
 def run_watch(
     config: Config,
     *,
     interval: float = 30.0,
     iterations: int = 0,
-    out: Optional[TextIO] = None,
+    out: TextIO | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
-    client_factory: Optional[Callable[[Config], OmadaClient]] = None,
+    client_factory: Callable[[Config], OmadaClient] | None = None,
     weak_rssi_dbm: float = -75.0,
     retry_spike_pct: float = 15.0,
+    max_backoff: float = 60.0,
 ) -> int:
     """Poll telemetry on a single persistent session and emit structured JSON diffs."""
     stream = out if out is not None else sys.stdout
     eff_interval = max(MIN_POLL_INTERVAL_SECONDS, float(interval), float(config.min_interval))
+    eff_max_backoff = max(eff_interval, float(max_backoff))
     client = (client_factory or OmadaClient)(config)
-    client.authenticate()
-
-    prev: Optional[Dict[str, Any]] = None
+    prev: dict[str, Any] | None = None
     tick = 0
-    while True:
-        snap = collect_telemetry_snapshot(
-            client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
-        )
-        tick += 1
-        if prev is None:
-            _emit_line(stream, {
-                "event": "snapshot",
-                "iteration": tick,
-                "pollIntervalSeconds": eff_interval,
-                **snap,
-            })
-        else:
-            diff_evt = diff_telemetry_snapshots(
-                prev, snap, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
-            )
-            diff_evt["iteration"] = tick
-            _emit_line(stream, diff_evt)
-        prev = snap
+    consecutive_errors = 0
+    try:
+        client.authenticate()
+        while True:
+            tick += 1
+            try:
+                snap = collect_telemetry_snapshot(
+                    client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
+                )
+            except (OmadaError, OSError) as exc:
+                consecutive_errors += 1
+                backoff = min(eff_max_backoff, eff_interval * (2 ** min(consecutive_errors - 1, 5)))
+                _emit_line(stream, {
+                    "event": "degraded",
+                    "timestamp": _utc_now_iso(),
+                    "iteration": tick,
+                    "consecutiveErrors": consecutive_errors,
+                    "backoffSeconds": round(backoff, 3),
+                    "error": str(exc),
+                })
+                if iterations > 0 and tick >= iterations:
+                    return 1 if prev is None else 0
+                sleep_fn(backoff)
+                continue
 
-        if iterations > 0 and tick >= iterations:
-            return 0
-        sleep_fn(eff_interval)
+            consecutive_errors = 0
+            if prev is None:
+                _emit_line(stream, {
+                    "event": "snapshot",
+                    "iteration": tick,
+                    "pollIntervalSeconds": eff_interval,
+                    **snap,
+                })
+            else:
+                diff_evt = diff_telemetry_snapshots(
+                    prev, snap, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
+                )
+                diff_evt["iteration"] = tick
+                _emit_line(stream, diff_evt)
+            prev = snap
+
+            if iterations > 0 and tick >= iterations:
+                return 0
+            sleep_fn(eff_interval)
+    finally:
+        _close_client_safe(client)
 
 
 def export_metrics_once(
     config: Config,
     *,
-    out: Optional[TextIO] = None,
-    client_factory: Optional[Callable[[Config], OmadaClient]] = None,
+    out: TextIO | None = None,
+    client_factory: Callable[[Config], OmadaClient] | None = None,
     weak_rssi_dbm: float = -75.0,
     retry_spike_pct: float = 15.0,
 ) -> int:
     """Authenticate once, capture a telemetry snapshot, and write Prometheus metrics."""
     stream = out if out is not None else sys.stdout
     client = (client_factory or OmadaClient)(config)
-    client.authenticate()
-    snap = collect_telemetry_snapshot(
-        client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
-    )
-    stream.write(format_prometheus_metrics(snap))
-    stream.flush()
-    return 0
+    try:
+        client.authenticate()
+        snap = collect_telemetry_snapshot(
+            client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
+        )
+        stream.write(format_prometheus_metrics(snap))
+        stream.flush()
+        return 0
+    finally:
+        _close_client_safe(client)
 
 
 def serve_metrics_http(
@@ -594,49 +628,106 @@ def serve_metrics_http(
     host: str = "127.0.0.1",
     port: int = 9108,
     min_scrape_interval: float = 5.0,
-    client_factory: Optional[Callable[[Config], OmadaClient]] = None,
+    client_factory: Callable[[Config], OmadaClient] | None = None,
     weak_rssi_dbm: float = -75.0,
     retry_spike_pct: float = 15.0,
+    stale_after: float | None = None,
 ) -> http.server.ThreadingHTTPServer:
     """Create and return an HTTP server serving ``/metrics`` using one persistent session."""
     client = (client_factory or OmadaClient)(config)
-    client.authenticate()
+    try:
+        client.authenticate()
+    except Exception:
+        _close_client_safe(client)
+        raise
+
     cache_ttl = max(MIN_POLL_INTERVAL_SECONDS, float(min_scrape_interval), float(config.min_interval))
+    stale_threshold = max(cache_ttl * 3.0, 60.0) if stale_after is None else max(1.0, float(stale_after))
     lock = threading.Lock()
-    state: Dict[str, Any] = {"ts": 0.0, "body": b""}
+    state: dict[str, Any] = {
+        "ts": 0.0,
+        "body": b"",
+        "lastSuccessAt": None,
+        "lastError": None,
+        "consecutiveFailures": 0,
+    }
 
     def _render() -> bytes:
         with lock:
             now = time.monotonic()
             if not state["body"] or (now - state["ts"]) >= cache_ttl:
-                snap = collect_telemetry_snapshot(
-                    client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
-                )
+                try:
+                    snap = collect_telemetry_snapshot(
+                        client, weak_rssi_dbm=weak_rssi_dbm, retry_spike_pct=retry_spike_pct,
+                    )
+                except (OmadaError, OSError) as exc:
+                    state["consecutiveFailures"] += 1
+                    state["lastError"] = str(exc)
+                    raise
                 state["body"] = format_prometheus_metrics(snap).encode("utf-8")
                 state["ts"] = time.monotonic()
+                state["lastSuccessAt"] = _utc_now_iso()
+                state["lastError"] = None
+                state["consecutiveFailures"] = 0
             return state["body"]
+
+    def _health_payload() -> tuple[int, dict[str, Any], bytes]:
+        with lock:
+            failures = int(state["consecutiveFailures"])
+            last_ts = float(state["ts"])
+            age = round(time.monotonic() - last_ts, 3) if last_ts > 0 else None
+            last_err = state["lastError"]
+            last_ok_at = state["lastSuccessAt"]
+        if failures > 0:
+            code = 503
+            label = "degraded"
+            plain = f"degraded: {last_err}\n".encode()
+        elif age is not None and age > stale_threshold:
+            code = 503
+            label = "stale"
+            plain = f"stale: {age}s\n".encode()
+        else:
+            code = 200
+            label = "ok"
+            plain = b"ok\n"
+        payload = {
+            "status": label,
+            "consecutiveFailures": failures,
+            "lastSuccessAt": last_ok_at,
+            "lastError": last_err,
+            "cacheAgeSeconds": age,
+            "staleAfterSeconds": stale_threshold,
+        }
+        return code, payload, plain
 
     class _MetricsHandler(http.server.BaseHTTPRequestHandler):
         def log_message(self, _format: str, *_args: Any) -> None:
             return
 
         def do_GET(self) -> None:  # noqa: N802
-            if self.path.split("?", 1)[0] == "/healthz":
-                body = b"ok\n"
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
+            route = self.path.split("?", 1)[0]
+            if route == "/healthz":
+                code, health_json, plain_body = _health_payload()
+                wants_json = (
+                    "format=json" in self.path
+                    or "application/json" in str(self.headers.get("Accept") or "").lower()
+                )
+                body = (json.dumps(health_json) + "\n").encode("utf-8") if wants_json else plain_body
+                ctype = "application/json; charset=utf-8" if wants_json else "text/plain; charset=utf-8"
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if self.path.split("?", 1)[0] != "/metrics":
+            if route != "/metrics":
                 self.send_response(404)
                 self.end_headers()
                 return
             try:
                 body = _render()
-            except OmadaError as exc:
-                err_body = f"# ERROR: {exc}\n".encode("utf-8")
+            except (OmadaError, OSError) as exc:
+                err_body = f"# ERROR: {exc}\n".encode()
                 self.send_response(503)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
                 self.send_header("Content-Length", str(len(err_body)))
@@ -649,4 +740,11 @@ def serve_metrics_http(
             self.end_headers()
             self.wfile.write(body)
 
-    return http.server.ThreadingHTTPServer((host, int(port)), _MetricsHandler)
+    class _MetricsHTTPServer(http.server.ThreadingHTTPServer):
+        def server_close(self) -> None:
+            try:
+                super().server_close()
+            finally:
+                _close_client_safe(client)
+
+    return _MetricsHTTPServer((host, int(port)), _MetricsHandler)
