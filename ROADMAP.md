@@ -1,11 +1,29 @@
 # Roadmap
 
-v1.0 is intentionally narrow: eight read-only tools, a doctor, and a safety
-switch. The ordering below is driven by what blocks an external user from
-adopting the server, not by what is fun to build.
+The current surface has 33 read-only tools, 47 explicitly allowlisted write
+tools, diagnostics and monitoring. Priorities are driven by successful user
+adoption and verifiable controller behavior.
 
 Each item lists the evidence that it matters, so it can be re-prioritised when
 that evidence changes.
+
+## Next priorities after the November 2026 review
+
+The [local review](docs/review-2026-11-14.md) records the evidence, fixes and
+acceptance criteria. The next sequence is:
+
+1. Automate disposable Docker controller compatibility tests and retain
+   payload-free results across supported versions.
+2. Publish a validated MCP Registry listing and generate setup/tool documentation
+   from the actual descriptors. PyPI 1.2.2 is already available.
+3. Add site discovery and safe, explicit per-call site selection.
+4. Add deterministic configuration drift comparisons over redacted snapshots.
+5. Add client connection/roaming history diagnostics backed by captured endpoints.
+6. Collect real OC200/OC300, v5/v6, AP, switch and gateway compatibility fixtures.
+7. Expand write-preview/rollback fault injection, nested input validation,
+   pagination completeness reporting and monitoring resilience.
+
+The remaining sections retain historical milestones and their implementation notes.
 
 ## v1.1 — "works on the controllers people actually own" *(shipped in v1.1.0)*
 

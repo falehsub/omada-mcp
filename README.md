@@ -69,14 +69,14 @@ Three properties make it safe to hand to an LLM:
 # from git (works today)
 uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
 
-# from PyPI (once v1.2.1 is published there -- the name `omada-mcp` is reserved-free)
+# from PyPI
 uvx omada-mcp --doctor
 
-# or install the command (once published to PyPI)
+# or install the command
 uv tool install omada-mcp     # or: pipx install omada-mcp
 pip install omada-mcp         # plain pip
 
-# today, without PyPI:
+# from a local checkout:
 git clone https://github.com/falehsub/omada-mcp && cd omada-mcp
 uv tool install .             # installs the `omada-mcp` command from the checkout
 ```
@@ -474,7 +474,7 @@ See [`docs/compatibility.md`](docs/compatibility.md) for the full compatibility 
 
 ```bash
 git clone https://github.com/falehsub/omada-mcp && cd omada-mcp
-python -m unittest discover -s tests -v     # 165 tests, no network, no deps
+python -m unittest discover -s tests -v     # stdlib tests; loopback HTTP only
 python -m omada_mcp.cli --help              # after: pip install -e .
 uvx --from . omada-mcp --doctor             # what an external user does
 
@@ -482,6 +482,21 @@ uvx --from . omada-mcp --doctor             # what an external user does
 # changes (`--refresh` does not help). Force a fresh environment while iterating:
 UV_CACHE_DIR=$(mktemp -d) uvx --from . omada-mcp --doctor
 ```
+
+For a repeatable live read-only sweep, use an explicit isolated lab configuration:
+
+```bash
+python scripts/read_selftest.py --env-file /path/to/isolated/viewer.env
+```
+
+The sweep forces read-only mode, blocks mutations at the transport boundary,
+and reports pass/fail/skip, elapsed time and request counts without controller
+payloads. Hardware-dependent checks are skipped when the site has no matching
+devices or clients. Configuration, service and routing exports expose known
+fields only; diagnostic snapshots are not full controller backups.
+
+See the [local review and prioritized improvements](docs/review-2026-11-14.md)
+for measured results, limitations and the next development priorities.
 
 Layout:
 
@@ -537,7 +552,8 @@ Read-only inspection, composite diagnostics (`get_switch_ports`, `get_ap_radios`
 `network_audit`, the 80-tool control surface (`rollback_from_snapshot` + anti-stranding
 switch/AP/routing/DNS/ACL/client controls), `--watch`/`--export-metrics`, and non-root
 Docker packaging are implemented on `main`. Next items in [ROADMAP.md](ROADMAP.md)
-include MCP Registry `server.json` / PyPI publishing and multi-version live controller captures.
+include MCP Registry `server.json`, automated controller compatibility checks,
+multi-site workflows and configuration drift reports. PyPI installation is available.
 
 ## License
 

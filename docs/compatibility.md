@@ -19,6 +19,23 @@
 
 ## Reporting a New Controller Build
 
+### Latest local read-only sweep (2026-11-14)
+
+On Docker software controller `6.2.14.11`, the explicit-config live sweep passed
+27 read-only tools for both Viewer and Admin accounts. Six device/client-specific
+tools were skipped because no hardware or clients were adopted. All six doctor
+phases passed with CA/SAN verification. Additional checks covered all 11 snapshot
+sections, typed ACL reads, logs, session expiry via HTTP 302, metrics and watch.
+Writes remained disabled; write flows were exercised with the stateful mock.
+
+See [the full review](review-2026-11-14.md) for limitations and reproduction steps.
+
+```bash
+python scripts/read_selftest.py --env-file /path/to/isolated/viewer.env
+```
+
+### Submitting a report
+
 Run:
 
 ```bash
