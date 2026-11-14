@@ -4,6 +4,42 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-14
+
+Minor architecture, compatibility, and reliability release (**210 passing tests**).
+
+### Added
+
+- **Modular domain architecture**: Split monolithic tool and HTTP transport modules into
+  `transport.py`, `errors.py`, and cohesive `omada_mcp.domains.*` modules with backward-compatible
+  re-exports in `tools.py`, `write_tools.py`, and `_helpers.py`, plus `ruff` and strict `mypy`
+  enforcement in CI.
+- **Omada 5.x / 6.x Docker compatibility matrix & fixture tooling**: Added
+  `.github/workflows/compat.yml`, `scripts/docker_lab_init.py`, `scripts/capture_fixtures.py`,
+  `scripts/anonymize_capture.py`, `docs/compatibility.md`, and `tests/test_phase2_compat_and_fixtures.py`
+  covering Viewer/Admin projections across Omada 5.15 and 6.2 shapes.
+- **Recursive JSON Schema validation** (`omada_mcp.schema_validation`): Validate nested
+  `properties`, `required`, `additionalProperties` (with typo/`camelCase` hints), `items`, `type`,
+  `enum`, numeric/string/array bounds, `anyOf`, and `oneOf` before issuing controller requests.
+- **Explicit paginated truncation metadata** (`PaginatedList`): Preserve JSON array outputs in
+  `content[0]` while surfacing `truncated`, `totalRows`, `pagesFetched`, `maxPages`, `limit`,
+  and `truncationReason` in `structuredContent` (plus a note block when truncated) across
+  `list_clients`, `list_wifi_clients`, `list_wired_clients`, `search_clients`, `list_logs`,
+  and `OmadaClient.paginate`.
+- **Superseded-snapshot rollback guard & 47-tool hardening suite** (`tests/test_phase3_hardening.py`):
+  `rollback_from_snapshot` refuses stale snapshots superseded by newer writes on the same target
+  unless `force=true`, checks target existence before PATCH rollback, and verifies dry-run/confirm
+  gating, deep secret redaction (`deep_redact`) across all 47 write tools, and MCP protocol
+  conformance across all supported `PROTOCOL_VERSIONS`.
+
+### Fixed
+
+- **Monitor & stdio lifecycle resilience**: Guarantee client/HTTP socket cleanup on exit in
+  `Server.serve()`, `run_watch()`, `export_metrics_once()`, `serve_metrics_http()`, and CLI
+  `SIGTERM`; surface outage errors when both `devices` and `LAN networks` endpoints fail so
+  `run_watch` enters bounded exponential backoff (`degraded`) and `/healthz` reports HTTP `503`
+  (`degraded` / `stale`) until a scrape recovers.
+
 ## [1.3.1] - 2026-11-14
 
 Patch release addressing findings verified against a live Omada 6.2 hardware deployment
