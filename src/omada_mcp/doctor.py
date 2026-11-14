@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from . import __version__
 from .client import OmadaClient, OmadaError, classify_controller_family
@@ -48,21 +49,21 @@ class PhaseResult:
     name: str
     status: str
     detail: str
-    hint: Optional[str] = None
+    hint: str | None = None
 
 
 class Report:
     def __init__(self, stream=None, json_output: bool = False):
         self.stream = stream or sys.stdout
         self.json_output = json_output
-        self.results: List[PhaseResult] = []
-        self.controller_meta: Dict[str, Optional[str]] = {
+        self.results: list[PhaseResult] = []
+        self.controller_meta: dict[str, str | None] = {
             "omadacId": None,
             "controllerVer": None,
             "family": None,
             "sessionCookie": None,
         }
-        self.site_meta: Optional[Dict[str, Any]] = None
+        self.site_meta: dict[str, Any] | None = None
         ro_count = sum(1 for t in TOOL_MAP.values() if t.read_only)
         self.tool_summary: str = f"{ro_count} read-only tools"
 
@@ -86,7 +87,7 @@ class Report:
     def warned(self) -> bool:
         return any(r.status == WARN for r in self.results)
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         total = len(self.results)
         passed = sum(1 for r in self.results if r.status == PASS)
         warned = sum(1 for r in self.results if r.status == WARN)
@@ -154,7 +155,7 @@ class Report:
         return 0
 
 
-def _phase_env(config: Optional[Config], error: Optional[ConfigError], report: Report) -> None:
+def _phase_env(config: Config | None, error: ConfigError | None, report: Report) -> None:
     if error is not None:
         report.add(PhaseResult("env", FAIL, error.message, error.hint))
         return
@@ -166,7 +167,7 @@ def _phase_env(config: Optional[Config], error: Optional[ConfigError], report: R
     report.add(PhaseResult(
         "env", PASS,
         f"{origin} | url={config.base_url} user={config.username} "
-        f"password={'set (%d chars)' % len(config.password) if config.password else 'missing'}",
+        f"password={f'set ({len(config.password)} chars)' if config.password else 'missing'}",
     ))
     if config.env_file and not _IS_WINDOWS:
         mode = oct(config.env_file.stat().st_mode & 0o777)
@@ -355,7 +356,7 @@ def _client_count(client: OmadaClient) -> int:
 
 def run_doctor(
     config_factory: Callable[[], Config] = load_config,
-    client_factory: Optional[Callable[[Config], OmadaClient]] = None,
+    client_factory: Callable[[Config], OmadaClient] | None = None,
     stream=None,
     json_output: bool = False,
 ) -> int:
@@ -366,8 +367,8 @@ def run_doctor(
               flush=True)
         print("-" * 66, file=report.stream, flush=True)
 
-    config: Optional[Config] = None
-    error: Optional[ConfigError] = None
+    config: Config | None = None
+    error: ConfigError | None = None
     try:
         config = config_factory()
     except ConfigError as exc:

@@ -10,8 +10,9 @@ import re
 import threading
 import time
 import urllib.parse
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 MOCK_CONTROLLER_ID = "mockctrl000000000000000000000001"
@@ -29,14 +30,14 @@ def _normalize_mac(value: str) -> str:
     return str(value or "").strip().upper()
 
 
-DEFAULT_WLANS: List[Dict[str, Any]] = [
+DEFAULT_WLANS: list[dict[str, Any]] = [
     {
         "id": "wlan-grp-1",
         "name": "Default",
     }
 ]
 
-DEFAULT_SSIDS_BY_GROUP: Dict[str, List[Dict[str, Any]]] = {
+DEFAULT_SSIDS_BY_GROUP: dict[str, list[dict[str, Any]]] = {
     "wlan-grp-1": [
         {
             "id": "ssid-corp",
@@ -82,7 +83,7 @@ class MockController:
         self.cookie_name = cookie_name
         self.acl_disable = acl_disable
 
-        self.sites: List[Dict[str, Any]] = [
+        self.sites: list[dict[str, Any]] = [
             {
                 "id": MOCK_SITE_ID,
                 "name": "Mock Lab Site",
@@ -92,7 +93,7 @@ class MockController:
                 "wlan": True,
             }
         ]
-        self.devices: List[Dict[str, Any]] = load_fixture("devices.json")
+        self.devices: list[dict[str, Any]] = load_fixture("devices.json")
         client_one = load_fixture("client_detail.json")
         client_two = copy.deepcopy(client_one)
         client_two.update({
@@ -130,37 +131,37 @@ class MockController:
                 "ip": "192.168.20.99",
             },
         })
-        self.clients: Dict[str, Dict[str, Any]] = {
+        self.clients: dict[str, dict[str, Any]] = {
             _normalize_mac(client_one["mac"]): client_one,
             _normalize_mac(client_two["mac"]): client_two,
             _normalize_mac(client_three["mac"]): client_three,
         }
 
         lan_fixture = load_fixture("lan_networks.json")
-        self.lan_collection: List[Dict[str, Any]] = lan_fixture["collection"]
-        self.lan_interfaces: List[Dict[str, Any]] = lan_fixture["interface"]
-        self.groups: List[Dict[str, Any]] = load_fixture("ip_groups.json")
+        self.lan_collection: list[dict[str, Any]] = lan_fixture["collection"]
+        self.lan_interfaces: list[dict[str, Any]] = lan_fixture["interface"]
+        self.groups: list[dict[str, Any]] = load_fixture("ip_groups.json")
         acl_fixture = load_fixture("gateway_acls.json")
-        self.acls: List[Dict[str, Any]] = acl_fixture["data"]
+        self.acls: list[dict[str, Any]] = acl_fixture["data"]
         if acl_disable is not None:
             self.acl_disable = acl_disable
         else:
             self.acl_disable = acl_fixture.get("aclDisable", True)
 
-        self.wlans: List[Dict[str, Any]] = copy.deepcopy(DEFAULT_WLANS)
-        self.ssids_by_group: Dict[str, List[Dict[str, Any]]] = copy.deepcopy(DEFAULT_SSIDS_BY_GROUP)
-        self.dhcp_reservations: List[Dict[str, Any]] = []
-        self.port_forwards: List[Dict[str, Any]] = []
-        self.static_routes: List[Dict[str, Any]] = []
-        self.mdns_rules: List[Dict[str, Any]] = []
-        self.mdns_profiles: List[Dict[str, Any]] = [
+        self.wlans: list[dict[str, Any]] = copy.deepcopy(DEFAULT_WLANS)
+        self.ssids_by_group: dict[str, list[dict[str, Any]]] = copy.deepcopy(DEFAULT_SSIDS_BY_GROUP)
+        self.dhcp_reservations: list[dict[str, Any]] = []
+        self.port_forwards: list[dict[str, Any]] = []
+        self.static_routes: list[dict[str, Any]] = []
+        self.mdns_rules: list[dict[str, Any]] = []
+        self.mdns_profiles: list[dict[str, Any]] = [
             {"id": "buildIn-1", "name": "AirPlay", "serviceId": ["_airplay._tcp.local"], "defaultProfile": True},
             {"id": "buildIn-7", "name": "Printers", "serviceId": ["_ipp._tcp.local"], "defaultProfile": True},
         ]
-        self.upnp: Dict[str, Any] = {"enable": False, "resource": 0}
-        self.dns_proxy: Dict[str, Any] = {"enable": False, "supportDnsOverride": True}
-        self.ddns: Dict[str, Any] = {"data": [], "totalRows": 0}
-        self.wan: Dict[str, Any] = {
+        self.upnp: dict[str, Any] = {"enable": False, "resource": 0}
+        self.dns_proxy: dict[str, Any] = {"enable": False, "supportDnsOverride": True}
+        self.ddns: dict[str, Any] = {"data": [], "totalRows": 0}
+        self.wan: dict[str, Any] = {
             "wanMode": 0,
             "osgPortInfo": {
                 "wanLanPortSettings": [
@@ -170,13 +171,13 @@ class MockController:
             },
         }
         now_ms = int(time.time() * 1000)
-        self.logs_alerts: List[Dict[str, Any]] = [
+        self.logs_alerts: list[dict[str, Any]] = [
             {"id": "al-1", "level": 2, "type": 1, "module": 1, "content": "Mock alert entry", "time": now_ms - 60000, "resolved": False},
         ]
-        self.logs_events: List[Dict[str, Any]] = [
+        self.logs_events: list[dict[str, Any]] = [
             {"id": "ev-1", "level": 4, "type": 10, "module": 2, "content": "Client connected", "time": now_ms - 30000},
         ]
-        self.logs_audit: List[Dict[str, Any]] = [
+        self.logs_audit: list[dict[str, Any]] = [
             {"id": "au-1", "level": 4, "auditType": 1, "content": "Admin session started", "operator": username, "time": now_ms - 15000},
         ]
 
@@ -189,7 +190,7 @@ class MockController:
         sw_detail.update({"mac": "AA-BB-CC-00-00-02", "name": "sw-access"})
         if isinstance(sw_detail.get("uplink"), dict):
             sw_detail["uplink"].update({"mac": "AA-BB-CC-00-00-01", "name": "gw-core"})
-        self.switch_details: Dict[str, Dict[str, Any]] = {"AA-BB-CC-00-00-02": sw_detail}
+        self.switch_details: dict[str, dict[str, Any]] = {"AA-BB-CC-00-00-02": sw_detail}
 
         sw_ports = copy.deepcopy(sp_fx["ports"])
         for p in sw_ports:
@@ -201,16 +202,16 @@ class MockController:
             elif isinstance(ps, dict) and ps.get("port") == 17:
                 ps["chassisId"] = "AA-BB-CC-00-00-01"
                 ps["portId"] = "AA-BB-CC-00-00-01"
-        self.switch_ports: Dict[str, List[Dict[str, Any]]] = {"AA-BB-CC-00-00-02": sw_ports}
-        self.switch_lags: Dict[str, List[Dict[str, Any]]] = {"AA-BB-CC-00-00-02": copy.deepcopy(sp_fx.get("lags", []))}
+        self.switch_ports: dict[str, list[dict[str, Any]]] = {"AA-BB-CC-00-00-02": sw_ports}
+        self.switch_lags: dict[str, list[dict[str, Any]]] = {"AA-BB-CC-00-00-02": copy.deepcopy(sp_fx.get("lags", []))}
 
-        self.switch_insight_counters: Dict[str, List[Dict[str, Any]]] = {
+        self.switch_insight_counters: dict[str, list[dict[str, Any]]] = {
             "AA-BB-CC-00-00-02": [
                 {**copy.deepcopy(r), "switchMac": "AA-BB-CC-00-00-02", "switchName": "sw-access"}
                 for r in sp_fx.get("insight_counters", [])
             ]
         }
-        self.switch_insight_poe: Dict[str, List[Dict[str, Any]]] = {
+        self.switch_insight_poe: dict[str, list[dict[str, Any]]] = {
             "AA-BB-CC-00-00-02": [
                 {**copy.deepcopy(r), "switchMac": "AA-BB-CC-00-00-02", "switchName": "sw-access"}
                 for r in sp_fx.get("insight_poe", [])
@@ -219,8 +220,8 @@ class MockController:
         ins_detail = copy.deepcopy(sp_fx.get("insight_switch_detail", []))
         if ins_detail:
             ins_detail[0]["mac"] = "AA-BB-CC-00-00-02"
-        self.switch_insight_detail: List[Dict[str, Any]] = ins_detail
-        self.switch_stat: Dict[str, Dict[str, Any]] = {
+        self.switch_insight_detail: list[dict[str, Any]] = ins_detail
+        self.switch_stat: dict[str, dict[str, Any]] = {
             "AA-BB-CC-00-00-02": copy.deepcopy(sp_fx.get("stat_switch", {}))
         }
         ct_ports = copy.deepcopy(sp_fx.get("cable_test_ports", []))
@@ -231,28 +232,28 @@ class MockController:
                         dl.update({"mac": "AA-BB-CC-00-00-03", "name": "ap-living"})
                     elif dl.get("type") == "gateway":
                         dl.update({"mac": "AA-BB-CC-00-00-01", "name": "gw-core"})
-        self.cable_test_ports: Dict[str, List[Dict[str, Any]]] = {"AA-BB-CC-00-00-02": ct_ports}
-        self.cable_test_results: Dict[str, Dict[str, Any]] = {
+        self.cable_test_ports: dict[str, list[dict[str, Any]]] = {"AA-BB-CC-00-00-02": ct_ports}
+        self.cable_test_results: dict[str, dict[str, Any]] = {
             "AA-BB-CC-00-00-02": copy.deepcopy(sp_fx.get("cable_test_full", {"status": 0, "data": []}))
         }
-        self.port_profiles: List[Dict[str, Any]] = copy.deepcopy(sp_fx["lan_profiles"]["data"])
+        self.port_profiles: list[dict[str, Any]] = copy.deepcopy(sp_fx["lan_profiles"]["data"])
 
         ap_detail = copy.deepcopy(er_fx["eap_detail"])
         ap_detail.update({"mac": "AA-BB-CC-00-00-03", "name": "ap-living", "wlanId": "wlan-grp-1"})
-        self.eap_details: Dict[str, Dict[str, Any]] = {"AA-BB-CC-00-00-03": ap_detail}
-        self.eap_channel_info: Dict[str, Any] = {
+        self.eap_details: dict[str, dict[str, Any]] = {"AA-BB-CC-00-00-03": ap_detail}
+        self.eap_channel_info: dict[str, Any] = {
             "AA-BB-CC-00-00-03": copy.deepcopy(er_fx["eap_channel_info"])
         }
-        self.eap_rf_scan: Dict[str, Dict[str, Any]] = {
+        self.eap_rf_scan: dict[str, dict[str, Any]] = {
             "AA-BB-CC-00-00-03": copy.deepcopy(er_fx["eap_rf_scan"])
         }
 
         gw_detail = copy.deepcopy(tw_fx["gateway_detail"])
         gw_detail.update({"mac": "AA-BB-CC-00-00-01", "name": "gw-core"})
-        self.gateway_details: Dict[str, Dict[str, Any]] = {"AA-BB-CC-00-00-01": gw_detail}
-        self.wan_lan_status: Dict[str, Any] = copy.deepcopy(tw_fx["wanlanstatus"])
-        self.port_state_details: Dict[str, Any] = copy.deepcopy(tw_fx["portstatedetails"])
-        self.speedtest_result: Optional[Dict[str, Any]] = None
+        self.gateway_details: dict[str, dict[str, Any]] = {"AA-BB-CC-00-00-01": gw_detail}
+        self.wan_lan_status: dict[str, Any] = copy.deepcopy(tw_fx["wanlanstatus"])
+        self.port_state_details: dict[str, Any] = copy.deepcopy(tw_fx["portstatedetails"])
+        self.speedtest_result: dict[str, Any] | None = None
         topo = copy.deepcopy(tw_fx["topology_v2"])
         if topo.get("topologyArray"):
             gw_node = topo["topologyArray"][0]
@@ -263,27 +264,27 @@ class MockController:
                     for child in sw_node.get("successors") or []:
                         if child.get("type") == "ap":
                             child.update({"mac": "AA-BB-CC-00-00-03", "name": "ap-living"})
-        self.topology_v2: Dict[str, Any] = topo
+        self.topology_v2: dict[str, Any] = topo
 
-        self.ips_settings: Dict[str, Any] = copy.deepcopy(tw_fx["setting_ips"])
-        self.threat_alerts: List[Dict[str, Any]] = copy.deepcopy(tw_fx["ips_threat_management"].get("data", []))
-        self.attack_defense: Dict[str, Any] = copy.deepcopy(tw_fx["setting_attackdefense"])
-        self.rogue_aps: List[Dict[str, Any]] = copy.deepcopy(tw_fx["insight_rogueaps"].get("data", []))
-        self.wids_events: List[Dict[str, Any]] = []
-        self.wids_blacklist: List[Dict[str, Any]] = []
+        self.ips_settings: dict[str, Any] = copy.deepcopy(tw_fx["setting_ips"])
+        self.threat_alerts: list[dict[str, Any]] = copy.deepcopy(tw_fx["ips_threat_management"].get("data", []))
+        self.attack_defense: dict[str, Any] = copy.deepcopy(tw_fx["setting_attackdefense"])
+        self.rogue_aps: list[dict[str, Any]] = copy.deepcopy(tw_fx["insight_rogueaps"].get("data", []))
+        self.wids_events: list[dict[str, Any]] = []
+        self.wids_blacklist: list[dict[str, Any]] = []
         self.wids_supported: bool = False
 
-        self.vpn_tunnels: List[Dict[str, Any]] = []
-        self.vpn_configs: List[Dict[str, Any]] = []
-        self.wireguard_configs: List[Dict[str, Any]] = []
-        self.wireguard_peers: List[Dict[str, Any]] = []
-        self.past_connections: List[Dict[str, Any]] = []
+        self.vpn_tunnels: list[dict[str, Any]] = []
+        self.vpn_configs: list[dict[str, Any]] = []
+        self.wireguard_configs: list[dict[str, Any]] = []
+        self.wireguard_peers: list[dict[str, Any]] = []
+        self.past_connections: list[dict[str, Any]] = []
 
-        self.policy_routes: List[Dict[str, Any]] = copy.deepcopy(tw_fx["policy_routings"].get("data", []))
-        self.lan_dns_rules: List[Dict[str, Any]] = copy.deepcopy(tw_fx["lan_dns"].get("data", []))
-        self.switch_acls: List[Dict[str, Any]] = copy.deepcopy(tw_fx["acls_switch"].get("data", []))
-        self.eap_acls: List[Dict[str, Any]] = copy.deepcopy(tw_fx["acls_eap"].get("data", []))
-        self.rate_limit_profiles: List[Dict[str, Any]] = [
+        self.policy_routes: list[dict[str, Any]] = copy.deepcopy(tw_fx["policy_routings"].get("data", []))
+        self.lan_dns_rules: list[dict[str, Any]] = copy.deepcopy(tw_fx["lan_dns"].get("data", []))
+        self.switch_acls: list[dict[str, Any]] = copy.deepcopy(tw_fx["acls_switch"].get("data", []))
+        self.eap_acls: list[dict[str, Any]] = copy.deepcopy(tw_fx["acls_eap"].get("data", []))
+        self.rate_limit_profiles: list[dict[str, Any]] = [
             {
                 "id": "rl-prof-1",
                 "name": "Guest-10M",
@@ -305,7 +306,7 @@ class MockController:
         self.cookie_jar = http.cookiejar.CookieJar()
         self.token: str = "tok-mock-001"
         self.logins: int = 0
-        self.requests: List[Dict[str, Any]] = []
+        self.requests: list[dict[str, Any]] = []
         self._id_seq: int = 100
 
         # Fault-injection controls
@@ -317,9 +318,7 @@ class MockController:
         self.corrupt_dhcp_on_patch: bool = False
         self.drop_collection_isolation_sync: bool = False
         self.omada62_lan_normalization: bool = False
-        self.next_fault_hook: Optional[
-            Callable[[str, str, Any], Optional[Tuple[int, Dict[str, Any]]]]
-        ] = None
+        self.next_fault_hook: Callable[[str, str, Any], tuple[int, dict[str, Any]] | None] | None = None
 
     @property
     def write_request_count(self) -> int:
@@ -353,7 +352,7 @@ class MockController:
         self.cookie_jar.set_cookie(cookie)
 
     @staticmethod
-    def _match_fault_set(faults: set[Any], method: str, path: str) -> Optional[Any]:
+    def _match_fault_set(faults: set[Any], method: str, path: str) -> Any | None:
         for entry in list(faults):
             if isinstance(entry, tuple) and len(entry) == 2:
                 f_method, frag = entry
@@ -364,13 +363,13 @@ class MockController:
         return None
 
     @staticmethod
-    def _json_response(payload: Any, status: int = 200) -> Tuple[int, bytes]:
+    def _json_response(payload: Any, status: int = 200) -> tuple[int, bytes]:
         return status, json.dumps(payload).encode("utf-8")
 
-    def _ok(self, result: Any = None, msg: str = "Success.") -> Tuple[int, bytes]:
+    def _ok(self, result: Any = None, msg: str = "Success.") -> tuple[int, bytes]:
         return self._json_response({"errorCode": 0, "msg": msg, "result": result})
 
-    def _err(self, code: int, msg: str, status: int = 200) -> Tuple[int, bytes]:
+    def _err(self, code: int, msg: str, status: int = 200) -> tuple[int, bytes]:
         return self._json_response({"errorCode": code, "msg": msg}, status=status)
 
     def _is_authenticated(self, headers: Mapping[str, str]) -> bool:
@@ -383,10 +382,10 @@ class MockController:
         self,
         method: str,
         url: str,
-        headers: Optional[Dict[str, str]] = None,
-        data: Optional[bytes] = None,
-        timeout: Optional[float] = None,
-    ) -> Tuple[int, bytes]:
+        headers: dict[str, str] | None = None,
+        data: bytes | None = None,
+        timeout: float | None = None,
+    ) -> tuple[int, bytes]:
         parsed = urllib.parse.urlsplit(url)
         full_path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
         req_headers = dict(headers or {})
@@ -466,9 +465,8 @@ class MockController:
                 status, payload = custom
                 return self._json_response(payload, status=status)
 
-        if method.upper() in ("POST", "PATCH", "PUT", "DELETE"):
-            if "viewer" in self.role.lower():
-                return self._err(-1007, "The current user does not have permissions to access this page.")
+        if method.upper() in ("POST", "PATCH", "PUT", "DELETE") and "viewer" in self.role.lower():
+            return self._err(-1007, "The current user does not have permissions to access this page.")
 
         if self._match_fault_set(self.silent_noop_for, method, full_path) and method.upper() != "GET":
             return self._ok({})
@@ -485,7 +483,7 @@ class MockController:
         return path.lstrip("/")
 
     @staticmethod
-    def _paginate_rows(rows: Sequence[Dict[str, Any]], params: Mapping[str, List[str]]) -> Dict[str, Any]:
+    def _paginate_rows(rows: Sequence[dict[str, Any]], params: Mapping[str, list[str]]) -> dict[str, Any]:
         total = len(rows)
         if "currentPage" in params:
             page = max(1, int(params["currentPage"][0]))
@@ -500,7 +498,7 @@ class MockController:
             }
         return {"data": copy.deepcopy(list(rows)), "totalRows": total}
 
-    def _dispatch(self, method: str, raw_path: str, query: str, body: Any) -> Tuple[int, bytes]:
+    def _dispatch(self, method: str, raw_path: str, query: str, body: Any) -> tuple[int, bytes]:
         ep = self._strip_api_prefix(raw_path)
         params = urllib.parse.parse_qs(query)
 
@@ -1417,7 +1415,7 @@ class MockController:
 class MockControllerHTTPServer:
     """Optional loopback HTTP server wrapper around MockController."""
 
-    def __init__(self, controller: Optional[MockController] = None) -> None:
+    def __init__(self, controller: MockController | None = None) -> None:
         self.controller = controller or MockController()
         ctrl = self.controller
 
@@ -1463,7 +1461,7 @@ class MockControllerHTTPServer:
         host, port = self.server.server_address
         return f"http://{host}:{port}"
 
-    def __enter__(self) -> "MockControllerHTTPServer":
+    def __enter__(self) -> MockControllerHTTPServer:
         self.thread.start()
         return self
 

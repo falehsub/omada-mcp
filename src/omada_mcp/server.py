@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import json
 import traceback
-from typing import Any, Dict, Iterable, Optional, TextIO
+from collections.abc import Iterable
+from typing import Any, TextIO
 
 from . import __version__
 from .client import OmadaClient, OmadaError, log
@@ -46,9 +47,9 @@ INSTRUCTIONS = (
 )
 
 
-def configure_streams(stdin: Optional[TextIO] = None,
-                      stdout: Optional[TextIO] = None,
-                      stderr: Optional[TextIO] = None) -> None:
+def configure_streams(stdin: TextIO | None = None,
+                      stdout: TextIO | None = None,
+                      stderr: TextIO | None = None) -> None:
     """Force UTF-8 and LF line endings on the stdio streams.
 
     Two Windows-specific failures this prevents:
@@ -83,19 +84,19 @@ def configure_streams(stdin: Optional[TextIO] = None,
 class RpcError(Exception):
     """A JSON-RPC level failure (as opposed to a tool execution failure)."""
 
-    def __init__(self, code: int, message: str, hint: Optional[str] = None,
-                 data: Optional[Dict[str, Any]] = None):
+    def __init__(self, code: int, message: str, hint: str | None = None,
+                 data: dict[str, Any] | None = None):
         super().__init__(message)
         self.code = code
         self.message = message
         self.hint = hint
         self.extra = data or {}
 
-    def payload(self) -> Dict[str, Any]:
-        data: Dict[str, Any] = dict(self.extra)
+    def payload(self) -> dict[str, Any]:
+        data: dict[str, Any] = dict(self.extra)
         if self.hint:
             data["hint"] = self.hint
-        error: Dict[str, Any] = {"code": self.code, "message": self.message}
+        error: dict[str, Any] = {"code": self.code, "message": self.message}
         if data:
             error["data"] = data
         return error
@@ -104,8 +105,8 @@ class RpcError(Exception):
 class Server:
     """One MCP connection: owns a single :class:`OmadaClient`."""
 
-    def __init__(self, config: Config, client: Optional[OmadaClient] = None,
-                 out: Optional[TextIO] = None):
+    def __init__(self, config: Config, client: OmadaClient | None = None,
+                 out: TextIO | None = None):
         self.config = config
         self.client = client or OmadaClient(config)
         self.out = out
@@ -114,7 +115,7 @@ class Server:
 
     # -- lifecycle ------------------------------------------------------------
 
-    def serve(self, stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> int:
+    def serve(self, stdin: TextIO | None = None, stdout: TextIO | None = None) -> int:
         """Read JSON-RPC from ``stdin`` until EOF, writing replies to ``stdout``."""
         import sys
 
@@ -129,7 +130,7 @@ class Server:
                 self._write(response)
         return 0
 
-    def _write(self, payload: Dict[str, Any]) -> None:
+    def _write(self, payload: dict[str, Any]) -> None:
         assert self.out is not None
         self.out.write(json.dumps(payload, ensure_ascii=False) + "\n")
         self.out.flush()
@@ -195,7 +196,7 @@ class Server:
 
     # -- dispatch -------------------------------------------------------------
 
-    def handle(self, message: Any) -> Optional[Dict[str, Any]]:
+    def handle(self, message: Any) -> dict[str, Any] | None:
         if message is None:
             return self._error(None, -32700, "parse error: not valid JSON")
         if not isinstance(message, dict):
@@ -237,8 +238,8 @@ class Server:
         return {"jsonrpc": "2.0", "id": msg_id, "result": result}
 
     def _error(self, msg_id: Any, code: int, message: str,
-               hint: Optional[str] = None, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        error: Dict[str, Any] = {"code": code, "message": message}
+               hint: str | None = None, data: dict[str, Any] | None = None) -> dict[str, Any]:
+        error: dict[str, Any] = {"code": code, "message": message}
         merged = dict(data or {})
         if hint:
             merged["hint"] = hint
@@ -246,7 +247,7 @@ class Server:
             error["data"] = merged
         return {"jsonrpc": "2.0", "id": msg_id, "error": error}
 
-    def _call_method(self, method: str, params: Dict[str, Any]) -> Any:
+    def _call_method(self, method: str, params: dict[str, Any]) -> Any:
         if method == "initialize":
             return self._initialize(params)
         if method == "ping":
@@ -268,7 +269,7 @@ class Server:
         raise RpcError(-32601, f"method not found: {method}",
                        hint="supported methods: initialize, ping, tools/list, tools/call")
 
-    def _initialize(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         requested = str(params.get("protocolVersion") or "").strip()
         self.protocol_version = requested if requested in PROTOCOL_VERSIONS \
             else DEFAULT_PROTOCOL_VERSION
@@ -299,11 +300,11 @@ class Server:
 
     # -- tools ----------------------------------------------------------------
 
-    def _tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
         name = str(params.get("name") or "").strip()
         raw_arguments = params.get("arguments")
         if raw_arguments is None:
-            arguments: Dict[str, Any] = {}
+            arguments: dict[str, Any] = {}
         elif isinstance(raw_arguments, dict):
             arguments = dict(raw_arguments)
         else:
@@ -311,7 +312,7 @@ class Server:
         if not name:
             raise RpcError(-32602, "invalid params: tool name is required")
 
-        spec: Optional[Tool] = get_tool(name)
+        spec: Tool | None = get_tool(name)
 
         # Fail closed: in read-only mode anything not declared read-only is
         # refused before argument validation or controller I/O.
@@ -372,7 +373,7 @@ class Server:
             rendered = json.dumps(data, separators=(",", ":"), ensure_ascii=False, default=str)
         else:
             rendered = json.dumps(data, indent=2, ensure_ascii=False, default=str)
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "content": [{"type": "text", "text": rendered}],
             "isError": False,
         }
@@ -384,7 +385,7 @@ class Server:
         return result
 
     @staticmethod
-    def _check_arguments(spec: Tool, arguments: Dict[str, Any]) -> None:
+    def _check_arguments(spec: Tool, arguments: dict[str, Any]) -> None:
         schema = spec.input_schema or {}
         props = schema.get("properties") or {}
 

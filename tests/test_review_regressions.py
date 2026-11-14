@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from test_bridge import CLIENTS, FakeController, make_config
+from fake_controller import CLIENTS, FakeController, make_config
+
 from omada_mcp.client import OmadaClient, OmadaError, UrllibTransport, build_ssl_context
 from omada_mcp.config import ConfigError, load_config, normalize_base_url
 from omada_mcp.server import Server
@@ -19,8 +20,10 @@ class ReviewRegressionTests(unittest.TestCase):
         conn = mock.MagicMock()
         conn.sock = None
         conn.getresponse.side_effect = http.client.RemoteDisconnected('closed')
-        with mock.patch.object(transport, '_new_connection', return_value=conn):
-            with self.assertRaises(OmadaError) as caught:
+        with (
+            mock.patch.object(transport, '_new_connection', return_value=conn),
+            self.assertRaises(OmadaError) as caught,
+        ):
                 transport.request('POST', 'https://controller.test/api/write?token=private-session-token', data=b'{}')
         rendered = str(caught.exception) + str(caught.exception.endpoint)
         self.assertNotIn('private-session-token', rendered)
@@ -93,7 +96,7 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertEqual(list(SmallServer._read_messages(stream)), [None, json.loads(ping)])
 
     def test_config_snapshot_drops_unknown_controller_fields(self):
-        from test_write_support import make_write_env, call_tool, unwrap_ok
+        from write_harness import call_tool, make_write_env, unwrap_ok
         with tempfile.TemporaryDirectory() as tmp:
             server, _, ctrl, _ = make_write_env(tmp, read_only=True)
             # A future firmware can introduce secrets under names we do not know.
@@ -116,7 +119,8 @@ class ReviewRegressionTests(unittest.TestCase):
     def test_read_selftest_guards_transport_and_reports_without_payloads(self):
         import importlib.util
         from pathlib import Path
-        from test_write_support import make_write_env
+
+        from write_harness import make_write_env
         spec = importlib.util.spec_from_file_location('read_selftest', Path(__file__).resolve().parents[1] / 'scripts' / 'read_selftest.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -148,7 +152,7 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertNotEqual(client.token, 'local-invalid-token')
 
     def test_services_and_routing_drop_unknown_controller_fields(self):
-        from test_write_support import make_write_env, call_tool, unwrap_ok
+        from write_harness import call_tool, make_write_env, unwrap_ok
         with tempfile.TemporaryDirectory() as tmp:
             server, _, ctrl, _ = make_write_env(tmp, read_only=True)
             for obj in (ctrl.upnp, ctrl.dns_proxy, ctrl.ddns):

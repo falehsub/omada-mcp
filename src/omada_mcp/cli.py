@@ -15,7 +15,6 @@ import json
 import math
 import os
 import sys
-from typing import List, Optional
 
 from . import __version__
 from .client import OmadaError
@@ -107,7 +106,7 @@ def _configure_console() -> None:
     configure_streams(stdin=None, stdout=sys.stdout, stderr=sys.stderr)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     _configure_console()
     args = build_parser().parse_args(argv)
 
