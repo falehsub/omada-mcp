@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .._projections import project_controller_row
 from ..client import OmadaClient, OmadaError
+from ._common import deep_redact
 from ._network_helpers import dhcp_pool_capacity, extra_network_audit_findings
-from ._tool_model import _site
+from ._tool_model import _site, normalize_mac
 from ._write_common import _ACL_DISPATCH_NOTES
 from ._write_fetchers import (
     _fetch_acls,
@@ -261,6 +263,38 @@ _SNAPSHOT_ALL_OBJECTS: tuple[str, ...] = (
 _SNAPSHOT_OBJECT_CANONICAL: dict[str, str] = {name.lower(): name for name in _SNAPSHOT_ALL_OBJECTS}
 
 
+def _resolve_snapshot_objects(
+    objects: list[str] | None,
+    *,
+    default: tuple[str, ...] = _SNAPSHOT_DEFAULT_OBJECTS,
+) -> list[str]:
+    if objects is None:
+        return list(default)
+    if not isinstance(objects, list):
+        raise OmadaError("objects must be an array of snapshot section names")
+    selected: list[str] = []
+    seen: set[str] = set()
+    for raw in objects:
+        raw_lower = str(raw or "").strip().lower()
+        if not raw_lower:
+            raise OmadaError("objects contains an empty entry")
+        canonical = _SNAPSHOT_OBJECT_CANONICAL.get(raw_lower)
+        if canonical is None:
+            raise OmadaError(
+                f"unknown snapshot object {raw!r}",
+                hint="valid objects: " + ", ".join(_SNAPSHOT_ALL_OBJECTS),
+            )
+        if canonical not in seen:
+            seen.add(canonical)
+            selected.append(canonical)
+    if not selected:
+        raise OmadaError(
+            "objects must not be empty",
+            hint="omit objects for default snapshot (" + ", ".join(default) + ")",
+        )
+    return selected
+
+
 def _get_config_snapshot(
     client: OmadaClient,
     objects: list[str] | None = None,
@@ -274,32 +308,7 @@ def _get_config_snapshot_impl(
     client: OmadaClient,
     objects: list[str] | None = None,
 ) -> dict[str, Any]:
-    if objects is None:
-        selected = list(_SNAPSHOT_DEFAULT_OBJECTS)
-    else:
-        if not isinstance(objects, list):
-            raise OmadaError("objects must be an array of snapshot section names")
-        selected = []
-        seen = set()
-        for raw in objects:
-            raw_lower = str(raw or "").strip().lower()
-            if not raw_lower:
-                raise OmadaError("objects contains an empty entry")
-            canonical = _SNAPSHOT_OBJECT_CANONICAL.get(raw_lower)
-            if canonical is None:
-                raise OmadaError(
-                    f"unknown snapshot object {raw!r}",
-                    hint="valid objects: " + ", ".join(_SNAPSHOT_ALL_OBJECTS),
-                )
-            if canonical not in seen:
-                seen.add(canonical)
-                selected.append(canonical)
-        if not selected:
-            raise OmadaError(
-                "objects must not be empty",
-                hint="omit objects for default snapshot ("
-                     + ", ".join(_SNAPSHOT_DEFAULT_OBJECTS) + ")",
-            )
+    selected = _resolve_snapshot_objects(objects)
 
     site = _site(client)
     warnings: list[str] = []
@@ -485,5 +494,256 @@ _SNAPSHOT_SCHEMA: dict[str, Any] = {
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["site", "objects", "warnings"],
+}
+
+
+_DIFF_VOLATILE_KEYS: frozenset[str] = frozenset({
+    "uptime", "uptimeSec", "duration", "lastSeen", "cpuUtil", "memUtil",
+    "rxRate", "txRate", "rxRateKbps", "txRateKbps", "rxBytes", "txBytes",
+    "download", "upload", "trafficDown", "trafficUp", "clientCount", "userNum",
+    "txUtil", "rxUtil", "interUtil", "rssi", "signal", "signalLevel", "snr",
+    "channel", "noiseLevel", "activity", "power", "poePower", "temperature",
+    "temp", "speed", "rxPackets", "txPackets", "rxErrors", "txErrors",
+    "rxDrops", "txDrops", "rxRetryPkts", "txRetryPkts", "expired",
+    "warnings", "aclDisableReliable", "warning",
+})
+
+
+def _strip_volatile_and_redact(value: Any) -> Any:
+    cleaned = deep_redact(value)
+    if isinstance(cleaned, dict):
+        return {
+            k: _strip_volatile_and_redact(v)
+            for k, v in cleaned.items()
+            if k not in _DIFF_VOLATILE_KEYS
+        }
+    if isinstance(cleaned, list):
+        return [_strip_volatile_and_redact(item) for item in cleaned]
+    return cleaned
+
+
+def _diff_item_identity(section: str, item: Any) -> tuple[str, str]:
+    if not isinstance(item, dict):
+        canon = json.dumps(item, sort_keys=True, separators=(",", ":"), default=str)
+        return canon, canon
+    raw_id = item.get("id")
+    label = str(item.get("name") or item.get("ssid") or item.get("mac") or raw_id or "")
+    if raw_id not in (None, ""):
+        return f"id:{raw_id}", label or str(raw_id)
+    if section in ("devices", "clients", "dhcpReservations") and item.get("mac"):
+        mac = normalize_mac(str(item["mac"]))
+        if section == "dhcpReservations" and item.get("netId"):
+            return f"res:{mac}:{item['netId']}", label or mac
+        return f"mac:{mac}", label or mac
+    if section == "networks" and item.get("vlan") is not None:
+        return f"vlan:{item['vlan']}:{item.get('name') or ''}", label or f"vlan-{item['vlan']}"
+    if section == "wlans":
+        grp = str(item.get("wlanGroup") or item.get("wlanId") or "")
+        name = str(item.get("name") or "")
+        if grp or name:
+            return f"wlan:{grp}:{name}", name or grp
+    if item.get("name"):
+        return f"name:{item['name']}", str(item["name"])
+    canon = json.dumps(item, sort_keys=True, separators=(",", ":"), default=str)
+    return canon, label or canon[:48]
+
+
+def _diff_field_changes(before: Any, after: Any, prefix: str = "") -> dict[str, dict[str, Any]]:
+    if isinstance(before, dict) and isinstance(after, dict):
+        changes: dict[str, dict[str, Any]] = {}
+        for key in sorted(set(before) | set(after)):
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if key not in before:
+                changes[path] = {"before": None, "after": after[key]}
+            elif key not in after:
+                changes[path] = {"before": before[key], "after": None}
+            elif before[key] != after[key]:
+                if isinstance(before[key], dict) and isinstance(after[key], dict):
+                    changes.update(_diff_field_changes(before[key], after[key], path))
+                else:
+                    changes[path] = {"before": before[key], "after": after[key]}
+        return changes
+    if before != after:
+        return {prefix or "value": {"before": before, "after": after}}
+    return {}
+
+
+def _diff_object_list(
+    section: str,
+    before_items: list[Any],
+    after_items: list[Any],
+) -> dict[str, Any]:
+    before_map: dict[str, tuple[str, Any]] = {}
+    for item in before_items:
+        key, label = _diff_item_identity(section, item)
+        while key in before_map:
+            key = f"{key}#dup"
+        before_map[key] = (label, item)
+
+    after_map: dict[str, tuple[str, Any]] = {}
+    for item in after_items:
+        key, label = _diff_item_identity(section, item)
+        while key in after_map:
+            key = f"{key}#dup"
+        after_map[key] = (label, item)
+
+    added: list[dict[str, Any]] = []
+    removed: list[dict[str, Any]] = []
+    changed: list[dict[str, Any]] = []
+
+    for key in sorted(after_map):
+        if key not in before_map:
+            label, item = after_map[key]
+            added.append({"key": key, "label": label, "value": item})
+    for key in sorted(before_map):
+        if key not in after_map:
+            label, item = before_map[key]
+            removed.append({"key": key, "label": label, "value": item})
+    for key in sorted(set(before_map) & set(after_map)):
+        _, before_val = before_map[key]
+        label, after_val = after_map[key]
+        delta = _diff_field_changes(before_val, after_val)
+        if delta:
+            changed.append({"key": key, "label": label, "changes": delta})
+
+    return {
+        "hasChanges": bool(added or removed or changed),
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+    }
+
+
+def _extract_section_items(section: str, snapshot: dict[str, Any]) -> tuple[list[Any], dict[str, Any]]:
+    raw = snapshot.get(section)
+    if raw is None:
+        return [], {}
+    cleaned = _strip_volatile_and_redact(raw)
+    if section == "acls" and isinstance(cleaned, dict):
+        meta = {k: v for k, v in cleaned.items() if k not in ("rules", "count")}
+        return list(cleaned.get("rules") or []), meta
+    if section == "groups" and isinstance(cleaned, dict):
+        all_rows = cleaned.get("all")
+        if all_rows is None:
+            all_rows = list(cleaned.get("ipGroups") or []) + list(cleaned.get("otherGroups") or [])
+        return list(all_rows or []), {}
+    if isinstance(cleaned, list):
+        return cleaned, {}
+    return [], {"value": cleaned}
+
+
+def _diff_config_snapshots(
+    client: OmadaClient,
+    baseline: dict[str, Any],
+    current: dict[str, Any] | None = None,
+    objects: list[str] | None = None,
+) -> dict[str, Any]:
+    """Deterministically compare two snapshots (or *baseline* against the live site)."""
+    if not isinstance(baseline, dict) or not any(k in baseline for k in (*_SNAPSHOT_ALL_OBJECTS, "objects", "site")):
+        raise OmadaError(
+            "baseline must be a snapshot object produced by get_config_snapshot",
+            hint="pass the JSON object returned by get_config_snapshot",
+        )
+
+    if current is not None and not isinstance(current, dict):
+        raise OmadaError("current must be a snapshot object or omitted to query the live controller")
+
+    if objects is not None:
+        sections_list = _resolve_snapshot_objects(objects)
+    else:
+        raw_objs = baseline.get("objects")
+        if isinstance(raw_objs, list) and raw_objs:
+            sections_list = _resolve_snapshot_objects([str(o) for o in raw_objs])
+        else:
+            present = [s for s in _SNAPSHOT_ALL_OBJECTS if s in baseline or (current and s in current)]
+            sections_list = present or list(_SNAPSHOT_DEFAULT_OBJECTS)
+
+    live_used = current is None
+    if current is None:
+        with client.scoped_cache():
+            target_snapshot = _get_config_snapshot_impl(client, objects=sections_list)
+    else:
+        target_snapshot = current
+
+    base_site = baseline.get("site") if isinstance(baseline.get("site"), dict) else None
+    curr_site = target_snapshot.get("site") if isinstance(target_snapshot.get("site"), dict) else None
+    cross_site = bool(
+        base_site and curr_site and base_site.get("id") and curr_site.get("id")
+        and str(base_site["id"]) != str(curr_site["id"])
+    )
+
+    sections_out: dict[str, dict[str, Any]] = {}
+    total_added = 0
+    total_removed = 0
+    total_changed = 0
+    sections_changed = 0
+
+    for section in sections_list:
+        if section == "services":
+            b_clean = _strip_volatile_and_redact(baseline.get("services") or {})
+            c_clean = _strip_volatile_and_redact(target_snapshot.get("services") or {})
+            delta = _diff_field_changes(b_clean, c_clean)
+            sec_changed = [{"key": "services", "label": "services", "changes": delta}] if delta else []
+            sec_diff: dict[str, Any] = {
+                "hasChanges": bool(sec_changed),
+                "added": [],
+                "removed": [],
+                "changed": sec_changed,
+            }
+        else:
+            b_items, b_meta = _extract_section_items(section, baseline)
+            c_items, c_meta = _extract_section_items(section, target_snapshot)
+            sec_diff = _diff_object_list(section, b_items, c_items)
+            meta_delta = _diff_field_changes(b_meta, c_meta)
+            if meta_delta:
+                sec_diff["changed"].append({"key": f"{section}:settings", "label": "settings", "changes": meta_delta})
+                sec_diff["hasChanges"] = True
+
+        sections_out[section] = sec_diff
+        total_added += len(sec_diff["added"])
+        total_removed += len(sec_diff["removed"])
+        total_changed += len(sec_diff["changed"])
+        if sec_diff["hasChanges"]:
+            sections_changed += 1
+
+    return {
+        "comparedSource": "live" if live_used else "snapshot",
+        "baselineSite": deep_redact(base_site),
+        "currentSite": deep_redact(curr_site),
+        "crossSite": cross_site,
+        "sectionsCompared": sections_list,
+        "hasChanges": bool(total_added or total_removed or total_changed),
+        "summary": {
+            "sectionsChanged": sections_changed,
+            "added": total_added,
+            "removed": total_removed,
+            "changed": total_changed,
+        },
+        "sections": sections_out,
+    }
+
+
+_DIFF_CONFIG_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "comparedSource": {"type": "string", "enum": ["live", "snapshot"]},
+        "baselineSite": {"type": ["object", "null"]},
+        "currentSite": {"type": ["object", "null"]},
+        "crossSite": {"type": "boolean"},
+        "sectionsCompared": {"type": "array", "items": {"type": "string"}},
+        "hasChanges": {"type": "boolean"},
+        "summary": {
+            "type": "object",
+            "properties": {
+                "sectionsChanged": {"type": "integer", "minimum": 0},
+                "added": {"type": "integer", "minimum": 0},
+                "removed": {"type": "integer", "minimum": 0},
+                "changed": {"type": "integer", "minimum": 0},
+            },
+            "required": ["sectionsChanged", "added", "removed", "changed"],
+        },
+        "sections": {"type": "object"},
+    },
+    "required": ["comparedSource", "crossSite", "sectionsCompared", "hasChanges", "summary", "sections"],
 }
 

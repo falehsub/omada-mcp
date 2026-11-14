@@ -13,7 +13,7 @@ from ._network_helpers import (
     collect_vpn_tunnels_data,
     collect_wan_status_data,
 )
-from ._tool_model import _as_int, _site
+from ._tool_model import _as_int, _site, as_int_or_none
 from ._write_fetchers import (
     _fetch_dhcp_reservations,
     _fetch_lan_collection,
@@ -24,6 +24,26 @@ from ._write_fetchers import (
 )
 from .clients_read import _fetch_clients
 from .devices_read import _list_devices
+
+
+def _list_sites(client: OmadaClient) -> list[dict[str, Any]]:
+    """Return every site visible to the authenticated Viewer or Admin account."""
+    client.authenticate()
+    rows = client.get_cached_sites(refresh=True)
+    default_id = client.site.site_id if client.site is not None else ""
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        sid = str(row.get("id") or "")
+        out.append({
+            "id": sid,
+            "name": str(row.get("name") or sid),
+            "type": as_int_or_none(row.get("type")),
+            "wanConnected": bool(row["wan"]) if row.get("wan") is not None else None,
+            "lanConnected": bool(row["lan"]) if row.get("lan") is not None else None,
+            "wlanConnected": bool(row["wlan"]) if row.get("wlan") is not None else None,
+            "isConfiguredDefault": bool(default_id and sid == default_id),
+        })
+    return out
 
 
 def _get_site_info(client: OmadaClient) -> dict[str, Any]:
@@ -449,6 +469,21 @@ _TOPOLOGY_SCHEMA: dict[str, Any] = {
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["roots", "unattachedDevices", "counts", "warnings"],
+}
+
+
+_SITE_LIST_ITEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "type": {"type": ["integer", "null"]},
+        "wanConnected": {"type": ["boolean", "null"]},
+        "lanConnected": {"type": ["boolean", "null"]},
+        "wlanConnected": {"type": ["boolean", "null"]},
+        "isConfiguredDefault": {"type": "boolean"},
+    },
+    "required": ["id", "name", "isConfiguredDefault"],
 }
 
 

@@ -411,6 +411,7 @@ class V11FeatureTests(unittest.TestCase):
             ("get_network_services", {}),
             ("list_logs", {}),
             ("get_site_info", {}),
+            ("list_sites", {}),
             ("network_audit", {}),
             ("explain_error", {"code": -33726}),
             ("get_config_snapshot", {
@@ -418,6 +419,14 @@ class V11FeatureTests(unittest.TestCase):
                     "wlans", "devices", "clients", "dhcpReservations",
                     "portForwards", "staticRoutes", "mdnsRules", "services",
                 ],
+            }),
+            ("diff_config_snapshots", {
+                "baseline": {
+                    "site": {"id": "s1", "name": "Home"},
+                    "objects": ["networks", "devices"],
+                    "networks": [],
+                    "devices": [],
+                },
             }),
             ("get_switch_ports", {"mac": "AA-BB-CC-00-00-03"}),
             ("get_ap_radios", {"mac": "AA-BB-CC-00-00-02"}),

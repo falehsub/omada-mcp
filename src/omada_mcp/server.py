@@ -39,9 +39,10 @@ SERVER_NAME = "omada-mcp"
 
 INSTRUCTIONS = (
     "Read-only access by default to a TP-Link Omada SDN controller through its Web API v2. "
-    "Thirty-three read-only tools are always available, including get_config_snapshot, network_audit, "
-    "get_switch_ports, get_ap_radios, get_wan_status, get_topology, diagnose_client, diagnose_wan, "
-    "get_site_info, list_devices / list_clients, get_device / get_client, and explain_error. "
+    "Thirty-five read-only tools are always available, including list_sites, get_site_info, "
+    "get_config_snapshot, diff_config_snapshots, network_audit, get_switch_ports, get_ap_radios, "
+    "get_wan_status, get_topology, diagnose_client, diagnose_wan, list_devices / list_clients, "
+    "get_device / get_client, and explain_error. Most tools accept an optional site name/ID. "
     "Optional write tools remain hidden and disabled unless both OMADA_READ_ONLY=false and "
     "OMADA_WRITE_TOOLS explicitly allowlist them. Timestamps are UTC ISO-8601. Error messages "
     "include the controller's numeric errorCode and a fix hint."
@@ -354,6 +355,7 @@ class Server:
             )
 
         self._check_arguments(spec, arguments)
+        site_override = arguments.pop("site", None) if spec.site_scoped else None
 
         # Authentication problems are protocol-level, not tool results: the host
         # should surface them as a failed call, not as data the model can reason
@@ -366,7 +368,8 @@ class Server:
                                {"errorCode": exc.code} if exc.code else None) from None
 
         try:
-            data = spec.handler(self.client, **arguments)
+            with self.client.use_site(site_override):
+                data = spec.handler(self.client, **arguments)
         except OmadaError as exc:
             # Tool execution failures are reported in-band per MCP.
             text = str(exc)

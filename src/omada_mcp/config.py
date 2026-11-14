@@ -125,9 +125,11 @@ _READ_ONLY_TOOL_NAMES = frozenset({
     "get_network_services",
     "list_logs",
     "get_site_info",
+    "list_sites",
     "network_audit",
     "explain_error",
     "get_config_snapshot",
+    "diff_config_snapshots",
     "get_switch_ports",
     "get_ap_radios",
     "get_rf_scan",
@@ -175,6 +177,7 @@ class Config:
     password: str = field(repr=False)
     site_id: str | None = None
     site_name: str | None = None
+    allow_cross_site: bool = False
     ca_bundle: Path | None = None
     verify_ssl: bool = True
     strict_x509: bool = True
@@ -205,6 +208,7 @@ class Config:
             "password": f"set ({len(self.password)} chars)" if self.password else "missing",
             "site_id": self.site_id,
             "site_name": self.site_name,
+            "allow_cross_site": self.allow_cross_site,
             "ca_bundle": str(self.ca_bundle) if self.ca_bundle else None,
             "verify_ssl": self.verify_ssl,
             "strict_x509": self.strict_x509,
@@ -669,6 +673,8 @@ def load_config(
         password=values["OMADA_PASSWORD"],
         site_id=site_id,
         site_name=site_name,
+        allow_cross_site=parse_bool(values.get("OMADA_ALLOW_CROSS_SITE"),
+                                    "OMADA_ALLOW_CROSS_SITE", False),
         ca_bundle=ca_bundle,
         verify_ssl=parse_bool(values.get("OMADA_VERIFY_SSL"), "OMADA_VERIFY_SSL", True),
         strict_x509=parse_bool(values.get("OMADA_STRICT_X509"), "OMADA_STRICT_X509", True),

@@ -40,7 +40,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -144,6 +144,8 @@ class OmadaClient:
         self._cache_depth: int = 0
         self._cache_bypass_depth: int = 0
         self._negative_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+        self._site_override = threading.local()
+        self._site_list_cache: list[dict[str, Any]] | None = None
         self.token: str | None = None
         self.controller_id: str | None = None
         self.site: SiteInfo | None = None
@@ -366,6 +368,7 @@ class OmadaClient:
                 )
             self.token = token
             self.controller_id = controller_id
+            self._site_list_cache = None
             cookie_name = self.session_cookie_name()
             family = classify_controller_family(info, session_cookie=cookie_name)
             self._log(
@@ -958,6 +961,32 @@ class OmadaClient:
                 break
         return sites
 
+    def get_cached_sites(self, *, refresh: bool = False) -> list[dict[str, Any]]:
+        """Return cached visible sites, fetching from ``GET sites`` on miss or refresh."""
+        if not refresh and self._site_list_cache is not None:
+            return list(self._site_list_cache)
+        sites = self.list_sites()
+        self._site_list_cache = list(sites)
+        return list(sites)
+
+    @staticmethod
+    def _match_site_row(sites: list[dict[str, Any]], wanted: str) -> SiteInfo | None:
+        needle = wanted.strip().lower()
+        for matcher in (
+            lambda row: str(row.get("id", "")).lower() == needle,
+            lambda row: str(row.get("name", "")).lower() == needle,
+        ):
+            for index, site in enumerate(sites):
+                if matcher(site):
+                    return SiteInfo(
+                        site_id=str(site.get("id")),
+                        name=str(site.get("name") or site.get("id")),
+                        index=index,
+                        total=len(sites),
+                        requested=wanted,
+                    )
+        return None
+
     def resolve_site(self) -> SiteInfo:
         """Resolve ``OMADA_SITE_ID`` / ``OMADA_SITE_NAME``, defaulting to the first site.
 
@@ -965,7 +994,7 @@ class OmadaClient:
         controller itself only accepts the hex id in URLs, which is exactly the
         mistake ``-1505`` reports.
         """
-        sites = self.list_sites()
+        sites = self.get_cached_sites(refresh=True)
         if not sites:
             raise OmadaError(
                 "the account can see no sites",
@@ -974,17 +1003,9 @@ class OmadaClient:
             )
         wanted = self.config.site_id or self.config.site_name
         if wanted:
-            needle = wanted.strip().lower()
-            for index, site in enumerate(sites):
-                if str(site.get("id", "")).lower() == needle or \
-                        str(site.get("name", "")).lower() == needle:
-                    return SiteInfo(
-                        site_id=str(site.get("id")),
-                        name=str(site.get("name") or site.get("id")),
-                        index=index,
-                        total=len(sites),
-                        requested=wanted,
-                    )
+            resolved = self._match_site_row(sites, wanted)
+            if resolved is not None:
+                return resolved
             names = ", ".join(f"{s.get('name')} ({s.get('id')})" for s in sites)
             raise OmadaError(
                 f"no site matches {wanted!r}; this account can see: {names}",
@@ -1000,8 +1021,67 @@ class OmadaClient:
             requested=None,
         )
 
+    def resolve_target_site(self, wanted: str) -> SiteInfo:
+        """Resolve an explicit per-call ``site`` name or ID, honoring strict pinning."""
+        text = wanted.strip()
+        if not text:
+            return self.current_site()
+        sites = self.get_cached_sites()
+        resolved = self._match_site_row(sites, text)
+        if resolved is None:
+            sites = self.get_cached_sites(refresh=True)
+            resolved = self._match_site_row(sites, text)
+        if resolved is None:
+            names = ", ".join(f"{s.get('name')} ({s.get('id')})" for s in sites)
+            raise OmadaError(
+                f"no site matches {text!r}; this account can see: {names}",
+                hint="call list_sites to inspect visible site names and IDs",
+            )
+        if (self.config.site_id or self.config.site_name) and not self.config.allow_cross_site:
+            pinned = self.site
+            if pinned is not None and resolved.site_id != pinned.site_id:
+                raise OmadaError(
+                    (
+                        f"cross-site call to {resolved.name!r} ({resolved.site_id}) refused "
+                        f"while pinned to {pinned.name!r} ({pinned.site_id})"
+                    ),
+                    hint=(
+                        "unset OMADA_SITE_NAME / OMADA_SITE_ID or set "
+                        "OMADA_ALLOW_CROSS_SITE=true to allow explicit site overrides"
+                    ),
+                )
+        return resolved
+
+    def current_site(self) -> SiteInfo:
+        """Return the active site for this call (thread-local override or configured site)."""
+        self.authenticate()
+        override = getattr(self._site_override, "site", None)
+        if isinstance(override, SiteInfo):
+            return override
+        site = self.site
+        if site is None:  # pragma: no cover - authenticate() guarantees a site
+            raise OmadaError("site resolution failed", hint="run `omada-mcp --doctor`")
+        return site
+
+    @contextlib.contextmanager
+    def use_site(self, wanted: str | None) -> Iterator[SiteInfo | None]:
+        """Temporarily bind the current thread to *wanted* without mutating ``self.site``."""
+        text = wanted.strip() if isinstance(wanted, str) else ""
+        if not text:
+            yield getattr(self._site_override, "site", None) or self.site
+            return
+        self.authenticate()
+        target = self.resolve_target_site(text)
+        prev = getattr(self._site_override, "site", None)
+        self._site_override.site = target
+        try:
+            yield target
+        finally:
+            self._site_override.site = prev
+
     def close(self) -> None:
         self.token = None
+        self._site_list_cache = None
         closer = getattr(self._transport, "close", None)
         if callable(closer):
             closer()

@@ -240,11 +240,7 @@ def _normalize_mac(value: str) -> str:
 
 
 def _site(client: OmadaClient) -> SiteInfo:
-    client.authenticate()
-    site = client.site
-    if site is None:  # pragma: no cover - authenticate() guarantees a site
-        raise OmadaError("site resolution failed", hint="run `omada-mcp --doctor`")
-    return site
+    return client.current_site()
 
 
 def _unwrap_rows(payload: Any) -> list[dict[str, Any]]:

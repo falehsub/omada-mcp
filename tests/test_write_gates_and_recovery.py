@@ -48,11 +48,11 @@ class WriteConfigTests(unittest.TestCase):
     def test_tool_name_sets_match_tools_module(self):
         ro_names = {t.name for t in TOOLS if t.read_only}
         wr_names = {t.name for t in TOOLS if not t.read_only}
-        self.assertEqual(len(ro_names), 33)
+        self.assertEqual(len(ro_names), 35)
         self.assertEqual(len(wr_names), 47)
         self.assertEqual(config_mod._READ_ONLY_TOOL_NAMES, ro_names)
         self.assertEqual(set(WRITE_TOOL_NAMES), wr_names)
-        self.assertEqual(len(TOOLS), 80)
+        self.assertEqual(len(TOOLS), 82)
 
     def test_parse_write_tools_validation(self):
         self.assertEqual(parse_write_tools(None), ())
@@ -167,7 +167,7 @@ class GateAndProtocolTests(unittest.TestCase):
                 tmp, read_only=False, write_tools=("set_client_fixed_ip",)
             )
             listed = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]
-            self.assertEqual(len(listed), 34)
+            self.assertEqual(len(listed), 36)
             names = {t["name"] for t in listed}
             self.assertIn("set_client_fixed_ip", names)
             self.assertNotIn("release_client_fixed_ip", names)
@@ -217,7 +217,9 @@ class GateAndProtocolTests(unittest.TestCase):
 
     def test_write_annotations_match_safety_tiers(self):
         expected = {
+            "list_sites": (True, False, True),
             "get_config_snapshot": (True, False, True),
+            "diff_config_snapshots": (True, False, True),
             "search_clients": (True, False, True),
             "list_lan_networks": (True, False, True),
             "list_dhcp_reservations": (True, False, True),

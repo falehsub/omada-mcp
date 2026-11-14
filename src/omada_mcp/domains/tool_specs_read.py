@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from ._tool_model import _EMPTY, _LIMIT_PROP, _SUPPORTED_ITEMS_SCHEMA, Tool, _list_output_schema
 from .audit_snapshot import (
+    _DIFF_CONFIG_SCHEMA,
     _NETWORK_AUDIT_SCHEMA,
     _SNAPSHOT_ALL_OBJECTS,
     _SNAPSHOT_SCHEMA,
+    _diff_config_snapshots,
     _get_config_snapshot,
     _network_audit_enriched,
 )
@@ -51,6 +53,7 @@ from .networks_read import (
     _LAN_NETWORK_SCHEMA,
     _SERVICES_SCHEMA,
     _SITE_INFO_SCHEMA,
+    _SITE_LIST_ITEM_SCHEMA,
     _TOPOLOGY_SCHEMA,
     _VPN_TUNNELS_SCHEMA,
     _WAN_STATUS_SCHEMA,
@@ -60,6 +63,7 @@ from .networks_read import (
     _get_wan_status,
     _list_dhcp_reservations,
     _list_lan_networks,
+    _list_sites,
     _list_vpn_tunnels,
 )
 from .routing_dns_read import (
@@ -164,6 +168,18 @@ READ_TOOLS: list[Tool] = [
         handler=_get_site_info,
     ),
     Tool(
+        name="list_sites",
+        title="List visible controller sites",
+        description=(
+            "List sites visible to the authenticated Viewer or Admin account with site IDs, "
+            "names, connectivity flags, and configured default indicator."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_list_output_schema(_SITE_LIST_ITEM_SCHEMA),
+        handler=_list_sites,
+        site_scoped=False,
+    ),
+    Tool(
         name="network_audit",
         title="Audit site network health",
         description=("One-call read-only health audit checking WAN state/packet loss, offline "
@@ -193,6 +209,7 @@ READ_TOOLS: list[Tool] = [
         handler=_explain_error,
         open_world=False,
         requires_auth=False,
+        site_scoped=False,
     ),
     Tool(
         name="get_config_snapshot",
@@ -218,6 +235,37 @@ READ_TOOLS: list[Tool] = [
         },
         output_schema=_SNAPSHOT_SCHEMA,
         handler=_get_config_snapshot,
+    ),
+    Tool(
+        name="diff_config_snapshots",
+        title="Diff site configuration snapshots",
+        description=(
+            "Deterministically compare two get_config_snapshot payloads (or baseline vs live site "
+            "when current is omitted), stripping volatile telemetry and reporting added, removed, "
+            "and changed objects across sections."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "baseline": {
+                    "type": "object",
+                    "description": "Baseline snapshot object produced by get_config_snapshot",
+                },
+                "current": {
+                    "type": "object",
+                    "description": "Optional comparison snapshot object; queries live controller when omitted",
+                },
+                "objects": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(_SNAPSHOT_ALL_OBJECTS)},
+                    "description": "Optional snapshot sections subset to compare",
+                },
+            },
+            "required": ["baseline"],
+        },
+        output_schema=_DIFF_CONFIG_SCHEMA,
+        handler=_diff_config_snapshots,
+        requires_auth=False,
     ),
     Tool(
         name="search_clients",
