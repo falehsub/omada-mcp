@@ -36,6 +36,17 @@ from omada_mcp.server import Server  # noqa: E402
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
 results = []
 
+#: Every write tool a scenario calls, including its cleanup step. A scenario
+#: runs only when all of them are allowlisted, so it can always undo itself.
+SCENARIO_TOOLS = {
+    "ip-group": {"create_ip_group", "delete_ip_group"},
+    "acl": {"create_gateway_acl", "delete_gateway_acl"},
+    "isolation": {"set_vlan_isolation"},
+    "dhcp-pools": {"set_vlan_dhcp_pools"},
+    "lan-pool-shape": {"create_lan_network"},
+    "fixed-ip": {"set_client_fixed_ip", "release_client_fixed_ip"},
+}
+
 
 def record(status, label, detail=""):
     results.append((status, label, detail))
@@ -269,15 +280,26 @@ def main(argv=None):
     plan = [("ip-group", scenario_ip_group), ("acl", scenario_acl),
             ("isolation", scenario_isolation), ("dhcp-pools", scenario_dhcp_pools),
             ("lan-pool-shape", scenario_lan_pool_shape)]
+    allowed = set(config.write_tools)
     for name, fn in plan:
         if name in args.skip:
             record(SKIP, name, "skipped by --skip")
             continue
         print(f"[{name}]")
+        missing = sorted(SCENARIO_TOOLS.get(name, set()) - allowed)
+        if missing:
+            # Never start a scenario whose cleanup step is not allowlisted:
+            # that would leave the object behind on the controller.
+            record(SKIP, name, "add to OMADA_WRITE_TOOLS: " + ",".join(missing))
+            continue
         fn(run)
     if args.client_mac:
         print("[fixed-ip]")
-        scenario_fixed_ip(run, args.client_mac)
+        missing = sorted(SCENARIO_TOOLS["fixed-ip"] - allowed)
+        if missing:
+            record(SKIP, "fixed-ip", "add to OMADA_WRITE_TOOLS: " + ",".join(missing))
+        else:
+            scenario_fixed_ip(run, args.client_mac)
 
     failed = sum(1 for status, _, _ in results if status == FAIL)
     skipped = sum(1 for status, _, _ in results if status == SKIP)

@@ -915,6 +915,7 @@ class OmadaClient:
         self._transport = transport
         self._lock = threading.RLock()
         self._last_request_at = 0.0
+        self._adaptive_min_interval = 0.0
         self._last_write_at: Optional[float] = None
         self._snapshot_seq = 0
         self._auth_in_progress = False
@@ -960,9 +961,10 @@ class OmadaClient:
         return self._transport
 
     def _pace(self) -> None:
-        interval = max(0.0, float(self.config.min_interval or 0.0))
-        if interval <= 0:
+        base_interval = max(0.0, float(self.config.min_interval or 0.0))
+        if base_interval <= 0:
             return
+        interval = max(base_interval, self._adaptive_min_interval)
         elapsed = self._clock() - self._last_request_at
         if self._last_request_at and elapsed < interval:
             self._sleep(interval - elapsed)
@@ -1289,6 +1291,7 @@ class OmadaClient:
                             _burst=_burst)
 
         if code == -1600 and method_upper == "GET" and _burst < _MAX_BURST_RETRIES:
+            self._adaptive_min_interval = max(self._adaptive_min_interval, 0.25)
             self._log(f"-1600 from {endpoint}; pacing {BURST_BACKOFF_SECONDS}s and retrying once")
             self._sleep(BURST_BACKOFF_SECONDS)
             return self.api(endpoint, method_upper, data, require_auth=False, _retry=_retry,

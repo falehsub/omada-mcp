@@ -20,7 +20,7 @@ Use this skill when:
 - you need to decide between the Web API and the Open API.
 
 The companion MCP server in this repository (`omada-mcp`) implements 33 read-only
-diagnostics and inspection tools (plus 46 opt-in guarded write tools when
+diagnostics and inspection tools (plus 47 opt-in guarded write tools when
 explicitly enabled). When it is installed, prefer its tools over hand-rolled
 HTTP; when it is not, the snippets below are the reference implementation.
 

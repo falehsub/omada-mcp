@@ -80,7 +80,7 @@ fail closed unless explicitly enabled.
   `get_ap_radios`, `get_rf_scan`, `get_wan_status`, `list_vpn_tunnels`,
   `get_topology`, `get_security_status`, `diagnose_client`, `diagnose_wan`,
   `list_port_profiles`, `list_wlan_groups`, `list_policy_routes`,
-  `list_lan_dns_rules`) plus `46` opt-in write tools:
+  `list_lan_dns_rules`) plus `47` opt-in write tools:
   the core 8 (`set_client_fixed_ip`, `release_client_fixed_ip`, `set_vlan_dhcp_pools`,
   `set_vlan_isolation`, `create_ip_group`, `replace_ip_group`, `create_gateway_acl`,
   `set_acl_rule_status`), offline DHCP / LAN / ACL / IP-group / SSID / port-forward /

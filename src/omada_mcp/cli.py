@@ -22,6 +22,7 @@ from .config import (
     ConfigError,
     load_config,
     parse_bool,
+    parse_env_file,
     parse_schema_mode,
     parse_tool_categories,
     parse_write_tools,
@@ -113,9 +114,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_doctor(json_output=args.json)
 
     if args.list_tools:
+        env_values = dict(parse_env_file(os.environ["OMADA_ENV_FILE"])) if os.environ.get("OMADA_ENV_FILE") else {}
+        env_values.update(os.environ)
         try:
-            schema_mode = parse_schema_mode(os.environ.get("OMADA_SCHEMA_MODE"))
-            categories = parse_tool_categories(os.environ.get("OMADA_TOOL_CATEGORIES"))
+            schema_mode = parse_schema_mode(env_values.get("OMADA_SCHEMA_MODE"))
+            categories = parse_tool_categories(env_values.get("OMADA_TOOL_CATEGORIES"))
         except ConfigError as exc:
             print(f"omada-mcp: configuration error: {exc}", file=sys.stderr)
             return 2
@@ -128,9 +131,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             try:
                 read_only = parse_bool(
-                    os.environ.get("OMADA_READ_ONLY"), "OMADA_READ_ONLY", True
+                    env_values.get("OMADA_READ_ONLY"), "OMADA_READ_ONLY", True
                 )
-                write_tools = parse_write_tools(os.environ.get("OMADA_WRITE_TOOLS"))
+                write_tools = parse_write_tools(env_values.get("OMADA_WRITE_TOOLS"))
             except ConfigError as exc:
                 print(f"omada-mcp: configuration error: {exc}", file=sys.stderr)
                 return 2

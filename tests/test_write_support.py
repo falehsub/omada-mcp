@@ -132,10 +132,10 @@ class WriteConfigTests(unittest.TestCase):
         ro_names = {t.name for t in TOOLS if t.read_only}
         wr_names = {t.name for t in TOOLS if not t.read_only}
         self.assertEqual(len(ro_names), 33)
-        self.assertEqual(len(wr_names), 46)
+        self.assertEqual(len(wr_names), 47)
         self.assertEqual(config_mod._READ_ONLY_TOOL_NAMES, ro_names)
         self.assertEqual(set(WRITE_TOOL_NAMES), wr_names)
-        self.assertEqual(len(TOOLS), 79)
+        self.assertEqual(len(TOOLS), 80)
 
     def test_parse_write_tools_validation(self):
         self.assertEqual(parse_write_tools(None), ())
@@ -359,6 +359,7 @@ class GateAndProtocolTests(unittest.TestCase):
             "update_switch_port": (False, False, True),
             "cycle_poe_port": (False, True, False),
             "upsert_port_profile": (False, False, True),
+            "delete_port_profile": (False, True, True),
             "update_ap_radio": (False, False, True),
             "start_rf_scan": (False, True, False),
             "assign_ap_wlan_group": (False, False, True),
@@ -1357,6 +1358,35 @@ class DhcpLanAclGroupWriteTests(unittest.TestCase):
             }))
             self.assertIs(u_res["after"]["syslog"], True)
 
+            # Omada v6.2 omits 'biDirectional' on ACL rule read-back (uses stateMode instead):
+            # update_gateway_acl must warn and still verify when target_rule lacks biDirectional.
+            live_rule = next(r for r in _ctrl.acls if r["name"] == "acl-del-renamed")
+            live_rule.pop("biDirectional", None)
+            orig_req = _ctrl.request
+
+            def _req_v62(method, url, headers=None, data=None, timeout=None):
+                res = orig_req(method, url, headers=headers, data=data, timeout=timeout)
+                for r in _ctrl.acls:
+                    r.pop("biDirectional", None)
+                return res
+
+            _ctrl.request = _req_v62
+            try:
+                b_dry = unwrap_ok(call_tool(server, "update_gateway_acl", {
+                    "rule": "acl-del-renamed",
+                    "biDirectional": True,
+                }))
+                self.assertTrue(any("biDirectional" in w for w in b_dry["warnings"]))
+                b_res = unwrap_ok(call_tool(server, "update_gateway_acl", {
+                    "rule": "acl-del-renamed",
+                    "biDirectional": True,
+                    "dryRun": False,
+                    "confirm": b_dry["confirmToken"],
+                }))
+                self.assertTrue(b_res["verified"])
+            finally:
+                _ctrl.request = orig_req
+
             # Delete ACL then group succeeds
             d_acl_dry = unwrap_ok(call_tool(server, "delete_gateway_acl", {"rule": "acl-del-renamed"}))
             unwrap_ok(call_tool(server, "delete_gateway_acl", {
@@ -1762,6 +1792,31 @@ class Milestone2SwitchAndApTests(unittest.TestCase):
                 "confirm": up_dry["confirmToken"],
             }))
             self.assertEqual(up["after"]["poe"], 0)
+
+            # Protected built-in Disable profile refuses deletion
+            prot_del = call_tool(server, "delete_port_profile", {
+                "profile": "Disable",
+            })
+            self.assertTrue(prot_del["result"]["isError"])
+
+            # Delete custom profile and restore via rollback_from_snapshot
+            del_dry = unwrap_ok(call_tool(server, "delete_port_profile", {"profile": "IoT-Trunk"}))
+            del_res = unwrap_ok(call_tool(server, "delete_port_profile", {
+                "profile": "IoT-Trunk",
+                "dryRun": False,
+                "confirm": del_dry["confirmToken"],
+            }))
+            self.assertTrue(del_res["applied"])
+            self.assertFalse(any(p.get("name") == "IoT-Trunk" for p in ctrl.port_profiles))
+
+            rb_del_sid = Path(del_res["snapshot"]).name
+            rb_del_dry = unwrap_ok(call_tool(server, "rollback_from_snapshot", {"snapshotId": rb_del_sid}))
+            unwrap_ok(call_tool(server, "rollback_from_snapshot", {
+                "snapshotId": rb_del_sid,
+                "dryRun": False,
+                "confirm": rb_del_dry["confirmToken"],
+            }))
+            self.assertTrue(any(p.get("name") == "IoT-Trunk" for p in ctrl.port_profiles))
 
     def test_update_ap_radio_rf_scan_and_assign_wlan_group(self):
         with tempfile.TemporaryDirectory() as tmp:
