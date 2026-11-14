@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-11-14
+
+Major feature, multi-site, drift comparison, and ecosystem release (**224 passing tests**,
+**35 read-only + 47 opt-in write = 82 tools**).
+
+### Added
+
+- **Multi-site support (`list_sites` + per-call `site` + strict pinning)**: Added `list_sites`
+  discovery respecting Viewer/Admin RBAC, stateless thread-local per-call `site` overrides across
+  site-scoped tools (`client.use_site`), and `OMADA_ALLOW_CROSS_SITE` (`false` by default) to keep
+  `OMADA_SITE_NAME`/`OMADA_SITE_ID` pinned unless cross-site calls are explicitly allowed.
+- **Deterministic configuration drift diff (`diff_config_snapshots`)**: Read-only comparison
+  between two `get_config_snapshot` payloads (or `baseline` vs live site when `current` is omitted),
+  stripping volatile runtime telemetry keys, applying `deep_redact`, and reporting deterministic
+  `added`, `removed`, `changed`, and `crossSite` metadata.
+- **Client roaming & telemetry honesty diagnostics (`diagnose_client`)**: Added chronological
+  `pastConnections` AP transition analysis and roam/disconnect log correlation (`roamingSummary`),
+  structured `telemetryAvailability`, `FREQUENT_DISCONNECTS` / `FREQUENT_AP_ROAMING` /
+  `LOCK_TO_AP_MISMATCH` findings, and explicit `TELEMETRY_PARTIAL` / `ROAM_HISTORY_UNAVAILABLE`
+  findings when telemetry is missing or empty.
+- **Ecosystem discovery, zero-drift docs & supply-chain release standard**: Added official MCP
+  Registry `server.json` (`io.github.falehsub/omada-mcp`) with `README.md` verification tag,
+  `scripts/generate_docs.py` + generated `docs/tools-reference.md` enforced by CI (`--check`),
+  `SECURITY.md`, `CONTRIBUTING.md`, `.github/dependabot.yml`, macOS CI + `uvx` + `docker-smoke`
+  checks, SLSA provenance attestations, `SHA256SUMS.txt` release checksums, and multi-arch
+  (`linux/amd64`, `linux/arm64`) GHCR publishing.
+
 ## [1.4.0] - 2026-11-14
 
 Minor architecture, compatibility, and reliability release (**210 passing tests**).
