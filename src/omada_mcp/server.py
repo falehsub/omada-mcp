@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import traceback
-from typing import Any, Dict, Iterable, List, Optional, TextIO
+from typing import Any, Dict, Iterable, Optional, TextIO
 
 from . import __version__
 from .client import OmadaClient, OmadaError, log
@@ -151,7 +151,14 @@ class Server:
         decoder = json.JSONDecoder()
         buffer = ""
         while True:
-            chunk = stream.readline()
+            chunk = stream.readline(cls.MAX_FRAME_CHARS + 1)
+            if len(buffer) + len(chunk) > cls.MAX_FRAME_CHARS:
+                # Drain an oversized physical line in bounded chunks, then recover.
+                while chunk and not chunk.endswith("\n"):
+                    chunk = stream.readline(cls.MAX_FRAME_CHARS + 1)
+                buffer = ""
+                yield None
+                continue
             if not chunk:  # EOF: flush anything still buffered
                 tail = buffer.strip()
                 if tail:
@@ -194,9 +201,13 @@ class Server:
         if not isinstance(message, dict):
             return self._error(None, -32600, "invalid request: expected a JSON object")
 
-        method = message.get("method")
         msg_id = message.get("id")
-        params = message.get("params") or {}
+        if "id" in message and (isinstance(msg_id, bool) or not isinstance(msg_id, (str, int))):
+            return self._error(None, -32600, "invalid request: id must be a string or integer")
+        if message.get("jsonrpc") != "2.0":
+            return self._error(msg_id, -32600, "invalid request: jsonrpc must be '2.0'")
+        method = message.get("method")
+        params = message.get("params", {})
 
         if not isinstance(method, str):
             # A response object (has result/error) is not ours to handle.
@@ -204,7 +215,8 @@ class Server:
                 return None
             return self._error(msg_id, -32600, "invalid request: missing method")
 
-        if msg_id is None and method.startswith("notifications/"):
+        # Notifications are one-way. Never dispatch tools without a request ID.
+        if "id" not in message:
             return None
 
         try:

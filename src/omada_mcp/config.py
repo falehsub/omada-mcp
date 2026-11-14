@@ -19,6 +19,7 @@ environment, so a shell override always wins.
 from __future__ import annotations
 
 import ipaddress
+import math
 import os
 import re
 import urllib.parse
@@ -499,7 +500,17 @@ def normalize_base_url(raw: str) -> str:
                           key="OMADA_BASE_URL")
     if "://" not in text:
         text = "https://" + text
-    parts = urllib.parse.urlsplit(text)
+    try:
+        parts = urllib.parse.urlsplit(text)
+        parsed_port = parts.port
+    except ValueError:
+        raise ConfigError(
+            "OMADA_BASE_URL has an invalid host or port",
+            hint="use https://<controller-host>:8043 with a port between 1 and 65535",
+            key="OMADA_BASE_URL",
+        ) from None
+    if parsed_port == 0:
+        raise ConfigError("OMADA_BASE_URL port must be between 1 and 65535", key="OMADA_BASE_URL")
     scheme = parts.scheme.lower()
     if scheme not in ("http", "https"):
         raise ConfigError(
@@ -512,7 +523,7 @@ def normalize_base_url(raw: str) -> str:
         raise ConfigError(f"OMADA_BASE_URL={raw!r} has no host part",
                           hint="use https://<controller-host>:8043",
                           key="OMADA_BASE_URL")
-    port = parts.port or (DEFAULT_HTTPS_PORT if scheme == "https" else DEFAULT_HTTP_PORT)
+    port = parsed_port or (DEFAULT_HTTPS_PORT if scheme == "https" else DEFAULT_HTTP_PORT)
     netloc = f"[{host}]" if ":" in host else host
     netloc = f"{netloc}:{port}"
     if parts.username or parts.password:
@@ -625,12 +636,18 @@ def load_config(
             hint=("OMADA_TIMEOUT_SECONDS / OMADA_MIN_INTERVAL_SECONDS / "
                   "OMADA_WRITE_INTERVAL_SECONDS must be numbers"),
         ) from None
-    if write_min_interval < 0:
-        raise ConfigError(
-            f"OMADA_WRITE_INTERVAL_SECONDS={write_min_interval} cannot be negative",
-            hint="set OMADA_WRITE_INTERVAL_SECONDS=1.0 (or 0 to disable write pacing)",
-            key="OMADA_WRITE_INTERVAL_SECONDS",
-        )
+    for key, value, positive in (
+        ("OMADA_TIMEOUT_SECONDS", timeout, True),
+        ("OMADA_MIN_INTERVAL_SECONDS", min_interval, False),
+        ("OMADA_WRITE_INTERVAL_SECONDS", write_min_interval, False),
+    ):
+        if not math.isfinite(value) or value < 0 or (positive and value == 0):
+            bound = "greater than zero" if positive else "non-negative"
+            raise ConfigError(
+                f"{key} must be finite and {bound}",
+                hint=f"set {key} to a finite {'positive' if positive else 'non-negative'} number",
+                key=key,
+            )
 
     site_id = (values.get("OMADA_SITE_ID") or "").strip() or None
     site_name = (values.get("OMADA_SITE_NAME") or "").strip() or None

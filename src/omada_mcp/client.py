@@ -38,6 +38,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
@@ -608,6 +609,13 @@ class _CookieResponseAdapter:
         return self._headers
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Return redirects to the API layer without forwarding authentication headers."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class UrllibTransport:
     """HTTP transport over pooled HTTP/1.1 keep-alive connections and ``CookieJar``.
 
@@ -627,6 +635,7 @@ class UrllibTransport:
         self.proxy_mode = "system" if use_system_proxy else "disabled"
         self.opener = urllib.request.build_opener(
             self.proxy_handler,
+            _NoRedirectHandler(),
             urllib.request.HTTPSHandler(context=ssl_context),
             urllib.request.HTTPCookieProcessor(self.cookie_jar),
         )
@@ -793,15 +802,15 @@ class UrllibTransport:
                     ConnectionResetError,
                     BrokenPipeError,
                     ssl.SSLEOFError,
-                ) as exc:
+                ):
                     self._drop_conn(key, conn)
                     if idempotent and attempt == 0:
                         continue
                     if not idempotent:
                         raise OmadaError(
-                            f"connection closed after sending non-idempotent {method_upper} {target}: {exc}",
+                            f"connection closed after sending non-idempotent {method_upper} {parts.path or '/'}",
                             hint="verify controller state before retrying; write was not replayed automatically",
-                            endpoint=target,
+                            endpoint=parts.path or "/",
                         ) from None
                     raise
                 except (http.client.HTTPException, OSError):
@@ -1230,11 +1239,12 @@ class OmadaClient:
 
         status, raw = self._raw(method, url, headers=headers, data=body)
 
-        if self._looks_like_html(raw):
-            # 200 + SPA shell == the server-side API session is gone.
+        if self._looks_like_html(raw) or status in (301, 302, 303, 307, 308):
+            # Expired sessions return either the SPA shell or a redirect to it.
+            # Do not follow redirects: credentials stay on the configured origin.
             if not _retry:
                 raise OmadaError(
-                    "controller returned the web UI HTML instead of JSON, twice",
+                    "controller returned the web UI HTML instead of JSON, twice (or repeated redirects)",
                     hint=("the API session keeps dying: another session may be logging in "
                           "with the same account; log in with a dedicated account"),
                     endpoint=endpoint,
@@ -1242,7 +1252,7 @@ class OmadaClient:
             cookie_name = self.session_cookie_name()
             cookie_state = f"cookie={cookie_name} present, server-side session expired" \
                 if cookie_name else "no session cookie"
-            self._log(f"session expired (HTML response; {cookie_state}); "
+            self._log(f"session expired (HTML/redirect response; {cookie_state}); "
                       "re-authenticating")
             self.authenticate(force=True)
             if method_upper != "GET":
@@ -1392,7 +1402,7 @@ class OmadaClient:
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         safe_tool = self._safe_filename_part(tool_name, "write")
         safe_target = self._safe_filename_part(target, "target")
-        filename = f"{stamp}-{self._snapshot_seq:04d}-{safe_tool}-{safe_target}.json"
+        filename = f"{stamp}-{self._snapshot_seq:04d}-{uuid.uuid4().hex[:12]}-{safe_tool}-{safe_target}.json"
         path = directory / filename
         record = {
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -1401,8 +1411,10 @@ class OmadaClient:
             "account": self.config.username,
             "data": redact_secrets(payload),
         }
-        path.write_text(json.dumps(record, indent=2, ensure_ascii=False, default=str) + "\n",
-                        encoding="utf-8")
+        # Exclusive creation prevents a second process from replacing rollback state.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(record, indent=2, ensure_ascii=False, default=str) + "\n")
         if os.name != "nt":
             try:
                 os.chmod(path, 0o600)

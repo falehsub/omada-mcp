@@ -4,6 +4,43 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- Remove query strings from ambiguous write-disconnect errors so session tokens cannot
+  appear in tool responses or audit logs. Writes are still never replayed blindly.
+- Use explicit nested field allowlists for configuration snapshots, services, IP-group
+  entries, policy routes, and LAN DNS rules. Unknown controller fields are omitted.
+- Prevent the system-proxy transport from following redirects with authentication headers.
+- Create rollback snapshots exclusively with private POSIX permissions and unique names
+  across processes, preventing another session from overwriting recovery state.
+
+### Fixed
+
+- Recover once from HTTP redirect session expiry, verified against Docker Omada 6.2.14.11.
+- Apply Wi-Fi/wired client limits after filtering; stop repeated client pagination pages.
+- Reject invalid JSON-RPC versions, IDs, and parameter shapes before dispatch; do not
+  execute tool calls or reply to notifications without a request ID.
+- Bound complete and incomplete stdio frames before decoding, and recover on the next line.
+- Report malformed URL/port configuration cleanly and reject non-finite or invalid timing
+  values, including CLI polling intervals.
+- Include mock-controller fixtures, schemas, scripts, and Docker packaging files in sdists
+  so the source archive can run the complete test suite.
+
+### Added
+
+- `scripts/read_selftest.py`: an explicit-config, read-only live tool sweep with mutation
+  blocking, timings, request counts, and payload-free pass/fail/skip JSON reports.
+- A static correctness CI gate and a Docker build-context exclusion file.
+- A local review report and prioritized adoption/feature roadmap in
+  `docs/review-2026-11-14.md`.
+
+### Compatibility
+
+- The diagnostic exports above intentionally omit undocumented/raw fields. Supported
+  fields remain available; these exports are not full controller backups.
+
 ## [1.2.2] - 2026-11-13
 
 Patch release from a live write-mode session: two reporting/schema defects found by using the
