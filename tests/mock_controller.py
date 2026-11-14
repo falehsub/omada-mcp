@@ -1029,6 +1029,9 @@ class MockController:
             kind = m_logs.group(2)
             if "filters.timeStart" not in params or "filters.timeEnd" not in params:
                 return self._err(-1001 if kind == "alerts" else -1, "timeStart and timeEnd required.")
+            if params.get("filters.timeStart") == ["0"] and params.get("filters.timeEnd") == ["0"]:
+                # Real 6.2 controllers treat timeStart=0&timeEnd=0 as an empty window.
+                return self._ok(self._paginate_rows([], params))
             rows = self.logs_alerts if kind == "alerts" else self.logs_events
             return self._ok(self._paginate_rows(rows, params))
 

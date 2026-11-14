@@ -811,6 +811,38 @@ def _channel_info_by_band(channel_info_raw: Any) -> Dict[str, List[Dict[str, Any
     return out
 
 
+_RADIO_ID_TO_BAND: Dict[int, str] = {0: "2g", 1: "5g", 2: "5g2", 3: "6g"}
+
+
+def count_ap_clients_by_band(
+    ap_mac: str,
+    ap_name: str,
+    clients: Sequence[Mapping[str, Any]],
+) -> Dict[str, int]:
+    """Count active wireless clients connected to an AP, grouped by ``radioId`` band."""
+    counts: Dict[str, int] = {}
+    target_mac = normalize_mac(ap_mac)
+    target_name = ap_name.strip().lower()
+    for row in clients:
+        if not row.get("wireless"):
+            continue
+        row_ap_mac = normalize_mac(str(row.get("apMac") or ""))
+        row_ap_name = str(row.get("apName") or "").strip().lower()
+        if target_mac and row_ap_mac:
+            if row_ap_mac != target_mac:
+                continue
+        elif target_name and row_ap_name:
+            if row_ap_name != target_name:
+                continue
+        else:
+            continue
+        rid = as_int(row.get("radioId"), -1)
+        band = _RADIO_ID_TO_BAND.get(rid)
+        if band:
+            counts[band] = counts.get(band, 0) + 1
+    return counts
+
+
 def collect_ap_radios_data(
     client: OmadaClient,
     site: SiteInfo,
@@ -818,6 +850,7 @@ def collect_ap_radios_data(
     *,
     include_rf_scan: bool = True,
     include_available_channels: bool = True,
+    client_rows: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Fetch and normalize AP radio settings, RF utilization/retries, available channels, and RF scan."""
     warnings: List[str] = []
@@ -844,6 +877,13 @@ def collect_ap_radios_data(
         )
         if ok_rf and isinstance(rf_raw, Mapping):
             rf_scan_obj = deep_redact(dict(rf_raw))
+
+    ap_name = str(ap.get("name") or mac_norm)
+    band_counts = (
+        count_ap_clients_by_band(mac_norm, ap_name, client_rows)
+        if client_rows is not None
+        else None
+    )
 
     band_map = _extract_ap_band_map(ap)
     radios: List[Dict[str, Any]] = []
@@ -915,12 +955,13 @@ def collect_ap_radios_data(
             "rxDropPkts": as_int(rt.get("rxDropPkts"), 0),
             "txErrPkts": as_int(rt.get("txErrPkts"), 0),
             "rxErrPkts": as_int(rt.get("rxErrPkts"), 0),
+            "clientCount": band_counts.get(band, 0) if band_counts is not None else None,
             "availableChannels": avail_entries,
         })
 
     return {
         "mac": mac_norm,
-        "name": str(ap.get("name") or mac_norm),
+        "name": ap_name,
         "model": str(ap.get("showModel") or ap.get("model") or ""),
         "online": is_device_online(ap),
         "wlanGroupId": str(ap.get("wlanId") or ""),

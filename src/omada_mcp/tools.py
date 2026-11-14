@@ -185,6 +185,14 @@ def _as_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _as_num_or_none(value: Any) -> Optional[Any]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return _as_float(value)
+
+
 def project_client(client: Dict[str, Any]) -> Dict[str, Any]:
     """Client projection, including the fields an admin actually asks for."""
     wireless = bool(client.get("wireless"))
@@ -205,6 +213,15 @@ def project_client(client: Dict[str, Any]) -> Dict[str, Any]:
         "duration": _as_int(client.get("duration"), 0),
         "lastSeen": _iso(client.get("lastSeen")),
         "signal": _pick(client, "signalLevel", "rssi", default=None),
+        "rssi": _as_num_or_none(client.get("rssi")),
+        "signalLevel": _as_num_or_none(client.get("signalLevel")),
+        "snr": _as_num_or_none(client.get("snr")),
+        "txRate": as_int_or_none(client.get("txRate")),
+        "rxRate": as_int_or_none(client.get("rxRate")),
+        "uptime": as_int_or_none(client.get("uptime")),
+        "connectType": str(client.get("connectType") or ""),
+        "radioId": as_int_or_none(client.get("radioId")),
+        "channel": as_int_or_none(client.get("channel")),
     }
 
 
@@ -685,6 +702,15 @@ _CLIENT_SCHEMA: Dict[str, Any] = {
         "duration": {"type": "integer"},
         "lastSeen": {"type": "string"},
         "signal": {"type": ["integer", "number", "null"]},
+        "rssi": {"type": ["integer", "number", "null"]},
+        "signalLevel": {"type": ["integer", "number", "null"]},
+        "snr": {"type": ["integer", "number", "null"]},
+        "txRate": {"type": ["integer", "null"]},
+        "rxRate": {"type": ["integer", "null"]},
+        "uptime": {"type": ["integer", "null"]},
+        "connectType": {"type": "string"},
+        "radioId": {"type": ["integer", "null"]},
+        "channel": {"type": ["integer", "null"]},
     },
     "required": [
         "mac", "name", "hostName", "ip", "wireless", "guest", "active",
@@ -1313,6 +1339,7 @@ _AP_RADIOS_SCHEMA: Dict[str, Any] = {
                     "interferencePct": {"type": ["number", "null"]},
                     "txRetryRatePct": {"type": ["number", "null"]},
                     "rxRetryRatePct": {"type": ["number", "null"]},
+                    "clientCount": {"type": ["integer", "null"]},
                     "availableChannels": {"type": "array", "items": {"type": "object"}},
                 },
                 "required": ["band", "enabled", "channel", "channelWidth"],
@@ -2148,15 +2175,15 @@ def _list_logs(
         raise OmadaError("hours must be a non-negative integer")
     cap = max(1, min(1000, int(limit or 100)))
     now_ms = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
-    start_ms = 0 if hours == 0 else max(0, now_ms - hours * 3600 * 1000)
+    # Omada 6.2 treats timeStart=0&timeEnd=0 as an empty range and rejects
+    # missing timeStart/timeEnd with -1001/-1; timeStart=1 queries all history.
+    start_ms = 1 if hours == 0 else max(1, now_ms - hours * 3600 * 1000)
 
     if cat in ("alerts", "events"):
-        time_query = (
-            "filters.timeStart=0&filters.timeEnd=0"
-            if hours == 0
-            else f"filters.timeStart={start_ms}&filters.timeEnd={now_ms}"
+        endpoint = (
+            f"sites/{site.site_id}/logs/{cat}"
+            f"?filters.timeStart={start_ms}&filters.timeEnd={now_ms}"
         )
-        endpoint = f"sites/{site.site_id}/logs/{cat}?{time_query}"
     else:
         endpoint = f"sites/{site.site_id}/audit/logs"
 
@@ -2397,13 +2424,28 @@ def _get_ap_radios(
     includeRfScan: bool = True,
     includeAvailableChannels: bool = True,
 ) -> Dict[str, Any]:
-    site = _site(client)
-    ap = resolve_raw_device(client, site, mac, expected_type="ap")
-    return collect_ap_radios_data(
-        client, site, ap,
-        include_rf_scan=bool(includeRfScan),
-        include_available_channels=bool(includeAvailableChannels),
-    )
+    with client.scoped_cache():
+        site = _site(client)
+        ap = resolve_raw_device(client, site, mac, expected_type="ap")
+        client_rows: Optional[List[Dict[str, Any]]] = None
+        try:
+            rows = _fetch_client_rows(client, site)
+            wireless_rows = [r for r in rows if r.get("wireless")]
+            # Viewer insight/clients on 6.2.10.x strips AP identity and radioId;
+            # keep clientCount as None rather than misleading 0 when blind.
+            if not wireless_rows or any(
+                r.get("radioId") is not None and (r.get("apMac") or r.get("apName"))
+                for r in wireless_rows
+            ):
+                client_rows = rows
+        except OmadaError:
+            client_rows = None
+        return collect_ap_radios_data(
+            client, site, ap,
+            include_rf_scan=bool(includeRfScan),
+            include_available_channels=bool(includeAvailableChannels),
+            client_rows=client_rows,
+        )
 
 
 def _get_rf_scan(client: OmadaClient, mac: str) -> Dict[str, Any]:
@@ -3305,7 +3347,7 @@ TOOLS: Tuple[Tool, ...] = (
                 },
                 "includeCableTest": {
                     "type": "boolean", "default": True,
-                    "description": "Include cached cable-test results if supported by the switch (default true)",
+                    "description": "Include cached cable-test results if supported and previously triggered on the switch (default true)",
                 },
                 "includeDownPorts": {
                     "type": "boolean", "default": True,
@@ -3343,7 +3385,7 @@ TOOLS: Tuple[Tool, ...] = (
     Tool(
         name="get_rf_scan",
         title="Get AP RF scan results",
-        description="Read the latest RF scan status/results and per-radio interference metrics for an AP.",
+        description="Read the latest cached RF scan status/neighbor results (empty channels list if no scan was triggered) and per-radio utilization for an AP.",
         input_schema={
             "type": "object",
             "properties": {

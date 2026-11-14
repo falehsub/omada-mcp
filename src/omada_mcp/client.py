@@ -144,6 +144,10 @@ _PRIVILEGE_LABELS = {0: "viewer", 1: "admin", 2: "owner"}
 #: down"; a single paced retry disambiguates the two in practice.
 _MAX_BURST_RETRIES = 1
 
+#: TTL for session-scoped negative caching when an uncached GET hits ``-1600``
+#: even after the burst-backoff retry (e.g., unsupported firmware endpoints).
+_NEGATIVE_CACHE_TTL_SECONDS = 300.0
+
 ERROR_CATALOG: Dict[int, Dict[str, Any]] = {
     0: {
         "title": "Success",
@@ -931,6 +935,7 @@ class OmadaClient:
         self._cache: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None
         self._cache_depth: int = 0
         self._cache_bypass_depth: int = 0
+        self._negative_cache: Dict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = {}
         self.token: Optional[str] = None
         self.controller_id: Optional[str] = None
         self.site: Optional[SiteInfo] = None
@@ -1222,14 +1227,22 @@ class OmadaClient:
             and _burst == 0
         ):
             with self._lock:
-                if self._cache is not None and self._cache_bypass_depth == 0:
-                    cached = self._cache.get(cache_key)
-                    if cached is not None:
-                        return copy.deepcopy(cached)
+                if self._cache_bypass_depth == 0:
+                    if self._cache is not None:
+                        cached = self._cache.get(cache_key)
+                        if cached is not None:
+                            return copy.deepcopy(cached)
+                    neg = self._negative_cache.get(cache_key)
+                    if neg is not None:
+                        cached_at, neg_payload = neg
+                        if (self._clock() - cached_at) < _NEGATIVE_CACHE_TTL_SECONDS:
+                            return copy.deepcopy(neg_payload)
+                        del self._negative_cache[cache_key]
         elif method_upper != "GET":
             with self._lock:
                 if self._cache is not None:
                     self._cache.clear()
+                self._negative_cache.clear()
 
         separator = "&" if "?" in endpoint else "?"
         url = (f"{self.config.base_url}/{self.controller_id}/api/v2/"
@@ -1308,10 +1321,18 @@ class OmadaClient:
                             _burst=_burst + 1)
 
         payload["_httpStatus"] = status
-        if use_cache and method_upper == "GET" and data is None and code in (0, None):
+        if use_cache and method_upper == "GET" and data is None:
             with self._lock:
-                if self._cache is not None and self._cache_bypass_depth == 0:
-                    self._cache[cache_key] = copy.deepcopy(payload)
+                if self._cache_bypass_depth == 0:
+                    if code in (0, None):
+                        self._negative_cache.pop(cache_key, None)
+                        if self._cache is not None:
+                            self._cache[cache_key] = copy.deepcopy(payload)
+                    elif code == -1600 and _burst >= _MAX_BURST_RETRIES:
+                        self._negative_cache[cache_key] = (
+                            self._clock(),
+                            copy.deepcopy(payload),
+                        )
         return payload
 
     def api_result(self, endpoint: str, method: str = "GET",

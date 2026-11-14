@@ -2389,6 +2389,161 @@ class OptimizationTests(unittest.TestCase):
             _parse_ssid_security("wep-broken", None)
         self.assertIn("unsupported SSID security", str(ctx.exception))
 
+    def test_logs_hours_zero_uses_time_start_one(self):
+        from mock_controller import MockController
+
+        ctrl = MockController(username="admin", password="pw", role="Administrator")
+        cfg = make_config(username="admin", read_only=True, min_interval=0.0)
+        client = OmadaClient(cfg, transport=ctrl, sleep=lambda _s: None, clock=lambda: 0.0, log_fn=lambda _m: None)
+        client.authenticate()
+        srv = Server(cfg, client=client)
+
+        for cat in ("alerts", "events"):
+            ctrl.requests.clear()
+            res = srv.handle({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "list_logs", "arguments": {"category": cat, "hours": 0}},
+            })["result"]["structuredContent"]
+            self.assertGreaterEqual(res["count"], 1, cat)
+            log_req = next(r for r in ctrl.requests if f"logs/{cat}" in r["path"])
+            self.assertIn("filters.timeStart=1&", log_req["query"])
+            self.assertNotIn("filters.timeStart=0&", log_req["query"])
+
+        # Verify MockController reproduces Omada 6.2 behavior when timeStart=0&timeEnd=0 is sent.
+        raw_zero = client.api_result(
+            f"sites/{client.site.site_id}/logs/events?filters.timeStart=0&filters.timeEnd=0"
+        )
+        self.assertEqual(raw_zero["totalRows"], 0)
+        self.assertEqual(raw_zero["data"], [])
+
+    def test_double_1600_negative_cache_ttl_and_bypass(self):
+        from mock_controller import MockController
+
+        ctrl = MockController(username="admin", password="pw", role="Administrator")
+        now = [100.0]
+        sleeps = []
+        cfg = make_config(username="admin", read_only=True, min_interval=0.0)
+        client = OmadaClient(
+            cfg,
+            transport=ctrl,
+            sleep=lambda s: (sleeps.append(s), now.__setitem__(0, now[0] + s)),
+            clock=lambda: now[0],
+            log_fn=lambda _m: None,
+        )
+        client.authenticate()
+        ctrl.requests.clear()
+        sleeps.clear()
+
+        ep = f"sites/{client.site.site_id}/cmd/getSpeedTestResult"
+        first = client.api(ep)
+        self.assertEqual(first["errorCode"], -1600)
+        self.assertEqual(len(ctrl.requests), 2)  # initial + 1 burst retry
+        self.assertEqual(sleeps, [BURST_BACKOFF_SECONDS])
+
+        # Within TTL (<300s), repeated probes hit the negative cache without HTTP or sleep.
+        ctrl.requests.clear()
+        sleeps.clear()
+        second = client.api(ep)
+        self.assertEqual(second["errorCode"], -1600)
+        self.assertEqual(len(ctrl.requests), 0)
+        self.assertEqual(sleeps, [])
+
+        # Explicit uncached read and write-verification bypass ignore the negative cache.
+        uncached = client.api(ep, use_cache=False)
+        self.assertEqual(uncached["errorCode"], -1600)
+        self.assertEqual(len(ctrl.requests), 2)
+
+        ctrl.requests.clear()
+        client._cache_bypass_depth += 1
+        try:
+            bypassed = client.api(ep)
+        finally:
+            client._cache_bypass_depth -= 1
+        self.assertEqual(bypassed["errorCode"], -1600)
+        self.assertEqual(len(ctrl.requests), 2)
+
+        # Past TTL (>=300s), negative cache expires and re-probes.
+        now[0] += 301.0
+        ctrl.requests.clear()
+        sleeps.clear()
+        expired = client.api(ep)
+        self.assertEqual(expired["errorCode"], -1600)
+        self.assertEqual(len(ctrl.requests), 2)
+
+        # Any mutation invalidates the negative cache immediately.
+        ctrl.requests.clear()
+        client._negative_cache[(client.controller_id or "", ep)] = (now[0], {"errorCode": -1600})
+        client.api(f"sites/{client.site.site_id}/setting/upnp", method="PATCH", data={"enable": False})
+        self.assertNotIn((client.controller_id or "", ep), client._negative_cache)
+
+    def test_ap_radios_per_band_client_count_and_viewer_honesty(self):
+        from mock_controller import MockController
+
+        ctrl = MockController(username="admin", password="pw", role="Administrator")
+        ctrl.clients["AA-BB-CC-11-11-02"].update({
+            "wireless": True, "apMac": "AA-BB-CC-00-00-03", "apName": "ap-living", "radioId": 1,
+        })
+        ctrl.clients["AA-BB-CC-11-11-03"] = {
+            "mac": "AA-BB-CC-11-11-03", "name": "iot-plug", "hostName": "iot-plug",
+            "ip": "192.168.20.99", "wireless": True, "active": True, "ssid": "LabWiFi",
+            "apMac": "AA-BB-CC-00-00-03", "apName": "ap-living", "radioId": 0,
+            "networkName": "IoT", "vid": 20, "signalLevel": 75, "rssi": -60,
+        }
+        cfg = make_config(username="admin", read_only=True, min_interval=0.0)
+        client = OmadaClient(cfg, transport=ctrl, sleep=lambda _s: None, clock=lambda: 0.0, log_fn=lambda _m: None)
+        client.authenticate()
+        srv = Server(cfg, client=client)
+
+        res = srv.handle({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "get_ap_radios", "arguments": {"mac": "AA-BB-CC-00-00-03"}},
+        })["result"]["structuredContent"]
+        by_band = {r["band"]: r for r in res["radios"]}
+        self.assertEqual(by_band["2g"]["clientCount"], 1)
+        self.assertEqual(by_band["5g"]["clientCount"], 1)
+
+        # Viewer fallback: insight/clients on 6.2.10.x strips radioId/apName; return None honestly.
+        ctrl_v = MockController(username="viewer", password="pw", role="Viewer")
+        ctrl_v.clients["AA-BB-CC-11-11-02"].update({"wireless": True})
+        cfg_v = make_config(username="viewer", read_only=True, min_interval=0.0)
+        client_v = OmadaClient(cfg_v, transport=ctrl_v, sleep=lambda _s: None, clock=lambda: 0.0, log_fn=lambda _m: None)
+        client_v.authenticate()
+        srv_v = Server(cfg_v, client=client_v)
+        res_v = srv_v.handle({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "get_ap_radios", "arguments": {"mac": "AA-BB-CC-00-00-03"}},
+        })["result"]["structuredContent"]
+        for r in res_v["radios"]:
+            self.assertIsNone(r["clientCount"])
+
+    def test_client_projection_preserves_extended_telemetry(self):
+        from mock_controller import MockController
+
+        ctrl = MockController(username="admin", password="pw", role="Administrator")
+        ctrl.clients["AA-BB-CC-11-11-02"].update({
+            "wireless": True, "rssi": -62, "signalLevel": 68, "snr": 31,
+            "txRate": 866700, "rxRate": 780000, "uptime": 3600,
+            "connectType": "wifi5", "radioId": 1, "channel": 100,
+        })
+        cfg = make_config(username="admin", read_only=True, min_interval=0.0)
+        client = OmadaClient(cfg, transport=ctrl, sleep=lambda _s: None, clock=lambda: 0.0, log_fn=lambda _m: None)
+        client.authenticate()
+        srv = Server(cfg, client=client)
+
+        got = srv.handle({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "get_client", "arguments": {"mac": "AA-BB-CC-11-11-02"}},
+        })["result"]["structuredContent"]
+        self.assertEqual(got["rssi"], -62)
+        self.assertEqual(got["signalLevel"], 68)
+        self.assertEqual(got["snr"], 31)
+        self.assertEqual(got["txRate"], 866700)
+        self.assertEqual(got["rxRate"], 780000)
+        self.assertEqual(got["uptime"], 3600)
+        self.assertEqual(got["connectType"], "wifi5")
+        self.assertEqual(got["radioId"], 1)
+        self.assertEqual(got["channel"], 100)
+
 
 if __name__ == "__main__":
     unittest.main()
