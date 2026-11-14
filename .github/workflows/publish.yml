@@ -63,14 +63,22 @@ jobs:
           python -m pip install --upgrade pip build twine
           python -m build
           python -m twine check dist/*
-          (cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS.txt)
-          cat dist/SHA256SUMS.txt
+          (cd dist && sha256sum *.whl *.tar.gz > ../SHA256SUMS.txt)
+          cat SHA256SUMS.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-dists
-          path: dist/*
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-checksums
+          path: SHA256SUMS.txt
 
   pypi-publish:
     name: Publish package to PyPI
@@ -109,6 +117,12 @@ jobs:
           name: release-dists
           path: dist/
 
+      - name: Download checksum artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-checksums
+          path: .
+
       - name: Attest Python distribution provenance
         uses: actions/attest-build-provenance@v2
         with:
@@ -120,7 +134,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" dist/SHA256SUMS.txt --clobber
+          gh release upload "${{ github.event.release.tag_name }}" SHA256SUMS.txt --clobber
 
   docker-publish:
     name: Publish multi-arch container to GHCR
