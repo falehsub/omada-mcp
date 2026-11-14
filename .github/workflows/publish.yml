@@ -1,4 +1,4 @@
-name: Publish to PyPI
+name: Publish to PyPI & GHCR
 
 on:
   release:
@@ -6,10 +6,15 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Optional git tag to build and publish (e.g. v1.2.2; defaults to current ref)"
+        description: "Optional git tag to build and publish (e.g. v2.0.0; defaults to current ref)"
         required: false
         default: ""
         type: string
+      publish_container:
+        description: "Also build & push multi-arch container image to GHCR"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -28,33 +33,38 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run syntax gate and unit tests
+      - name: Run syntax gate, zero-drift doc check, and unit tests
         run: |
           python -m compileall -q src tests scripts
+          python scripts/generate_docs.py --check
           python -m unittest discover -s tests -v
 
-      - name: Verify tag matches package version (when publishing a tag)
+      - name: Verify tag matches package and server.json versions
         env:
           INPUT_TAG: ${{ inputs.tag }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
           python - <<'PY'
-          import os, re, tomllib
+          import json, os, re, tomllib
           tag = os.environ.get("INPUT_TAG") or os.environ.get("RELEASE_TAG") or os.environ.get("GITHUB_REF_NAME", "")
           with open("pyproject.toml", "rb") as fh:
               version = tomllib.load(fh)["project"]["version"]
+          srv_version = json.loads(open("server.json", encoding="utf-8").read())["version"]
+          assert srv_version == version, f"server.json {srv_version!r} != pyproject.toml {version!r}"
           if re.fullmatch(r"v\d+\.\d+\.\d+.*", tag):
               expected = f"v{version}"
               assert tag == expected, f"tag {tag!r} does not match pyproject.toml version {expected!r}"
           print(f"Verified version {version!r} for ref {tag!r}")
           PY
 
-      - name: Build sdist + wheel and validate metadata
+      - name: Build sdist + wheel, validate metadata, and compute SHA256SUMS
         run: |
           python -m pip install --upgrade pip build twine
           python -m build
           python -m twine check dist/*
+          (cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -80,3 +90,90 @@ jobs:
 
       - name: Publish to PyPI via Trusted Publishing (OIDC)
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: false
+
+  attest-and-upload-checksums:
+    name: Attest build provenance & attach checksums
+    needs: pypi-publish
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+
+      - name: Attest Python distribution provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      - name: Upload SHA256SUMS.txt to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" dist/SHA256SUMS.txt --clobber
+
+  docker-publish:
+    name: Publish multi-arch container to GHCR
+    needs: build
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish_container)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '') && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/omada-mcp
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+
+      - name: Build and push linux/amd64,linux/arm64 image
+        id: build-push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Attest container image provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/omada-mcp
+          subject-digest: ${{ steps.build-push.outputs.digest }}
+          push-to-registry: true

@@ -1,3 +1,5 @@
+<!-- mcp-name: io.github.falehsub/omada-mcp -->
+
 # omada-mcp
 
 **A Model Context Protocol server for TP-Link Omada SDN controllers — zero dependencies, read-only by default, and honest about every failure.**
@@ -275,6 +277,8 @@ is bounded by `limit` (default 500, max 5000) and de-duplicated by MAC.
 
 ### Read-only tools (always available)
 
+Full generated parameter & safety reference across all 82 tools: [`docs/tools-reference.md`](docs/tools-reference.md).
+
 | Tool | Arguments | Returns |
 |---|---|---|
 | `list_sites` | — | Sites visible to the account (`id`, `name`, connectivity flags, default indicator) |
@@ -518,8 +522,12 @@ src/omada_mcp/server.py         JSON-RPC stdio server, fail-closed gates, strict
 src/omada_mcp/doctor.py         6-phase self-test (env, tls, login, site, tools, write) with --json
 Dockerfile                      minimal non-root container (stdio default, --watch, --export-metrics)
 schemas/doctor.schema.json      JSON Schema for --doctor --json
+docs/tools-reference.md          auto-generated 82-tool parameter & safety reference
 docs/compatibility.md           controller family and cookie compatibility matrix
 docs/write-support.md           write-support contract, verified endpoints, and controller traps
+server.json                     MCP Registry manifest (PyPI + GHCR OCI metadata)
+SECURITY.md                     vulnerability disclosure policy & credential safety model
+CONTRIBUTING.md                 contributor setup, mock/Docker lab rules & zero-drift checks
 tests/mock_controller.py        stateful Web API v2 mock controller with fault injection
 tests/fake_controller.py        lightweight FakeController & offline unit fixtures
 tests/test_*.py                 domain-split read, protocol, monitor, write & regression tests
@@ -533,14 +541,18 @@ endpoints that are Admin-only.
 
 ### Contributing & releasing
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md) for local setup, mock/Docker lab testing rules, and vulnerability reporting.
+
 * **Pull requests only**: Develop changes on a branch and open a Pull Request targeting
   `main` rather than pushing directly to `main`. Every PR runs the CI matrix across
-  Ubuntu and Windows (Python `3.10`–`3.14`) via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-* **PyPI publishing (Trusted Publishing / OIDC)**: Releases publish to PyPI via
+  Ubuntu, Windows, and macOS (Python `3.10`–`3.14`), zero-drift doc checks
+  (`python scripts/generate_docs.py --check`), and Docker container smoke tests via
+  [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+* **PyPI, GHCR & Attestations**: Releases publish to PyPI via
   [`.github/workflows/publish.yml`](.github/workflows/publish.yml) using GitHub
-  Actions OIDC tokens (bound to the `pypi` GitHub Environment) on published GitHub
-  Releases or manual `workflow_dispatch` runs for a release tag, without stored PyPI
-  API tokens.
+  Actions OIDC Trusted Publishing (`pypi` environment, no stored tokens), push
+  multi-arch (`linux/amd64`, `linux/arm64`) containers to `ghcr.io/falehsub/omada-mcp`,
+  and attach SLSA build provenance attestations plus `SHA256SUMS.txt`.
 
 ## Write support
 
@@ -557,10 +569,10 @@ eviction. Firmware upgrades remain unshipped pending a maintenance-window policy
 Read-only inspection, composite diagnostics (`get_switch_ports`, `get_ap_radios`,
 `get_wan_status`, `get_topology`, `diagnose_client`, `diagnose_wan`), `--doctor --json`,
 `network_audit`, the 82-tool control surface (`rollback_from_snapshot` + anti-stranding
-switch/AP/routing/DNS/ACL/client controls), `--watch`/`--export-metrics`, and non-root
-Docker packaging are implemented on `main`. Next items in [ROADMAP.md](ROADMAP.md)
-include MCP Registry `server.json`, automated controller compatibility checks,
-multi-site workflows and configuration drift reports. PyPI installation is available.
+switch/AP/routing/DNS/ACL/client controls), multi-site workflows (`list_sites` + per-call
+`site`), `diff_config_snapshots`, `--watch`/`--export-metrics`, non-root multi-arch Docker
+packaging, and MCP Registry metadata ([`server.json`](server.json)) are implemented. See
+[ROADMAP.md](ROADMAP.md) for historical milestones and future ideas. PyPI installation is available.
 
 ## License
 
