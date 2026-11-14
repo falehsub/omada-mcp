@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from typing import List, Optional
@@ -151,8 +152,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.watch and args.export_metrics:
         print("omada-mcp: --watch and --export-metrics are mutually exclusive", file=sys.stderr)
         return 2
-    if args.interval <= 0:
-        print("omada-mcp: --interval must be positive", file=sys.stderr)
+    if not math.isfinite(args.interval) or args.interval <= 0:
+        print("omada-mcp: --interval must be finite and positive", file=sys.stderr)
         return 2
     if args.iterations < 0:
         print("omada-mcp: --iterations must be >= 0", file=sys.stderr)

@@ -20,13 +20,11 @@ not declared read-only, gates writes behind ``OMADA_WRITE_TOOLS`` plus
 from __future__ import annotations
 
 import datetime
-import ipaddress
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ._helpers import (
-    ACL_TYPE_LABELS,
     ACL_TYPE_MAP,
     PROFILE_TYPE_LABELS,
     as_float as _as_float,
@@ -44,8 +42,8 @@ from ._helpers import (
     resolve_raw_device,
     try_api_result,
     try_paginate,
-    unwrap_rows,
 )
+from ._projections import project_controller_row
 from .client import OmadaClient, OmadaError, SiteInfo, explain_error_code, redact_secrets
 from .config import Config
 from .write_tools import (
@@ -288,6 +286,7 @@ def _paginate_client_rows(client: OmadaClient, site: Any, endpoint: str) -> List
     """Page a single client endpoint, deduping by normalised MAC."""
     collected: List[Dict[str, Any]] = []
     seen = set()
+    previous_rows = None
     separator = "&" if "?" in endpoint else "?"
     for page in range(1, _MAX_CLIENT_PAGES + 1):
         payload = client.api(
@@ -303,8 +302,9 @@ def _paginate_client_rows(client: OmadaClient, site: Any, endpoint: str) -> List
             )
         result = payload.get("result") or {}
         rows = result.get("data") or []
-        if not rows:
+        if not rows or rows == previous_rows:
             break
+        previous_rows = rows
         for row in rows:
             mac = normalize_mac(row.get("mac", ""))
             if mac and mac in seen:
@@ -314,6 +314,8 @@ def _paginate_client_rows(client: OmadaClient, site: Any, endpoint: str) -> List
             collected.append(row)
         total = int(result.get("totalRows") or 0)
         if total and len(collected) >= total:
+            break
+        if not total and len(rows) < 100:
             break
     return collected
 
@@ -361,11 +363,11 @@ def _list_clients(client: OmadaClient, limit: int = 500) -> List[Dict[str, Any]]
 
 
 def _list_wifi_clients(client: OmadaClient, limit: int = 500) -> List[Dict[str, Any]]:
-    return [c for c in _list_clients(client, limit=limit) if c.get("wireless")]
+    return [c for c in _list_clients(client, limit=0) if c.get("wireless")][:limit or None]
 
 
 def _list_wired_clients(client: OmadaClient, limit: int = 500) -> List[Dict[str, Any]]:
-    return [c for c in _list_clients(client, limit=limit) if not c.get("wireless")]
+    return [c for c in _list_clients(client, limit=0) if not c.get("wireless")][:limit or None]
 
 
 def _get_device(client: OmadaClient, mac: str) -> Dict[str, Any]:
@@ -1979,7 +1981,7 @@ def _list_ip_groups(
             "type": gtype,
             "typeLabel": _GROUP_TYPE_LABELS.get(gtype, "unknown") if gtype is not None else "unknown",
             "entryCount": len(ip_list),
-            "ipList": ip_list,
+            "ipList": project_controller_row("groups", {"ipList": ip_list})["ipList"],
             "referencedByAcls": unique_refs,
         })
     return projected
@@ -2033,18 +2035,18 @@ def _get_network_services(client: OmadaClient) -> Dict[str, Any]:
     ddns_raw = _optional("ddns", lambda: client.api_result(f"sites/{site.site_id}/setting/service/ddns"))
     wan_raw = _optional("wan", lambda: _fetch_wan_networks(client, site))
 
-    rules_list = [redact_secrets(r) for r in (mdns_rules or [])]
-    profiles_list = [redact_secrets(p) for p in (mdns_profiles or [])]
+    rules_list = [project_controller_row("mdnsRules", r) for r in (mdns_rules or [])]
+    profiles_list = [project_controller_row("mdnsProfiles", p) for p in (mdns_profiles or [])]
     return {
-        "upnp": redact_secrets(upnp_raw) if isinstance(upnp_raw, dict) else None,
-        "dnsProxy": redact_secrets(dns_proxy_raw) if isinstance(dns_proxy_raw, dict) else None,
+        "upnp": project_controller_row("upnp", upnp_raw) if isinstance(upnp_raw, dict) else None,
+        "dnsProxy": project_controller_row("dnsProxy", dns_proxy_raw) if isinstance(dns_proxy_raw, dict) else None,
         "mdns": {
             "ruleCount": len(rules_list),
             "rules": rules_list,
             "profileCount": len(profiles_list),
             "profiles": profiles_list,
         },
-        "ddns": redact_secrets(ddns_raw) if isinstance(ddns_raw, dict) else None,
+        "ddns": project_controller_row("ddns", ddns_raw) if isinstance(ddns_raw, dict) else None,
         "wan": _sanitize_wan_summary(wan_raw) if isinstance(wan_raw, dict) else None,
         "warnings": warnings,
     }
@@ -2252,7 +2254,7 @@ def _get_config_snapshot_impl(
     }
 
     if "networks" in selected:
-        snapshot["networks"] = _merge_lan_networks(client, site)
+        snapshot["networks"] = [project_controller_row("networks", row) for row in _merge_lan_networks(client, site)]
 
     if "acls" in selected:
         acl_disable, rules = _fetch_acls(client, site)
@@ -2262,11 +2264,11 @@ def _get_config_snapshot_impl(
             "aclDisableReliable": False,
             "warning": _ACL_DISPATCH_NOTES,
             "count": len(rules),
-            "rules": rules,
+            "rules": [project_controller_row("acls", rule) for rule in rules],
         }
 
     if "groups" in selected:
-        groups = _fetch_groups(client, site)
+        groups = [project_controller_row("groups", group) for group in _fetch_groups(client, site)]
         ip_groups = [g for g in groups if _parse_group_type(g) == 0]
         other_groups = [g for g in groups if _parse_group_type(g) != 0]
         snapshot["groups"] = {
@@ -2295,7 +2297,7 @@ def _get_config_snapshot_impl(
         snapshot["staticRoutes"] = _list_static_routes(client)
 
     if "mdnsRules" in selected:
-        snapshot["mdnsRules"] = [redact_secrets(r) for r in _fetch_mdns_rules(client, site)]
+        snapshot["mdnsRules"] = [project_controller_row("mdnsRules", r) for r in _fetch_mdns_rules(client, site)]
 
     if "services" in selected:
         snapshot["services"] = _get_network_services(client)
@@ -2945,7 +2947,7 @@ def _list_policy_routes(client: OmadaClient) -> Dict[str, Any]:
         client, f"sites/{site.site_id}/setting/transmission/policyRoutings",
         warnings, label="policy routes",
     )
-    cleaned = [deep_redact(r) for r in rows] if ok else []
+    cleaned = [project_controller_row("policyRoutes", r) for r in rows] if ok else []
     return {
         "items": cleaned,
         "count": len(cleaned),
@@ -2961,7 +2963,7 @@ def _list_lan_dns_rules(client: OmadaClient) -> Dict[str, Any]:
         client, f"sites/{site.site_id}/setting/lan/dns",
         warnings, label="LAN DNS rules",
     )
-    cleaned = [deep_redact(r) for r in rows] if ok else []
+    cleaned = [project_controller_row("lanDnsRules", r) for r in rows] if ok else []
     return {
         "items": cleaned,
         "count": len(cleaned),
