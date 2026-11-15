@@ -385,7 +385,7 @@ class V11FeatureTests(unittest.TestCase):
              "statusCategory": 1},
         ]
         fake = FakeController(devices=devices_with_switch)
-        cfg = make_config()
+        cfg = make_config(allow_cross_site=True)
         client = OmadaClient(cfg, transport=fake, sleep=lambda _s: None,
                              clock=lambda: 0.0, log_fn=lambda _m: None)
         server = Server(client.config, client=client)
@@ -453,6 +453,13 @@ class V11FeatureTests(unittest.TestCase):
             ("list_switch_lags", {"mac": "AA-BB-CC-00-00-03"}),
             ("get_switch_global_features", {"mac": "AA-BB-CC-00-00-03"}),
             ("list_poe_schedules", {}),
+            ("get_wan_ip_details", {}),
+            ("get_ipv6_status", {}),
+            ("list_traffic_rules", {}),
+            ("list_qos_rules", {}),
+            ("list_backups", {}),
+            ("list_hotspot_vouchers", {}),
+            ("audit_all_sites", {}),
         ]
         self.assertEqual({name for name, _ in calls}, set(descriptors))
         for name, args in calls:

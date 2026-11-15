@@ -50,6 +50,22 @@ from .diagnostics_read import (
     _get_controller_status,
     _list_logs,
 )
+from .fleet_vpn_read import (
+    _BACKUPS_SCHEMA,
+    _FLEET_AUDIT_SCHEMA,
+    _HOTSPOT_VOUCHERS_SCHEMA,
+    _IPV6_STATUS_SCHEMA,
+    _QOS_RULES_SCHEMA,
+    _TRAFFIC_RULES_SCHEMA,
+    _WAN_IP_DETAILS_SCHEMA,
+    _audit_all_sites,
+    _get_ipv6_status,
+    _get_wan_ip_details,
+    _list_backups,
+    _list_hotspot_vouchers,
+    _list_qos_rules,
+    _list_traffic_rules,
+)
 from .networks_read import (
     _DHCP_RES_SCHEMA,
     _LAN_NETWORK_SCHEMA,
@@ -810,5 +826,109 @@ READ_TOOLS: list[Tool] = [
         input_schema=_EMPTY,
         output_schema=_list_output_schema(_POE_SCHEDULE_SCHEMA),
         handler=_list_poe_schedules,
+    ),
+    Tool(
+        name="get_wan_ip_details",
+        title="Get WAN IPv4/IPv6 & DDNS details",
+        description=(
+            "Read per-WAN IPv4 and IPv6 configuration, DNS resolvers, WAN port config, and redacted DDNS bindings "
+            "(passwords and keys never returned)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "maskWanIp": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Mask host octets of public WAN IP addresses (default true)",
+                },
+            },
+        },
+        output_schema=_WAN_IP_DETAILS_SCHEMA,
+        handler=_get_wan_ip_details,
+    ),
+    Tool(
+        name="get_ipv6_status",
+        title="Get site IPv6 status",
+        description=(
+            "Summarize IPv6 configuration across WAN ports (SLAAC/DHCPv6/PPPoEv6/PD) and LAN/VLAN interfaces."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "maskWanIp": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Mask WAN IPv6 address suffix",
+                },
+            },
+        },
+        output_schema=_IPV6_STATUS_SCHEMA,
+        handler=_get_ipv6_status,
+    ),
+    Tool(
+        name="list_traffic_rules",
+        title="List URL filtering, bandwidth & session rules",
+        description=(
+            "Aggregate gateway and AP URL filtering rules, transmission bandwidth controls, session limits, "
+            "and gateway ACL rule count."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_TRAFFIC_RULES_SCHEMA,
+        handler=_list_traffic_rules,
+    ),
+    Tool(
+        name="list_qos_rules",
+        title="List gateway & switch QoS rules",
+        description=(
+            "Read gateway QoS BWC, class rules, VoIP QoS, WAN rate limits, and switch QoS queue profiles."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_QOS_RULES_SCHEMA,
+        handler=_list_qos_rules,
+    ),
+    Tool(
+        name="list_backups",
+        title="List controller backups & schedule",
+        description=(
+            "Read controller auto-backup schedule, stored auto-backup files (Admin), and manual backup status "
+            "without exposing file-server credentials."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_BACKUPS_SCHEMA,
+        handler=_list_backups,
+        site_scoped=False,
+    ),
+    Tool(
+        name="list_hotspot_vouchers",
+        title="List hotspot voucher groups & codes",
+        description=(
+            "Read hotspot voucher groups and individual voucher statuses (category 'hotspot')."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "groupId": {"type": "string", "description": "Optional voucher group ID to inspect vouchers inside one group"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Max groups/vouchers to return"},
+            },
+        },
+        output_schema=_HOTSPOT_VOUCHERS_SCHEMA,
+        handler=_list_hotspot_vouchers,
+    ),
+    Tool(
+        name="audit_all_sites",
+        title="Audit all visible sites",
+        description=(
+            "Cross-site fleet health rollup across visible sites (strictly refused unless OMADA_ALLOW_CROSS_SITE=true)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "maxSites": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "Max sites to audit per call (default 20)"},
+            },
+        },
+        output_schema=_FLEET_AUDIT_SCHEMA,
+        handler=_audit_all_sites,
+        site_scoped=False,
     ),
 ]

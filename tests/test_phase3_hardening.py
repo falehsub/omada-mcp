@@ -297,6 +297,29 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                     "macAddressList": [{"name": "seed-cam", "macAddress": "AA-BB-CC-DD-EE-01"}],
                 },
             ])
+            ctrl.vpn_configs.append({"id": "vpn-seed-1", "name": "Seed-VPN", "status": True, "preSharedKey": secret_tokens[1]})
+            ctrl.wireguard_configs.append({
+                "id": "wg-seed-1", "name": "wg0", "status": True, "mtu": 1420,
+                "listenPort": 51820, "localIp": "10.66.0.1/24",
+                "privateKey": "K7s8fJ2kLmNoPqRsTuVwXyZ0123456789abcdef012=",
+            })
+            ctrl.wireguard_configs.append({
+                "id": "wg-seed-empty", "name": "wg1", "status": True, "mtu": 1420,
+                "listenPort": 51821, "localIp": "10.67.0.1/24",
+                "privateKey": "L7s8fJ2kLmNoPqRsTuVwXyZ0123456789abcdef012=",
+            })
+            ctrl.wireguard_peers.append({
+                "id": "wgp-seed-1", "name": "seed-peer", "status": True, "interfaceId": "wg-seed-1",
+                "publicKey": "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1=",
+                "allowAddress": ["10.66.0.2/32"], "keepAlive": 25,
+                "presharedKey": "B1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1=",
+            })
+            ctrl.ddns["data"] = [{
+                "id": "ddns-seed-1", "service": 0, "interfacePortId": "wan-port-1",
+                "username": "seed-user", "password": secret_tokens[2],
+                "domainName": "seed.example.org", "updateInterval": 12, "status": True,
+            }]
+            ctrl.ddns["totalRows"] = 1
 
             # Create one real reversible write so rollback_from_snapshot has a live snapshot target
             prep_dry = unwrap_ok(call_tool(server, "set_vlan_isolation", {"vlan": 20, "isolation": True}))
@@ -325,6 +348,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                     "destination": {"type": "network", "ids": ["net-mgmt-1"]},
                     "direction": {"lanToLan": True},
                 },
+                "create_hotspot_vouchers": {"name": "DayPass-Test", "amount": 5, "durationMinutes": 60},
                 "create_ip_group": {"name": "test-grp-new", "cidrs": ["10.99.0.0/24"]},
                 "create_lan_network": {
                     "name": "Sandbox",
@@ -340,6 +364,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                     "destination": {"type": "network", "ids": ["net-mgmt-1"]},
                 },
                 "cycle_poe_port": {"deviceMac": "AA-BB-CC-00-00-02", "port": 3},
+                "delete_ddns": {"ddns": "ddns-seed-1"},
                 "delete_dhcp_reservation": {"mac": "AA-BB-CC-11-22-99"},
                 "delete_gateway_acl": {"rule": "acl-001", "aclType": "gateway"},
                 "delete_ip_group": {"group": "grp-printers-02"},
@@ -357,10 +382,14 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "delete_ssid": {"ssid": "Lab-Guest", "wlanGroup": "Default"},
                 "delete_static_route": {"rule": "sr-seed-1"},
                 "delete_switch_lag": {"mac": "AA-BB-CC-00-00-02", "lagId": 1},
+                "delete_wireguard_peer": {"peer": "wgp-seed-1"},
+                "delete_wireguard_tunnel": {"tunnel": "wg-seed-empty"},
+                "export_controller_backup": {"retentionDays": -1},
                 "reboot_device": {"mac": "AA-BB-CC-00-00-03"},
                 "reconnect_client": {"mac": "AA-BB-CC-11-11-02"},
                 "release_client_fixed_ip": {"mac": "AA-BB-CC-11-11-01"},
                 "replace_ip_group": {"group": "grp-printers-02", "cidrs": ["10.20.30.0/24"]},
+                "revoke_hotspot_voucher": {"target": "vg-seed-1", "targetType": "group"},
                 "rollback_from_snapshot": {"snapshotId": snap_id},
                 "run_ping": {"deviceMac": "AA-BB-CC-00-00-01", "target": "1.1.1.1"},
                 "run_traceroute": {"deviceMac": "AA-BB-CC-00-00-01", "target": "1.1.1.1"},
@@ -378,6 +407,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "set_upnp": {"enable": True},
                 "set_vlan_dhcp_pools": {"vlan": 20, "pools": [{"start": "192.168.20.100", "end": "192.168.20.200"}]},
                 "set_vlan_isolation": {"vlan": 20, "isolation": False},
+                "set_vpn_tunnel_status": {"vpn": "vpn-seed-1", "enabled": False},
                 "start_cable_test": {"deviceMac": "AA-BB-CC-00-00-02", "ports": [3]},
                 "start_rf_scan": {"deviceMac": "AA-BB-CC-00-00-03"},
                 "start_wan_speedtest": {},
@@ -389,6 +419,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "update_ssid": {"ssid": "Lab-Main", "wlanGroup": "Default", "broadcast": False, "psk": secret_tokens[0]},
                 "update_switch_global_features": {"mac": "AA-BB-CC-00-00-02", "jumboEnable": True, "jumbo": 9216},
                 "update_switch_port": {"deviceMac": "AA-BB-CC-00-00-02", "port": 3, "name": "ap-port"},
+                "upsert_ddns": {"domainName": "lab.example.org", "username": "u1", "password": secret_tokens[2]},
                 "upsert_dhcp_reservation": {"mac": "AA-BB-CC-11-22-88", "ip": "192.168.20.88", "vlan": 20},
                 "upsert_lan_dns_rule": {"name": "printer-host", "domain": "printer.lab.arpa", "ipAddresses": ["192.168.20.44"]},
                 "upsert_mac_group": {"name": "New-MACs", "entries": ["AA-BB-CC-DD-EE-02"]},
@@ -425,8 +456,15 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "upsert_schedule": {"name": "Work-Hours", "dayMode": "weekday", "windows": [{"start": "09:00", "end": "17:00"}]},
                 "upsert_static_route": {"name": "lab-subnet", "destination": "10.88.0.0/16", "nextHop": "192.168.40.254"},
                 "upsert_switch_lag": {"mac": "AA-BB-CC-00-00-02", "lagId": 1, "ports": [1, 2], "lagType": "lacp"},
+                "upsert_wireguard_peer": {
+                    "name": "phone-1",
+                    "interface": "wg-seed-1",
+                    "publicKey": "C1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1V=",
+                    "allowAddress": ["10.66.0.9/32"],
+                },
+                "upsert_wireguard_tunnel": {"name": "wg-lab-new", "localIp": "10.68.0.1/24"},
             }
-            self.assertEqual(len(WRITE_TOOL_NAMES), 68)
+            self.assertEqual(len(WRITE_TOOL_NAMES), 78)
             self.assertEqual(set(sample_args.keys()), set(WRITE_TOOL_NAMES))
 
             for tool_name in sorted(WRITE_TOOL_NAMES):

@@ -48,11 +48,11 @@ class WriteConfigTests(unittest.TestCase):
     def test_tool_name_sets_match_tools_module(self):
         ro_names = {t.name for t in TOOLS if t.read_only}
         wr_names = {t.name for t in TOOLS if not t.read_only}
-        self.assertEqual(len(ro_names), 47)
-        self.assertEqual(len(wr_names), 68)
+        self.assertEqual(len(ro_names), 54)
+        self.assertEqual(len(wr_names), 78)
         self.assertEqual(config_mod._READ_ONLY_TOOL_NAMES, ro_names)
         self.assertEqual(set(WRITE_TOOL_NAMES), wr_names)
-        self.assertEqual(len(TOOLS), 115)
+        self.assertEqual(len(TOOLS), 132)
 
     def test_parse_write_tools_validation(self):
         self.assertEqual(parse_write_tools(None), ())
@@ -167,7 +167,7 @@ class GateAndProtocolTests(unittest.TestCase):
                 tmp, read_only=False, write_tools=("set_client_fixed_ip",)
             )
             listed = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]
-            self.assertEqual(len(listed), 48)
+            self.assertEqual(len(listed), 55)
             names = {t["name"] for t in listed}
             self.assertIn("set_client_fixed_ip", names)
             self.assertNotIn("release_client_fixed_ip", names)
@@ -310,6 +310,16 @@ class GateAndProtocolTests(unittest.TestCase):
             "upsert_poe_schedule": (False, False, True),
             "bind_poe_schedule": (False, True, True),
             "delete_poe_schedule": (False, True, True),
+            "set_vpn_tunnel_status": (False, False, True),
+            "upsert_wireguard_tunnel": (False, False, True),
+            "delete_wireguard_tunnel": (False, True, False),
+            "upsert_wireguard_peer": (False, False, True),
+            "delete_wireguard_peer": (False, True, False),
+            "upsert_ddns": (False, False, True),
+            "delete_ddns": (False, True, False),
+            "export_controller_backup": (False, False, True),
+            "create_hotspot_vouchers": (False, False, False),
+            "revoke_hotspot_voucher": (False, True, False),
         }
         for name, (ro, dest, idemp) in expected.items():
             t = TOOL_MAP[name]
@@ -323,6 +333,9 @@ class GateAndProtocolTests(unittest.TestCase):
             "get_wifi_radio_features", "get_ap_ssid_overrides", "get_mesh_status",
             "get_wlan_optimization_status", "list_switch_lags",
             "get_switch_global_features", "list_poe_schedules",
+            "get_wan_ip_details", "get_ipv6_status", "list_traffic_rules",
+            "list_qos_rules", "list_backups", "list_hotspot_vouchers",
+            "audit_all_sites",
         })
 
 

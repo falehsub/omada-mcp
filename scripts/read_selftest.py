@@ -46,6 +46,9 @@ def run_checks(client):
         arguments = {}
         if tool.name == 'explain_error':
             arguments['code'] = -1600
+        elif tool.name == 'audit_all_sites' and not getattr(config, 'allow_cross_site', False):
+            results.append({'tool': tool.name, 'status': 'skip', 'reason': 'cross-site audit disabled (OMADA_ALLOW_CROSS_SITE=false)'})
+            continue
         elif tool.name == 'diff_config_snapshots':
             if snapshot_baseline is None:
                 results.append({'tool': tool.name, 'status': 'skip', 'reason': 'no baseline snapshot captured'})

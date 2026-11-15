@@ -200,7 +200,7 @@ class Milestone3MonitorAndPackagingTests(unittest.TestCase):
             env=env, text=True,
         )
         data = json.loads(out)
-        self.assertEqual(len(data["tools"]), 47)
+        self.assertEqual(len(data["tools"]), 54)
 
 
 class OptimizationTests(unittest.TestCase):
@@ -574,7 +574,7 @@ class OptimizationTests(unittest.TestCase):
         with mock.patch("sys.stdout", buf_ro), \
              mock.patch.dict(os.environ, {"OMADA_WRITE_TOOLS": "set_client_fixed_ip"}, clear=True):
             self.assertEqual(cli_main(["--list-tools"]), 0)
-        self.assertEqual(len(json.loads(buf_ro.getvalue())["tools"]), 47)
+        self.assertEqual(len(json.loads(buf_ro.getvalue())["tools"]), 54)
 
         buf_wr = io.StringIO()
         with mock.patch("sys.stdout", buf_wr), \
@@ -584,7 +584,7 @@ class OptimizationTests(unittest.TestCase):
                  clear=True,
              ):
             self.assertEqual(cli_main(["--list-tools"]), 0)
-        self.assertEqual(len(json.loads(buf_wr.getvalue())["tools"]), 48)
+        self.assertEqual(len(json.loads(buf_wr.getvalue())["tools"]), 55)
         srv_pretty = Server(cfg_pretty, client=client)
         r_pretty = srv_pretty.handle({
             "jsonrpc": "2.0", "id": 12, "method": "tools/call",

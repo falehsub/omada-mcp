@@ -1040,6 +1040,119 @@ def rollback_from_snapshot(
                 verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("wlanId") or "") == wlan_id, "AP SSID overrides rollback failed"),
             )
 
+    if orig_tool == "set_vpn_tunnel_status" and isinstance(snap_data, Mapping):
+        vpn_obj = as_mapping(snap_data.get("vpn"))
+        vid = str(vpn_obj.get("id") or orig_target)
+        if vid and "status" in vpn_obj:
+            prev_status = bool(vpn_obj["status"])
+            live_rows, _ = client.paginate(f"sites/{site.site_id}/setting/vpns")
+            live_vpn = next((r for r in live_rows if str(r.get("id")) == vid), None)
+            return _run_restore(
+                method="POST",
+                endpoint=f"sites/{site.site_id}/setting/vpns/{urllib.parse.quote(vid)}/status",
+                payload={"status": prev_status},
+                live_before=deep_redact(live_vpn) if live_vpn else None,
+                restore_preview={"status": prev_status},
+                read_back_fn=lambda: next(
+                    (dict(r) for r in client.paginate(f"sites/{site.site_id}/setting/vpns")[0] if str(r.get("id")) == vid),
+                    {},
+                ),
+                verify_fn=lambda _b, a: (
+                    isinstance(a, Mapping) and bool(a.get("status")) == prev_status,
+                    f"VPN {vid} status did not revert to {prev_status}",
+                ),
+            )
+
+    if orig_tool in ("upsert_wireguard_tunnel", "upsert_wireguard_peer", "upsert_ddns") and isinstance(snap_data, Mapping) and snap_data.get("created"):
+            if orig_tool == "upsert_wireguard_tunnel":
+                tunnels, _ = client.paginate(f"sites/{site.site_id}/setting/wireguard")
+                live_row = next(
+                    (r for r in tunnels if str(r.get("id")) == orig_target or str(r.get("name") or "") == orig_target),
+                    None,
+                )
+                if live_row is None:
+                    raise OmadaError(f"WireGuard interface {orig_target!r} not found for rollback delete")
+                tid = str(live_row["id"])
+                return _run_restore(
+                    method="DELETE",
+                    endpoint=f"sites/{site.site_id}/setting/wireguard/{urllib.parse.quote(tid)}",
+                    payload=None,
+                    live_before=deep_redact(live_row),
+                    restore_preview=None,
+                    read_back_fn=lambda: client.paginate(f"sites/{site.site_id}/setting/wireguard")[0],
+                    verify_fn=lambda _b, a: (all(str(r.get("id")) != tid for r in a), f"WireGuard interface {tid} still present"),
+                )
+            if orig_tool == "upsert_wireguard_peer":
+                peers, _ = client.paginate(f"sites/{site.site_id}/setting/wireguard/peer")
+                live_row = next(
+                    (r for r in peers if str(r.get("id")) == orig_target or str(r.get("name") or "") == orig_target),
+                    None,
+                )
+                if live_row is None:
+                    raise OmadaError(f"WireGuard peer {orig_target!r} not found for rollback delete")
+                pid = str(live_row["id"])
+                return _run_restore(
+                    method="DELETE",
+                    endpoint=f"sites/{site.site_id}/setting/wireguard/peer/{urllib.parse.quote(pid)}",
+                    payload=None,
+                    live_before=deep_redact(live_row),
+                    restore_preview=None,
+                    read_back_fn=lambda: client.paginate(f"sites/{site.site_id}/setting/wireguard/peer")[0],
+                    verify_fn=lambda _b, a: (all(str(r.get("id")) != pid for r in a), f"WireGuard peer {pid} still present"),
+                )
+            if orig_tool == "upsert_ddns":
+                ddns_rows, _ = client.paginate(f"sites/{site.site_id}/setting/service/ddns")
+                live_row = next(
+                    (r for r in ddns_rows if str(r.get("id")) == orig_target or str(r.get("domainName") or "") == orig_target),
+                    None,
+                )
+                if live_row is None:
+                    raise OmadaError(f"DDNS entry {orig_target!r} not found for rollback delete")
+                did = str(live_row["id"])
+                return _run_restore(
+                    method="DELETE",
+                    endpoint=f"sites/{site.site_id}/setting/service/ddns/{urllib.parse.quote(did)}",
+                    payload=None,
+                    live_before=deep_redact(live_row),
+                    restore_preview=None,
+                    read_back_fn=lambda: client.paginate(f"sites/{site.site_id}/setting/service/ddns")[0],
+                    verify_fn=lambda _b, a: (all(str(r.get("id")) != did for r in a), f"DDNS entry {did} still present"),
+                )
+
+    if orig_tool == "upsert_wireguard_peer" and isinstance(snap_data, Mapping) and not snap_data.get("created"):
+        peer_obj = as_mapping(snap_data.get("peer"))
+        pid = str(peer_obj.get("id") or orig_target)
+        if pid and peer_obj.get("interfaceId") and peer_obj.get("publicKey"):
+            peer_body: dict[str, Any] = {
+                "name": str(peer_obj.get("name") or pid),
+                "status": bool(peer_obj.get("status", True)),
+                "interfaceId": str(peer_obj["interfaceId"]),
+                "publicKey": str(peer_obj["publicKey"]),
+                "allowAddress": list(peer_obj.get("allowAddress") or []),
+                "keepAlive": as_int(peer_obj.get("keepAlive"), 25),
+            }
+            if peer_obj.get("endPoint") and peer_obj.get("endPointPort"):
+                peer_body["endPoint"] = str(peer_obj["endPoint"])
+                peer_body["endPointPort"] = as_int(peer_obj["endPointPort"], 51820)
+            return _run_restore(
+                method="PUT",
+                endpoint=f"sites/{site.site_id}/setting/wireguard/peer/{urllib.parse.quote(pid)}",
+                payload=peer_body,
+                live_before=None,
+                restore_preview=deep_redact(peer_body),
+                read_back_fn=lambda: next(
+                    (dict(r) for r in client.paginate(f"sites/{site.site_id}/setting/wireguard/peer")[0] if str(r.get("id")) == pid),
+                    {},
+                ),
+                verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name") or "") == peer_body["name"], "WireGuard peer rollback failed"),
+            )
+
+    if orig_tool in ("delete_wireguard_tunnel", "delete_wireguard_peer", "delete_ddns"):
+        raise OmadaError(
+            f"cannot automatically rollback {orig_tool}: deleted credential/key secrets were redacted from snapshot {sid!r}",
+            hint="re-create the entry manually using upsert_wireguard_tunnel / upsert_wireguard_peer / upsert_ddns with the intended secret/key",
+        )
+
     raise OmadaError(
         f"snapshot {sid!r} from tool {orig_tool!r} does not have an automatic rollback handler for its stored payload shape",
         hint="Inspect the snapshot JSON in OMADA_SNAPSHOT_DIR and apply the recorded before state with the corresponding config tool.",

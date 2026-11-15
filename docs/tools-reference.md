@@ -2,7 +2,7 @@
 
 # Tool & Configuration Reference
 
-Generated directly from `omada_mcp.tools.TOOLS` (**115 total**: **47 read-only**, **68 opt-in write**).
+Generated directly from `omada_mcp.tools.TOOLS` (**132 total**: **54 read-only**, **78 opt-in write**).
 
 - Required parameters are shown in **`bold`**; optional parameters carry `?`.
 - Site-scoped tools accept optional `site?` (pinned when `OMADA_SITE_NAME`/`OMADA_SITE_ID` is set unless `OMADA_ALLOW_CROSS_SITE=true`).
@@ -12,15 +12,16 @@ Generated directly from `omada_mcp.tools.TOOLS` (**115 total**: **47 read-only**
 
 | Category | Read-only | Opt-in write | Total |
 |---|---:|---:|---:|
-| `core` | 17 | 17 | 34 |
-| `diagnostics` | 7 | 4 | 11 |
+| `core` | 18 | 18 | 36 |
+| `diagnostics` | 9 | 4 | 13 |
+| `hotspot` | 1 | 2 | 3 |
 | `rollback` | 0 | 1 | 1 |
-| `routing` | 6 | 11 | 17 |
-| `security` | 5 | 13 | 18 |
+| `routing` | 8 | 18 | 26 |
+| `security` | 6 | 13 | 19 |
 | `switch` | 5 | 11 | 16 |
 | `wifi` | 7 | 11 | 18 |
 
-## Read-Only Tools (47)
+## Read-Only Tools (54)
 
 | Tool | Tier | Category | Hints | Parameters | Description |
 |---|---|---|---|---|---|
@@ -71,8 +72,15 @@ Generated directly from `omada_mcp.tools.TOOLS` (**115 total**: **47 read-only**
 | `list_switch_lags` | read-only | `switch` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `site?` | List configured LAG/LACP port-channel groups, member ports, and LAG hardware limits on a switch. |
 | `get_switch_global_features` | read-only | `switch` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `site?` | Read switch-level STP/RSTP/MSTP mode and timers, loopback detection, jumbo frame MTU, multicast, port-mirroring sessions, and hardware L2 capabilities. |
 | `list_poe_schedules` | read-only | `switch` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List PoE power schedules with resolved time-range schedule names and switch-port bindings. |
+| `get_wan_ip_details` | read-only | `diagnostics` | `readOnly=true, destructive=false, idempotent=true` | `maskWanIp?`, `site?` | Read per-WAN IPv4 and IPv6 configuration, DNS resolvers, WAN port config, and redacted DDNS bindings (passwords and keys never returned). |
+| `get_ipv6_status` | read-only | `routing` | `readOnly=true, destructive=false, idempotent=true` | `maskWanIp?`, `site?` | Summarize IPv6 configuration across WAN ports (SLAAC/DHCPv6/PPPoEv6/PD) and LAN/VLAN interfaces. |
+| `list_traffic_rules` | read-only | `security` | `readOnly=true, destructive=false, idempotent=true` | `site?` | Aggregate gateway and AP URL filtering rules, transmission bandwidth controls, session limits, and gateway ACL rule count. |
+| `list_qos_rules` | read-only | `routing` | `readOnly=true, destructive=false, idempotent=true` | `site?` | Read gateway QoS BWC, class rules, VoIP QoS, WAN rate limits, and switch QoS queue profiles. |
+| `list_backups` | read-only | `core` | `readOnly=true, destructive=false, idempotent=true, global` | — | Read controller auto-backup schedule, stored auto-backup files (Admin), and manual backup status without exposing file-server credentials. |
+| `list_hotspot_vouchers` | read-only | `hotspot` | `readOnly=true, destructive=false, idempotent=true` | `groupId?`, `limit?`, `site?` | Read hotspot voucher groups and individual voucher statuses (category 'hotspot'). |
+| `audit_all_sites` | read-only | `diagnostics` | `readOnly=true, destructive=false, idempotent=true, global` | `maxSites?` | Cross-site fleet health rollup across visible sites (strictly refused unless OMADA_ALLOW_CROSS_SITE=true). |
 
-## Opt-In Write Tools (68)
+## Opt-In Write Tools (78)
 
 | Tool | Tier | Category | Hints | Parameters | Description |
 |---|---|---|---|---|---|
@@ -144,6 +152,16 @@ Generated directly from `omada_mcp.tools.TOOLS` (**115 total**: **47 read-only**
 | `upsert_poe_schedule` | opt-in write | `switch` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, `poeScheduleId?`, `schedule?`, `enabled?`, `portBindings?`, `dryRun?`, `confirm?`, `site?` | Create or update a site PoE power schedule referencing a time-range profile and optional switch port bindings. |
 | `bind_poe_schedule` | opt-in write | `switch` | `readOnly=false, destructive=true, idempotent=true` | **`poeSchedule`**, **`mac`**, **`ports`**, `replace?`, `dryRun?`, `confirm?`, `site?` | Attach or replace a switch's PoE ports on an existing PoE schedule (setting/service/poeSchedules). |
 | `delete_poe_schedule` | opt-in write | `switch` | `readOnly=false, destructive=true, idempotent=true` | **`poeSchedule`**, `dryRun?`, `confirm?`, `site?` | Delete a PoE power schedule by ID or exact name. |
+| `set_vpn_tunnel_status` | opt-in write | `routing` | `readOnly=false, destructive=false, idempotent=true` | **`vpn`**, **`enabled`**, `dryRun?`, `confirm?`, `site?` | Toggle status of an IPsec, OpenVPN, L2TP, or PPTP tunnel entry (POST setting/vpns/{id}/status) with dryRun preview and secret redaction. |
+| `upsert_wireguard_tunnel` | opt-in write | `routing` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, **`localIp`**, `privateKey?`, `mtu?`, `listenPort?`, `status?`, `tunnelId?`, `dryRun?`, `confirm?`, `site?` | Create or update a WireGuard VPN interface (POST/PUT setting/wireguard). If privateKey is omitted on create, requests an ephemeral controller keypair without returning or logging it. |
+| `delete_wireguard_tunnel` | opt-in write | `routing` | `readOnly=false, destructive=true, idempotent=false` | **`tunnel`**, `dryRun?`, `confirm?`, `site?` | Delete a WireGuard VPN interface (DELETE setting/wireguard/{id}). Refuses deletion if peers are still attached. |
+| `upsert_wireguard_peer` | opt-in write | `routing` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, **`interface`**, **`publicKey`**, **`allowAddress`**, `peerId?`, `endPoint?`, `endPointPort?`, `presharedKey?`, `keepAlive?`, `comment?`, `status?`, `dryRun?`, `confirm?`, `site?` | Create or update a WireGuard peer bound to an existing interface (POST/PUT setting/wireguard/peer). Redacts presharedKey from all responses and snapshots. |
+| `delete_wireguard_peer` | opt-in write | `routing` | `readOnly=false, destructive=true, idempotent=false` | **`peer`**, `dryRun?`, `confirm?`, `site?` | Delete a WireGuard peer by ID or exact name (DELETE setting/wireguard/peer/{id}). |
+| `upsert_ddns` | opt-in write | `routing` | `readOnly=false, destructive=false, idempotent=true` | **`domainName`**, `service?`, `username?`, `password?`, `ddnsId?`, `interface?`, `updateInterval?`, `status?`, `dryRun?`, `confirm?`, `site?` | Create or update a dynamic DNS configuration on a WAN port (POST/PUT setting/service/ddns). Passwords are redacted from responses and rollback snapshots. |
+| `delete_ddns` | opt-in write | `routing` | `readOnly=false, destructive=true, idempotent=false` | **`ddns`**, `dryRun?`, `confirm?`, `site?` | Delete a DDNS configuration by ID or domainName (DELETE setting/service/ddns/{id}). |
+| `export_controller_backup` | opt-in write | `core` | `readOnly=false, destructive=false, idempotent=true, global` | `retentionDays?`, `retainUsers?`, `fileName?`, `timeoutSeconds?`, `dryRun?`, `confirm?` | Trigger a controller backup (or download a named auto-backup file) into OMADA_SNAPSHOT_DIR/backups with byte/path-traversal guards. Never restores. |
+| `create_hotspot_vouchers` | opt-in write | `hotspot` | `readOnly=false, destructive=false, idempotent=false` | **`name`**, `amount?`, `durationMinutes?`, `codeLength?`, `codeFormat?`, `maxUsers?`, `downLimitKbps?`, `upLimitKbps?`, `trafficLimitMb?`, `description?`, `dryRun?`, `confirm?`, `site?` | Generate a hotspot voucher group (POST hotspot/sites/{id}/voucherGroups, category 'hotspot'). |
+| `revoke_hotspot_voucher` | opt-in write | `hotspot` | `readOnly=false, destructive=true, idempotent=false` | **`target`**, `targetType?`, `dryRun?`, `confirm?`, `site?` | Revoke/delete a hotspot voucher group or single voucher code (category 'hotspot'). |
 
 ## Environment Variables (`server.json`)
 

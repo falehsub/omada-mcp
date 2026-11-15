@@ -330,6 +330,26 @@ class MockController:
         self.wireguard_configs: list[dict[str, Any]] = []
         self.wireguard_peers: list[dict[str, Any]] = []
         self.past_connections: list[dict[str, Any]] = []
+        self.url_filtering_gw: list[dict[str, Any]] = []
+        self.url_filtering_ap: list[dict[str, Any]] = []
+        self.bandwidth_controls: dict[str, Any] = {"bandwidthControl": False, "table": {"data": [], "totalRows": 0}}
+        self.session_limits: dict[str, Any] = {"sessionLimitEnable": False, "ipSessionEnable": False, "table": {"data": [], "totalRows": 0}}
+        self.qos_bwc: list[dict[str, Any]] = []
+        self.qos_class_rules: list[dict[str, Any]] = []
+        self.qos_voip: dict[str, Any] = {"enable": False}
+        self.qos_wans: list[dict[str, Any]] = []
+        self.qos_switch_profiles: list[dict[str, Any]] = []
+        self.auto_backup_task: dict[str, Any] = {"enable": True, "retention": 30, "password": "synthetic-backup-secret"}
+        self.auto_backup_files: list[dict[str, Any]] = [
+            {"fileName": "autobackup_20261115.cfg", "size": 24, "time": 1700000000000},
+        ]
+        self.backup_bytes: bytes = b"OMADA-MOCK-BACKUP-PAYLOAD"
+        self.voucher_groups: list[dict[str, Any]] = [
+            {"id": "vg-seed-1", "name": "Guest-Pass", "amount": 5, "codeLength": 6, "durationNum": 480, "durationUnit": 0},
+        ]
+        self.vouchers: list[dict[str, Any]] = [
+            {"id": "v-seed-1", "code": "123456", "groupId": "vg-seed-1", "status": 0},
+        ]
 
         self.policy_routes: list[dict[str, Any]] = copy.deepcopy(tw_fx["policy_routings"].get("data", []))
         self.lan_dns_rules: list[dict[str, Any]] = copy.deepcopy(tw_fx["lan_dns"].get("data", []))
@@ -1243,8 +1263,41 @@ class MockController:
             return self._ok(copy.deepcopy(self.dns_proxy))
 
         m_ddns = re.fullmatch(r"sites/([^/]+)/setting/service/ddns", ep)
-        if m_ddns and method == "GET":
-            return self._ok(copy.deepcopy(self.ddns))
+        if m_ddns:
+            rows = self.ddns.setdefault("data", [])
+            if method == "GET":
+                return self._ok(self._paginate_rows(rows, params))
+            if method == "POST":
+                if not isinstance(body, Mapping) or not body.get("domainName"):
+                    return self._err(-1001, "domainName required.")
+                new_id = self._next_id("ddns-new")
+                created = copy.deepcopy(dict(body))
+                created["id"] = new_id
+                rows.append(created)
+                self.ddns["totalRows"] = len(rows)
+                return self._ok({"id": new_id})
+            return self._err(-1600, "Method not supported.")
+
+        m_ddns_id = re.fullmatch(r"sites/([^/]+)/setting/service/ddns/([^/]+)", ep)
+        if m_ddns_id:
+            did = m_ddns_id.group(2)
+            rows = self.ddns.setdefault("data", [])
+            idx = next((i for i, r in enumerate(rows) if str(r.get("id")) == did), None)
+            if idx is None:
+                return self._err(-1600, "DDNS entry not found.")
+            if method == "PUT":
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                updated = copy.deepcopy(rows[idx])
+                updated.update(copy.deepcopy(dict(body)))
+                updated["id"] = did
+                rows[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                rows.pop(idx)
+                self.ddns["totalRows"] = len(rows)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
 
         m_logs = re.fullmatch(r"sites/([^/]+)/logs/(alerts|events)", ep)
         if m_logs and method == "GET":
@@ -1683,13 +1736,87 @@ class MockController:
                 rows = [t for t in self.vpn_tunnels if t.get("vpnCategory") == wanted]
             return self._ok(copy.deepcopy(rows))
 
+        m_vpn_status = re.fullmatch(r"sites/([^/]+)/setting/vpns/([^/]+)/status", ep)
+        if m_vpn_status and method == "POST":
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            vid = m_vpn_status.group(2)
+            row = next((r for r in self.vpn_configs if str(r.get("id")) == vid), None)
+            if row is None:
+                return self._err(-1600, "VPN entry not found.")
+            if not isinstance(body, Mapping) or "status" not in body:
+                return self._err(-1001, "status required.")
+            row["status"] = bool(body["status"])
+            return self._ok({})
+
+        m_wg_key = re.fullmatch(r"sites/([^/]+)/setting/wireguard/key", ep)
+        if m_wg_key and method == "GET":
+            return self._ok({
+                "privateKey": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq=",
+                "publicKey": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefg=",
+            })
+
+        m_wg_summary = re.fullmatch(r"sites/([^/]+)/setting/wireguard-summary", ep)
+        if m_wg_summary and method == "GET":
+            return self._ok([{"id": t.get("id"), "name": t.get("name")} for t in self.wireguard_configs])
+
+        m_wg_peer_id = re.fullmatch(r"sites/([^/]+)/setting/wireguard/peer/([^/]+)", ep)
+        if m_wg_peer_id:
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            pid = m_wg_peer_id.group(2)
+            idx = next((i for i, r in enumerate(self.wireguard_peers) if str(r.get("id")) == pid), None)
+            if idx is None:
+                return self._err(-1600, "WireGuard peer not found.")
+            if method == "PUT":
+                updated = copy.deepcopy(self.wireguard_peers[idx])
+                updated.update(copy.deepcopy(dict(body or {})))
+                updated["id"] = pid
+                self.wireguard_peers[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                self.wireguard_peers.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
+
+        m_wg_id = re.fullmatch(r"sites/([^/]+)/setting/wireguard/(?!key$|peer$)([^/]+)", ep)
+        if m_wg_id:
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            tid = m_wg_id.group(2)
+            idx = next((i for i, r in enumerate(self.wireguard_configs) if str(r.get("id")) == tid), None)
+            if idx is None:
+                return self._err(-1600, "WireGuard interface not found.")
+            if method == "PUT":
+                updated = copy.deepcopy(self.wireguard_configs[idx])
+                updated.update(copy.deepcopy(dict(body or {})))
+                updated["id"] = tid
+                self.wireguard_configs[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                if any(str(p.get("interfaceId") or "") == tid for p in self.wireguard_peers):
+                    return self._err(-1001, "WireGuard interface still has peers.")
+                self.wireguard_configs.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
+
         m_vpn_cfg = re.fullmatch(r"sites/([^/]+)/setting/(vpns|wireguard|wireguard/peer)", ep)
-        if m_vpn_cfg and method == "GET":
+        if m_vpn_cfg:
             if not self.has_gateway:
                 return self._err(-1007, "No adopted gateway.")
             kind = m_vpn_cfg.group(2)
             store = {"vpns": self.vpn_configs, "wireguard": self.wireguard_configs, "wireguard/peer": self.wireguard_peers}[kind]
-            return self._ok(self._paginate_rows(store, params))
+            if method == "GET":
+                return self._ok(self._paginate_rows(store, params))
+            if method == "POST" and kind in ("wireguard", "wireguard/peer"):
+                if not isinstance(body, Mapping) or not body.get("name"):
+                    return self._err(-1001, "name required.")
+                new_id = self._next_id("wg-new" if kind == "wireguard" else "wgp-new")
+                created = copy.deepcopy(dict(body))
+                created["id"] = new_id
+                store.append(created)
+                return self._ok({"id": new_id})
+            return self._err(-1600, "Method not supported.")
 
         m_topo = re.fullmatch(r"sites/([^/]+)/(topology-v2|topology)", ep)
         if m_topo and method == "GET":
@@ -1912,6 +2039,94 @@ class MockController:
                 self.poe_schedules.pop(idx)
                 return self._ok({})
             return self._err(-1600, "Method not supported.")
+
+        # -- Phase C routes (Traffic, QoS, WAN ports, Backups, Hotspot) -------
+        if re.fullmatch(r"sites/([^/]+)/setting/wan-ports", ep) and method == "GET":
+            return self._ok({"enable": True, "wanPorts": [{"portUuid": "wan-port-1", "portName": "WAN"}]})
+
+        if re.fullmatch(r"sites/([^/]+)/setting/firewall/urlfilterings", ep) and method == "GET":
+            tval = (params.get("type") or ["gateway"])[0]
+            rows = self.url_filtering_gw if tval == "gateway" else self.url_filtering_ap
+            return self._ok(self._paginate_rows(rows, params))
+
+        if re.fullmatch(r"sites/([^/]+)/setting/transmission/bandwidthControls", ep) and method == "GET":
+            return self._ok(copy.deepcopy(self.bandwidth_controls))
+
+        if re.fullmatch(r"sites/([^/]+)/setting/transmission/sessionLimits", ep) and method == "GET":
+            return self._ok(copy.deepcopy(self.session_limits))
+
+        m_qos = re.fullmatch(r"sites/([^/]+)/setting/qos/(gateway/bwc|gateway/class-rule|gateway/voip|gateway/wans|switch/queue-profiles)", ep)
+        if m_qos and method == "GET":
+            seg = m_qos.group(2)
+            if seg == "gateway/voip":
+                return self._ok(copy.deepcopy(self.qos_voip))
+            if seg == "gateway/wans":
+                return self._ok({"data": copy.deepcopy(self.qos_wans)})
+            rows = {
+                "gateway/bwc": self.qos_bwc,
+                "gateway/class-rule": self.qos_class_rules,
+                "switch/queue-profiles": self.qos_switch_profiles,
+            }[seg]
+            return self._ok(self._paginate_rows(rows, params))
+
+        if re.fullmatch(r"sites/([^/]+)/insight/qos", ep) and method == "GET":
+            return self._ok(self._paginate_rows([], params))
+
+        if ep == "autoBackup/autoBackupTask" and method == "GET":
+            if "viewer" in self.role.lower():
+                return self._err(-1005, "Insufficient privilege for backup configuration.")
+            return self._ok(copy.deepcopy(self.auto_backup_task))
+        if ep == "autoBackup/gridAutoBackupFiles" and method == "GET":
+            if "viewer" in self.role.lower():
+                return self._err(-1005, "Insufficient privilege for backup files.")
+            return self._ok(self._paginate_rows(self.auto_backup_files, params))
+        if ep == "maintenance/backup/prepareBackup" and method == "POST":
+            return self._ok({})
+        if ep == "maintenance/backup/result" and method == "GET":
+            if "viewer" in self.role.lower():
+                return self._err(-1005, "Insufficient privilege for backup status.")
+            return self._ok({"status": 0, "percent": 100, "errorCode": 0, "backupType": "backup"})
+        if ep in ("files/backup", "autoBackup/autoBackupFile") and method == "GET":
+            return 200, self.backup_bytes
+
+        m_vg = re.fullmatch(r"hotspot/sites/([^/]+)/voucherGroups", ep)
+        if m_vg:
+            if method == "GET":
+                return self._ok(self._paginate_rows(self.voucher_groups, params))
+            if method == "POST":
+                if not isinstance(body, Mapping) or not body.get("name"):
+                    return self._err(-1001, "voucher group name required.")
+                new_id = self._next_id("vg-new")
+                created = copy.deepcopy(dict(body))
+                created["id"] = new_id
+                self.voucher_groups.append(created)
+                return self._ok({"id": new_id})
+
+        m_vg_id = re.fullmatch(r"hotspot/sites/([^/]+)/voucherGroups/([^/]+)", ep)
+        if m_vg_id:
+            gid = m_vg_id.group(2)
+            idx = next((i for i, r in enumerate(self.voucher_groups) if str(r.get("id")) == gid), None)
+            if idx is None:
+                return self._err(-1600, "Voucher group not found.")
+            if method == "GET":
+                rows = [v for v in self.vouchers if str(v.get("groupId")) == gid]
+                return self._ok(self._paginate_rows(rows, params))
+            if method == "DELETE":
+                self.voucher_groups.pop(idx)
+                return self._ok({})
+
+        m_vs = re.fullmatch(r"hotspot/sites/([^/]+)/vouchers", ep)
+        if m_vs and method == "GET":
+            return self._ok(self._paginate_rows(self.vouchers, params))
+
+        m_v_id = re.fullmatch(r"hotspot/sites/([^/]+)/vouchers/([^/]+)", ep)
+        if m_v_id and method == "DELETE":
+            vid = m_v_id.group(2)
+            idx = next((i for i, r in enumerate(self.vouchers) if str(r.get("id")) == vid), None)
+            if idx is None:
+                return self._err(-1600, "Voucher not found.")
+            self.vouchers.pop(idx)
+            return self._ok({})
 
         return self._err(-1600, f"Unmocked endpoint: {method} {ep}")
 

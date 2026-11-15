@@ -200,7 +200,7 @@ def deep_redact(value: Any) -> Any:
         out: dict[str, Any] = {}
         for k, v in cleaned.items():
             kl = str(k).lower()
-            if any(tok in kl for tok in ("privatekey", "preshared", "passphrase", "secret", "password", "community")) and v not in (None, "", False, True):
+            if any(tok in kl for tok in ("privatekey", "private_key", "preshared", "passphrase", "secret", "password", "ddnspwd", "community")) and v not in (None, "", False, True):
                 out[k] = "***REDACTED***"
                 continue
             out[k] = deep_redact(v)

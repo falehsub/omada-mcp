@@ -259,6 +259,7 @@ _SNAPSHOT_ALL_OBJECTS: tuple[str, ...] = (
     "networks", "acls", "groups", "schedules", "wlans", "devices", "clients",
     "dhcpReservations", "portForwards", "staticRoutes", "mdnsRules", "services",
     "rateLimitProfiles", "poeSchedules", "wirelessFeature", "rfPlanning",
+    "vpns", "wireguard", "wireguardPeers", "ddns", "trafficRules", "qos",
 )
 
 
@@ -396,6 +397,46 @@ def _get_config_snapshot_impl(
         from .switch_wifi_read import _get_wlan_optimization_status
         snapshot["rfPlanning"] = _get_wlan_optimization_status(client)
 
+    if "vpns" in selected:
+        try:
+            vpn_rows, _ = client.paginate(f"sites/{site.site_id}/setting/vpns")
+            snapshot["vpns"] = [deep_redact(r) for r in vpn_rows]
+        except OmadaError as exc:
+            warnings.append(f"vpns skipped: {exc.message}")
+            snapshot["vpns"] = []
+
+    if "wireguard" in selected:
+        try:
+            wg_rows, _ = client.paginate(f"sites/{site.site_id}/setting/wireguard")
+            snapshot["wireguard"] = [deep_redact(r) for r in wg_rows]
+        except OmadaError as exc:
+            warnings.append(f"wireguard skipped: {exc.message}")
+            snapshot["wireguard"] = []
+
+    if "wireguardPeers" in selected:
+        try:
+            peer_rows, _ = client.paginate(f"sites/{site.site_id}/setting/wireguard/peer")
+            snapshot["wireguardPeers"] = [deep_redact(r) for r in peer_rows]
+        except OmadaError as exc:
+            warnings.append(f"wireguardPeers skipped: {exc.message}")
+            snapshot["wireguardPeers"] = []
+
+    if "ddns" in selected:
+        try:
+            ddns_rows, _ = client.paginate(f"sites/{site.site_id}/setting/service/ddns")
+            snapshot["ddns"] = [deep_redact(r) for r in ddns_rows]
+        except OmadaError as exc:
+            warnings.append(f"ddns skipped: {exc.message}")
+            snapshot["ddns"] = []
+
+    if "trafficRules" in selected:
+        from .fleet_vpn_read import _list_traffic_rules
+        snapshot["trafficRules"] = _list_traffic_rules(client)
+
+    if "qos" in selected:
+        from .fleet_vpn_read import _list_qos_rules
+        snapshot["qos"] = _list_qos_rules(client)
+
     return snapshot
 
 
@@ -527,6 +568,12 @@ _SNAPSHOT_SCHEMA: dict[str, Any] = {
         "poeSchedules": {"type": "array", "items": {"type": "object"}},
         "wirelessFeature": {"type": "object"},
         "rfPlanning": {"type": "object"},
+        "vpns": {"type": "array", "items": {"type": "object"}},
+        "wireguard": {"type": "array", "items": {"type": "object"}},
+        "wireguardPeers": {"type": "array", "items": {"type": "object"}},
+        "ddns": {"type": "array", "items": {"type": "object"}},
+        "trafficRules": {"type": "object"},
+        "qos": {"type": "object"},
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["site", "objects", "warnings"],
@@ -715,7 +762,7 @@ def _diff_config_snapshots(
     sections_changed = 0
 
     for section in sections_list:
-        if section in ("services", "wirelessFeature", "rfPlanning"):
+        if section in ("services", "wirelessFeature", "rfPlanning", "trafficRules", "qos"):
             b_clean = _strip_volatile_and_redact(baseline.get(section) or {})
             c_clean = _strip_volatile_and_redact(target_snapshot.get(section) or {})
             delta = _diff_field_changes(b_clean, c_clean)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from .config import Config, ConfigError
+from .config import VALID_TOOL_CATEGORIES, Config, ConfigError
 from .domains._tool_model import _TOOL_CATEGORIES, Tool, normalize_mac
 from .domains.audit_snapshot import _findings_healthy as _findings_healthy
 from .domains.clients_read import _fetch_clients as _fetch_clients
@@ -14,6 +14,7 @@ from .domains.devices_read import project_device, project_wlan
 from .domains.tool_specs_read import READ_TOOLS
 from .domains.tool_specs_write_a import WRITE_TOOLS_A
 from .domains.tool_specs_write_b import WRITE_TOOLS_B
+from .domains.tool_specs_write_c import WRITE_TOOLS_C
 
 __all__ = [
     "TOOLS",
@@ -31,6 +32,7 @@ TOOLS: list[Tool] = [
     *READ_TOOLS,
     *WRITE_TOOLS_A,
     *WRITE_TOOLS_B,
+    *WRITE_TOOLS_C,
 ]
 
 TOOL_MAP: dict[str, Tool] = {tool.name: tool for tool in TOOLS}
@@ -69,9 +71,10 @@ def tool_descriptors(
     if unknown_cats:
         raise ConfigError(
             f"unknown tool category filter: {', '.join(sorted(unknown_cats))}",
-            hint="valid categories: core, diagnostics, switch, wifi, routing, security, rollback",
+            hint=f"valid categories: {', '.join(VALID_TOOL_CATEGORIES)}",
             key="OMADA_TOOL_CATEGORIES",
         )
+    eff_catalog = str(getattr(config, "tool_catalog", "full") if config is not None else "full").strip().lower() or "full"
 
     if include_all:
         selected: Sequence[Tool] = TOOLS
@@ -90,5 +93,5 @@ def tool_descriptors(
     return [
         tool.descriptor(schema_mode=eff_mode)
         for tool in selected
-        if not eff_cats or tool.category in eff_cats
+        if (tool.category in eff_cats if eff_cats else (include_all or eff_catalog != "core" or tool.category != "hotspot"))
     ]

@@ -381,7 +381,7 @@ class CliTests(unittest.TestCase):
             finally:
                 sys.stdout = original
             payload = json.loads(buffer.getvalue())
-            self.assertEqual(len(payload["tools"]), 47)
+            self.assertEqual(len(payload["tools"]), 54)
 
             buffer_all = io.StringIO()
             sys.stdout = buffer_all
@@ -390,7 +390,7 @@ class CliTests(unittest.TestCase):
             finally:
                 sys.stdout = original
             payload_all = json.loads(buffer_all.getvalue())
-            self.assertEqual(len(payload_all["tools"]), 115)
+            self.assertEqual(len(payload_all["tools"]), 132)
 
         with tempfile.TemporaryDirectory() as tmp:
             env_file = Path(tmp) / "custom.env"
@@ -402,7 +402,7 @@ class CliTests(unittest.TestCase):
             with mock.patch("sys.stdout", buf_env), \
                  mock.patch.dict(os.environ, {"OMADA_ENV_FILE": str(env_file)}, clear=True):
                 self.assertEqual(main(["--list-tools"]), 0)
-            self.assertEqual(len(json.loads(buf_env.getvalue())["tools"]), 49)
+            self.assertEqual(len(json.loads(buf_env.getvalue())["tools"]), 56)
 
     def test_missing_config_exits_non_zero(self):
         from omada_mcp.cli import main

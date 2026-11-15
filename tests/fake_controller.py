@@ -245,6 +245,26 @@ class FakeController:
             return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
         if fragment.startswith(site_prefix + "/setting/wan/networks"):
             return 200, json.dumps({"errorCode": 0, "result": {"wanMode": 0, "osgPortInfo": {"wanLanPortSettings": []}}}).encode()
+        if fragment.startswith(site_prefix + "/setting/wan-ports"):
+            return 200, json.dumps({"errorCode": 0, "result": {"enable": False, "wanPorts": []}}).encode()
+        if fragment.startswith(site_prefix + "/setting/firewall/urlfilterings"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
+        if fragment.startswith(site_prefix + "/setting/transmission/bandwidthControls"):
+            return 200, json.dumps({"errorCode": 0, "result": {"bandwidthControl": False, "table": {"data": [], "totalRows": 0}}}).encode()
+        if fragment.startswith(site_prefix + "/setting/transmission/sessionLimits"):
+            return 200, json.dumps({"errorCode": 0, "result": {"sessionLimitEnable": False, "table": {"data": [], "totalRows": 0}}}).encode()
+        if fragment.startswith(site_prefix + "/setting/qos/gateway/voip"):
+            return 200, json.dumps({"errorCode": 0, "result": {"enable": False}}).encode()
+        if fragment.startswith(site_prefix + "/setting/qos/") or fragment.startswith(site_prefix + "/insight/qos"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
+        if fragment.startswith("autoBackup/autoBackupTask"):
+            return 200, json.dumps({"errorCode": 0, "result": {"enable": False}}).encode()
+        if fragment.startswith("autoBackup/gridAutoBackupFiles"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
+        if fragment.startswith("maintenance/backup/result"):
+            return 200, json.dumps({"errorCode": 0, "result": {"status": 0, "percent": 0}}).encode()
+        if fragment.startswith(f"hotspot/sites/{SITE_ID}/voucherGroups") or fragment.startswith(f"hotspot/sites/{SITE_ID}/vouchers"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
         if fragment.startswith(site_prefix + "/logs/") or fragment.startswith(site_prefix + "/audit/logs"):
             return 200, json.dumps({"errorCode": 0, "result": {"data": self.logs, "totalRows": len(self.logs)}}).encode()
         if fragment.endswith("/ports") and "/switches/" in fragment:

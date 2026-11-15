@@ -113,6 +113,11 @@ from .domains.networks_write import (
     set_vlan_isolation,
     update_lan_network,
 )
+from .domains.ops_hotspot_write import (
+    create_hotspot_vouchers,
+    export_controller_backup,
+    revoke_hotspot_voucher,
+)
 from .domains.rollback import rollback_from_snapshot
 from .domains.routing_dns_write import (
     delete_lan_dns_rule,
@@ -167,6 +172,15 @@ from .domains.switch_write import (
 from .domains.switch_write import (
     delete_port_profile as delete_port_profile,
 )
+from .domains.vpn_ddns_write import (
+    delete_ddns,
+    delete_wireguard_peer,
+    delete_wireguard_tunnel,
+    set_vpn_tunnel_status,
+    upsert_ddns,
+    upsert_wireguard_peer,
+    upsert_wireguard_tunnel,
+)
 from .domains.wireless_write import (
     _parse_ssid_security as _parse_ssid_security,
 )
@@ -188,11 +202,13 @@ __all__ = [
     "bind_poe_schedule",
     "create_eap_acl",
     "create_gateway_acl",
+    "create_hotspot_vouchers",
     "create_ip_group",
     "create_lan_network",
     "create_ssid",
     "create_switch_acl",
     "cycle_poe_port",
+    "delete_ddns",
     "delete_dhcp_reservation",
     "delete_gateway_acl",
     "delete_ip_group",
@@ -208,11 +224,15 @@ __all__ = [
     "delete_ssid",
     "delete_static_route",
     "delete_switch_lag",
+    "delete_wireguard_peer",
+    "delete_wireguard_tunnel",
+    "export_controller_backup",
     "pack_ip_entries",
     "reboot_device",
     "reconnect_client",
     "release_client_fixed_ip",
     "replace_ip_group",
+    "revoke_hotspot_voucher",
     "rollback_from_snapshot",
     "run_wlan_optimization",
     "set_acl_rule_status",
@@ -225,6 +245,7 @@ __all__ = [
     "set_upnp",
     "set_vlan_dhcp_pools",
     "set_vlan_isolation",
+    "set_vpn_tunnel_status",
     "start_rf_scan",
     "update_ap_radio",
     "update_client",
@@ -234,6 +255,7 @@ __all__ = [
     "update_ssid",
     "update_switch_global_features",
     "update_switch_port",
+    "upsert_ddns",
     "upsert_dhcp_reservation",
     "upsert_lan_dns_rule",
     "upsert_mdns_rule",
@@ -245,4 +267,6 @@ __all__ = [
     "upsert_schedule",
     "upsert_static_route",
     "upsert_switch_lag",
+    "upsert_wireguard_peer",
+    "upsert_wireguard_tunnel",
 ]
