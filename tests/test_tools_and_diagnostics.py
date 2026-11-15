@@ -446,6 +446,13 @@ class V11FeatureTests(unittest.TestCase):
             ("list_schedules", {}),
             ("list_controller_users", {}),
             ("get_controller_status", {}),
+            ("get_wifi_radio_features", {}),
+            ("get_ap_ssid_overrides", {"mac": "AA-BB-CC-00-00-02"}),
+            ("get_mesh_status", {}),
+            ("get_wlan_optimization_status", {}),
+            ("list_switch_lags", {"mac": "AA-BB-CC-00-00-03"}),
+            ("get_switch_global_features", {"mac": "AA-BB-CC-00-00-03"}),
+            ("list_poe_schedules", {}),
         ]
         self.assertEqual({name for name, _ in calls}, set(descriptors))
         for name, args in calls:

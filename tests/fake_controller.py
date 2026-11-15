@@ -209,6 +209,24 @@ class FakeController:
             return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
         if fragment.startswith(site_prefix + "/setting/profiles/timeranges"):
             return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
+        if fragment.startswith(site_prefix + "/setting/service/poeSchedules"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
+        if fragment == site_prefix + "/setting/wireless/feature" or fragment == site_prefix + "/setting":
+            return 200, json.dumps({"errorCode": 0, "result": {
+                "roaming": {"fastRoamingEnable": False},
+                "bandSteering": {"enable": False},
+                "airtimeFairness": {"enable2g": False, "enable5g": False, "enable6g": False},
+                "mesh": {"meshEnable": False},
+                "lldp": {"enable": True},
+            }}).encode()
+        if fragment == site_prefix + "/rfPlanning":
+            return 200, json.dumps({"errorCode": 0, "result": {"mode": 0, "scheduleEnable": False}}).encode()
+        if fragment == site_prefix + "/rfPlanning/result":
+            return 200, json.dumps({"errorCode": 0, "result": {"status": 1}}).encode()
+        if fragment == site_prefix + "/experienceIndex":
+            return 200, json.dumps({"errorCode": 0, "result": {"lastScan": []}}).encode()
+        if fragment == site_prefix + "/rfplanning/history":
+            return 200, json.dumps({"errorCode": 0, "result": {"firstDeploy": False}}).encode()
         if fragment.startswith(site_prefix + "/setting/ntp"):
             return 200, json.dumps({"errorCode": 0, "result": {"mode": 0, "timezone": "UTC"}}).encode()
         if fragment.startswith(site_prefix + "/setting/transmission/portForwardings"):
@@ -236,6 +254,10 @@ class FakeController:
                  "duplex": 2, "supportPoe": True, "poe": 1,
                  "portStatus": {"port": 1, "linkStatus": 1, "linkSpeed": 3, "duplex": 2, "poe": True, "poePower": 6.5}}
             ]}).encode()
+        if fragment.endswith("/lags") and "/switches/" in fragment:
+            return 200, json.dumps({"errorCode": 0, "result": []}).encode()
+        if fragment.endswith("/grid/mesh/candiParents") and "/eaps/" in fragment:
+            return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
         if fragment.endswith("/channelInfo") and "/eaps/" in fragment:
             return 200, json.dumps({"errorCode": 0, "result": {"data": [
                 {"radioId": 1, "band": "5G", "channelList": [

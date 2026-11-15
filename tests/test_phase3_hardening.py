@@ -311,6 +311,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
 
             sample_args: dict[str, dict[str, Any]] = {
                 "assign_ap_wlan_group": {"deviceMac": "AA-BB-CC-00-00-03", "wlanGroup": "Default"},
+                "bind_poe_schedule": {"poeSchedule": "poe-sched-1", "mac": "AA-BB-CC-00-00-02", "ports": [1, 2]},
                 "create_eap_acl": {
                     "name": "eap-test",
                     "policy": "deny",
@@ -346,13 +347,16 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "delete_lan_network": {"vlan": 40},
                 "delete_mac_group": {"group": "grp-mac-seed"},
                 "delete_mdns_rule": {"rule": "mdns-seed-1"},
+                "delete_poe_schedule": {"poeSchedule": "poe-sched-1"},
                 "delete_policy_route": {"routeId": "pr-seed-1"},
                 "delete_port_forward": {"rule": "pf-seed-1"},
                 "delete_port_group": {"group": "grp-port-seed"},
                 "delete_port_profile": {"profile": "65000000000000000000001e"},
+                "delete_rate_limit_profile": {"profile": "rl-prof-2"},
                 "delete_schedule": {"schedule": "sched-seed-1"},
                 "delete_ssid": {"ssid": "Lab-Guest", "wlanGroup": "Default"},
                 "delete_static_route": {"rule": "sr-seed-1"},
+                "delete_switch_lag": {"mac": "AA-BB-CC-00-00-02", "lagId": 1},
                 "reboot_device": {"mac": "AA-BB-CC-00-00-03"},
                 "reconnect_client": {"mac": "AA-BB-CC-11-11-02"},
                 "release_client_fixed_ip": {"mac": "AA-BB-CC-11-11-01"},
@@ -360,11 +364,17 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "rollback_from_snapshot": {"snapshotId": snap_id},
                 "run_ping": {"deviceMac": "AA-BB-CC-00-00-01", "target": "1.1.1.1"},
                 "run_traceroute": {"deviceMac": "AA-BB-CC-00-00-01", "target": "1.1.1.1"},
+                "run_wlan_optimization": {"action": "trigger"},
                 "set_acl_rule_status": {"rule": "acl-001", "status": False, "aclType": "gateway"},
+                "set_ap_ssid_overrides": {
+                    "mac": "AA-BB-CC-00-00-03",
+                    "overrides": [{"globalSsid": "CorpWiFi", "enable": True, "ssid": "LivingRoom"}],
+                },
                 "set_client_blocked": {"mac": "AA-BB-CC-11-11-01", "blocked": True},
                 "set_client_fixed_ip": {"mac": "AA-BB-CC-11-11-01", "ip": "192.168.20.55", "vlan": 20},
                 "set_client_lock_to_ap": {"clientMac": "AA-BB-CC-11-11-01", "enabled": True, "apMacs": ["AA-BB-CC-00-00-03"]},
                 "set_client_rate_limit": {"clientMac": "AA-BB-CC-11-11-01", "enabled": True, "rateLimitProfileId": "rl-prof-1"},
+                "set_switch_port_mirror": {"mac": "AA-BB-CC-00-00-02", "mirroringPort": 2, "mirroredPorts": [1]},
                 "set_upnp": {"enable": True},
                 "set_vlan_dhcp_pools": {"vlan": 20, "pools": [{"start": "192.168.20.100", "end": "192.168.20.200"}]},
                 "set_vlan_isolation": {"vlan": 20, "isolation": False},
@@ -377,6 +387,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "update_gateway_acl": {"rule": "acl-001", "aclType": "gateway", "status": False},
                 "update_lan_network": {"vlan": 20, "domain": "iot.local"},
                 "update_ssid": {"ssid": "Lab-Main", "wlanGroup": "Default", "broadcast": False, "psk": secret_tokens[0]},
+                "update_switch_global_features": {"mac": "AA-BB-CC-00-00-02", "jumboEnable": True, "jumbo": 9216},
                 "update_switch_port": {"deviceMac": "AA-BB-CC-00-00-02", "port": 3, "name": "ap-port"},
                 "upsert_dhcp_reservation": {"mac": "AA-BB-CC-11-22-88", "ip": "192.168.20.88", "vlan": 20},
                 "upsert_lan_dns_rule": {"name": "printer-host", "domain": "printer.lab.arpa", "ipAddresses": ["192.168.20.44"]},
@@ -387,6 +398,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                     "serviceNetworks": ["net-iot-20"],
                     "clientNetworks": ["net-mgmt-1"],
                 },
+                "upsert_poe_schedule": {"name": "PoE-New-Hours", "schedule": "Work-Hours", "enabled": True},
                 "upsert_policy_route": {
                     "name": "lab-wan",
                     "sourceType": 0,
@@ -403,10 +415,18 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 },
                 "upsert_port_group": {"name": "New-Ports", "ports": ["8080", "8443"]},
                 "upsert_port_profile": {"name": "IoT-Access", "nativeNetworkId": "net-iot-20"},
+                "upsert_rate_limit_profile": {
+                    "name": "Guest-Limit",
+                    "downLimitEnable": True,
+                    "downLimitKbps": 5000,
+                    "upLimitEnable": True,
+                    "upLimitKbps": 2000,
+                },
                 "upsert_schedule": {"name": "Work-Hours", "dayMode": "weekday", "windows": [{"start": "09:00", "end": "17:00"}]},
                 "upsert_static_route": {"name": "lab-subnet", "destination": "10.88.0.0/16", "nextHop": "192.168.40.254"},
+                "upsert_switch_lag": {"mac": "AA-BB-CC-00-00-02", "lagId": 1, "ports": [1, 2], "lagType": "lacp"},
             }
-            self.assertEqual(len(WRITE_TOOL_NAMES), 57)
+            self.assertEqual(len(WRITE_TOOL_NAMES), 68)
             self.assertEqual(set(sample_args.keys()), set(WRITE_TOOL_NAMES))
 
             for tool_name in sorted(WRITE_TOOL_NAMES):

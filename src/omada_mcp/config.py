@@ -115,6 +115,17 @@ WRITE_TOOL_NAMES: tuple[str, ...] = (
     "run_traceroute",
     "start_wan_speedtest",
     "start_cable_test",
+    "upsert_rate_limit_profile",
+    "delete_rate_limit_profile",
+    "set_ap_ssid_overrides",
+    "run_wlan_optimization",
+    "upsert_switch_lag",
+    "delete_switch_lag",
+    "update_switch_global_features",
+    "set_switch_port_mirror",
+    "upsert_poe_schedule",
+    "bind_poe_schedule",
+    "delete_poe_schedule",
 )
 
 _READ_ONLY_TOOL_NAMES = frozenset({
@@ -158,6 +169,13 @@ _READ_ONLY_TOOL_NAMES = frozenset({
     "list_schedules",
     "list_controller_users",
     "get_controller_status",
+    "get_wifi_radio_features",
+    "get_ap_ssid_overrides",
+    "get_mesh_status",
+    "get_wlan_optimization_status",
+    "list_switch_lags",
+    "get_switch_global_features",
+    "list_poe_schedules",
 })
 
 _TRUE = {"1", "true", "yes", "on", "y", "t"}

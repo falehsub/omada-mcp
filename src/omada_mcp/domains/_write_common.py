@@ -549,14 +549,16 @@ def _parse_code_map(value: Any, mapping: Mapping[str, int], *, label: str) -> in
 
 
 def _field_diff(
-    before: Mapping[str, Any],
-    after: Mapping[str, Any],
+    before: Mapping[str, Any] | None,
+    after: Mapping[str, Any] | None,
     keys: Sequence[str],
 ) -> dict[str, dict[str, Any]]:
+    before_map = before or {}
+    after_map = after or {}
     out: dict[str, dict[str, Any]] = {}
     for k in keys:
-        bv = before.get(k)
-        av = after.get(k)
+        bv = before_map.get(k)
+        av = after_map.get(k)
         if bv != av:
             out[str(k)] = {"before": copy.deepcopy(bv), "after": copy.deepcopy(av)}
     return out

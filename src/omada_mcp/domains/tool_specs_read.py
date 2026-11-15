@@ -92,6 +92,22 @@ from .security_read import (
     _list_rate_limit_profiles,
     _list_schedules,
 )
+from .switch_wifi_read import (
+    _AP_SSID_OVERRIDES_SCHEMA,
+    _MESH_STATUS_SCHEMA,
+    _POE_SCHEDULE_SCHEMA,
+    _SWITCH_GLOBAL_FEATURES_SCHEMA,
+    _SWITCH_LAGS_SCHEMA,
+    _WIFI_RADIO_FEATURES_SCHEMA,
+    _WLAN_OPTIMIZATION_SCHEMA,
+    _get_ap_ssid_overrides,
+    _get_mesh_status,
+    _get_switch_global_features,
+    _get_wifi_radio_features,
+    _get_wlan_optimization_status,
+    _list_poe_schedules,
+    _list_switch_lags,
+)
 
 READ_TOOLS: list[Tool] = [
     Tool(
@@ -236,9 +252,10 @@ READ_TOOLS: list[Tool] = [
                     "type": "array",
                     "items": {"type": "string", "enum": list(_SNAPSHOT_ALL_OBJECTS)},
                     "description": (
-                        "Optional subset of sections to fetch: networks, acls, groups, wlans, "
-                        "devices, clients, schedules, dhcpReservations, portForwards, staticRoutes, "
-                        "mdnsRules, services (defaults to networks, acls, groups, wlans, devices)"
+                        "Optional subset of sections to fetch: networks, acls, groups, schedules, wlans, "
+                        "devices, clients, dhcpReservations, portForwards, staticRoutes, "
+                        "mdnsRules, services, rateLimitProfiles, poeSchedules, wirelessFeature, "
+                        "rfPlanning (defaults to networks, acls, groups, wlans, devices)"
                     ),
                 },
             },
@@ -697,5 +714,101 @@ READ_TOOLS: list[Tool] = [
         input_schema=_EMPTY,
         output_schema=_CONTROLLER_STATUS_SCHEMA,
         handler=_get_controller_status,
+    ),
+    Tool(
+        name="get_wifi_radio_features",
+        title="Get site Wi-Fi radio & roaming features",
+        description=(
+            "Read site-wide Wi-Fi roaming (802.11r/k, AI roaming), band steering, airtime fairness, "
+            "mesh policy, beacon control, and multicast rate-limit settings."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_WIFI_RADIO_FEATURES_SCHEMA,
+        handler=_get_wifi_radio_features,
+    ),
+    Tool(
+        name="get_ap_ssid_overrides",
+        title="Get per-AP SSID overrides",
+        description=(
+            "Read an AP's bound WLAN group and per-SSID overrides (enabled, custom SSID, VLAN ID, PSK flag; secret stripped)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "AP MAC address or exact name"},
+            },
+            "required": ["mac"],
+        },
+        output_schema=_AP_SSID_OVERRIDES_SCHEMA,
+        handler=_get_ap_ssid_overrides,
+    ),
+    Tool(
+        name="get_mesh_status",
+        title="Get Wi-Fi mesh status & links",
+        description=(
+            "Read site mesh settings and per-AP wireless mesh role, wired/wireless uplink state, "
+            "downlink children, and candidate mesh parents."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Optional AP MAC or exact name to inspect one AP cleanly"},
+            },
+        },
+        output_schema=_MESH_STATUS_SCHEMA,
+        handler=_get_mesh_status,
+    ),
+    Tool(
+        name="get_wlan_optimization_status",
+        title="Get AI RF optimization status",
+        description=(
+            "Read AI WLAN / RF optimization configuration, schedule, active scan status, and experience score history."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_WLAN_OPTIMIZATION_SCHEMA,
+        handler=_get_wlan_optimization_status,
+    ),
+    Tool(
+        name="list_switch_lags",
+        title="List switch LAG / LACP port channels",
+        description=(
+            "List configured LAG/LACP port-channel groups, member ports, and LAG hardware limits on a switch."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Switch MAC address or exact name"},
+            },
+            "required": ["mac"],
+        },
+        output_schema=_SWITCH_LAGS_SCHEMA,
+        handler=_list_switch_lags,
+    ),
+    Tool(
+        name="get_switch_global_features",
+        title="Get switch global L2 features",
+        description=(
+            "Read switch-level STP/RSTP/MSTP mode and timers, loopback detection, jumbo frame MTU, "
+            "multicast, port-mirroring sessions, and hardware L2 capabilities."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Switch MAC address or exact name"},
+            },
+            "required": ["mac"],
+        },
+        output_schema=_SWITCH_GLOBAL_FEATURES_SCHEMA,
+        handler=_get_switch_global_features,
+    ),
+    Tool(
+        name="list_poe_schedules",
+        title="List PoE port schedules",
+        description=(
+            "List PoE power schedules with resolved time-range schedule names and switch-port bindings."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_list_output_schema(_POE_SCHEDULE_SCHEMA),
+        handler=_list_poe_schedules,
     ),
 ]

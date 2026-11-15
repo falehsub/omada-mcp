@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..client import OmadaClient, OmadaError
-from ._common import as_int, as_mapping, deep_redact, resolve_raw_device
+from ._common import as_int, as_mapping, deep_redact, resolve_device_detail, resolve_raw_device
 from ._write_common import (
     _NON_REVERSIBLE_SNAPSHOT_TOOLS,
     _committed_result,
@@ -29,10 +29,13 @@ from ._write_fetchers import (
     _fetch_lan_dns_rules,
     _fetch_lan_profiles,
     _fetch_mdns_rules,
+    _fetch_poe_schedules,
     _fetch_policy_routes,
     _fetch_port_forwards,
+    _fetch_rate_limit_profiles,
     _fetch_schedules,
     _fetch_static_routes,
+    _fetch_switch_lags,
     _fetch_typed_acls,
     _omada_mac,
     _strip_client_volatiles,
@@ -784,6 +787,258 @@ def rollback_from_snapshot(
             read_back_fn=lambda: next((r for r in _fetch_typed_acls(client, site, acl_type) if str(r.get("name")) == str(snap_data.get("name"))), None),
             verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == str(snap_data.get("name")), "ACL rollback verification failed"),
         )
+
+    if orig_tool in ("upsert_rate_limit_profile", "delete_rate_limit_profile") and isinstance(snap_data, Mapping):
+        if snap_data.get("action") == "create":
+            existing_ids = set(snap_data.get("existingIds") or [])
+            rows = _fetch_rate_limit_profiles(client, site)
+            target = next(
+                (r for r in rows if str(r.get("name")) == str(snap_data.get("name")) and str(r.get("id")) not in existing_ids),
+                None,
+            ) or next((r for r in rows if str(r.get("name")) == str(snap_data.get("name"))), None)
+            if target is None or not target.get("id"):
+                raise OmadaError(f"cannot locate created rate-limit profile {snap_data.get('name')!r} to delete on rollback")
+            pid = str(target["id"])
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/profiles/rateLimits/{pid}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_rate_limit_profiles(client, site),
+                verify_fn=lambda _b, a: (all(str(r.get("id")) != pid for r in a), f"rate-limit profile {pid} still present"),
+            )
+        prof = as_mapping(snap_data.get("profile")) or snap_data
+        pid = str(prof.get("id") or "")
+        pname = str(prof.get("name") or "")
+        body = {
+            "name": pname,
+            "downLimitEnable": bool(prof.get("downLimitEnable", False)),
+            "downLimit": as_int(prof.get("downLimit"), 0) if prof.get("downLimitEnable") else 0,
+            "downLimitUnit": as_int(prof.get("downLimitUnit"), 1) or 1,
+            "upLimitEnable": bool(prof.get("upLimitEnable", False)),
+            "upLimit": as_int(prof.get("upLimit"), 0) if prof.get("upLimitEnable") else 0,
+            "upLimitUnit": as_int(prof.get("upLimitUnit"), 1) or 1,
+        }
+        rows = _fetch_rate_limit_profiles(client, site)
+        live = next((r for r in rows if str(r.get("id")) == pid), None)
+        method = "PATCH" if live is not None and pid else "POST"
+        ep = f"sites/{site.site_id}/setting/profiles/rateLimits/{pid}" if method == "PATCH" else f"sites/{site.site_id}/setting/profiles/rateLimits"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=prof,
+            read_back_fn=lambda: next((r for r in _fetch_rate_limit_profiles(client, site) if str(r.get("name")) == pname), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == pname, "rate-limit rollback verification failed"),
+        )
+
+    if orig_tool in ("upsert_poe_schedule", "bind_poe_schedule", "delete_poe_schedule") and isinstance(snap_data, Mapping):
+        if snap_data.get("action") == "create":
+            rows = _fetch_poe_schedules(client, site)
+            target = next((r for r in rows if str(r.get("name")) == str(snap_data.get("name"))), None)
+            if target is None or not target.get("id"):
+                raise OmadaError(f"cannot locate created PoE schedule {snap_data.get('name')!r} to delete on rollback")
+            pid = str(target["id"])
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/service/poeSchedules/{pid}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_poe_schedules(client, site),
+                verify_fn=lambda _b, a: (all(str(r.get("id")) != pid for r in a), f"PoE schedule {pid} still present"),
+            )
+        poe = as_mapping(snap_data.get("poeSchedule")) or snap_data
+        pname = str(poe.get("name") or "")
+        rows = _fetch_poe_schedules(client, site)
+        live = next((r for r in rows if str(r.get("name")) == pname), None)
+        pid = str(live["id"]) if live and live.get("id") else str(poe.get("id") or "")
+        body = {
+            "name": pname,
+            "status": bool(poe.get("status", True)),
+            "turnOnTime": str(poe.get("turnOnTime") or ""),
+            "poePortsMap": copy.deepcopy(poe.get("poePortsMap") or {}),
+        }
+        method = "PUT" if live is not None and pid else "POST"
+        ep = f"sites/{site.site_id}/setting/service/poeSchedules/{pid}" if method == "PUT" else f"sites/{site.site_id}/setting/service/poeSchedules"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=poe,
+            read_back_fn=lambda: next((r for r in _fetch_poe_schedules(client, site) if str(r.get("name")) == pname), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == pname, "PoE schedule rollback verification failed"),
+        )
+
+    if orig_tool == "update_switch_global_features" and isinstance(snap_data, Mapping):
+        before_sw = as_mapping(snap_data.get("before"))
+        raw_sw = as_mapping(snap_data.get("raw"))
+        dev_mac = _omada_mac(str(snap_data.get("mac") or orig_target))
+        is_es = bool(snap_data.get("es", False))
+        if before_sw and orig_target.endswith(":general"):
+            gen_body = {
+                "name": str(raw_sw.get("name") or dev_mac),
+                "ledSetting": as_int(raw_sw.get("ledSetting"), 2),
+                "tagIds": list(raw_sw.get("tagIds") or []),
+                "jumbo": before_sw.get("jumbo", 1518),
+                "jumboEnable": bool(before_sw.get("jumboEnable", False)),
+            }
+            live_sw = resolve_device_detail(client, site, dev_mac, expected_type="switch")
+            return _run_restore(
+                method="PUT",
+                endpoint=f"sites/{site.site_id}/switches/{'es/' if is_es else ''}{dev_mac}/config/general",
+                payload=gen_body,
+                live_before=deep_redact(live_sw),
+                restore_preview=before_sw,
+                read_back_fn=lambda: deep_redact(resolve_device_detail(client, site, dev_mac, expected_type="switch")),
+                verify_fn=lambda _b, a: (isinstance(a, Mapping) and a.get("jumbo") == gen_body["jumbo"], "switch general features rollback verification failed"),
+            )
+        if before_sw:
+            svc_body = {
+                "stp": 0 if (is_es and before_sw.get("loopbackDetectEnable")) else before_sw.get("stp", 2),
+                "priority": before_sw.get("priority", 32768),
+                "helloTime": before_sw.get("helloTime", 2),
+                "maxAge": before_sw.get("maxAge", 20),
+                "forwardDelay": before_sw.get("forwardDelay", 15),
+                "txHoldCount": before_sw.get("txHoldCount", 5),
+                "maxHops": before_sw.get("maxHops", 20),
+                "loopbackDetectEnable": bool(before_sw.get("loopbackDetectEnable", False)),
+            }
+            live_sw = resolve_device_detail(client, site, dev_mac, expected_type="switch")
+            return _run_restore(
+                method="PUT",
+                endpoint=f"sites/{site.site_id}/switches/{dev_mac}/config/services",
+                payload=svc_body,
+                live_before=deep_redact(live_sw),
+                restore_preview=before_sw,
+                read_back_fn=lambda: deep_redact(resolve_device_detail(client, site, dev_mac, expected_type="switch")),
+                verify_fn=lambda _b, a: (isinstance(a, Mapping) and a.get("stp") == svc_body["stp"], "switch global features rollback verification failed"),
+            )
+
+    if orig_tool == "set_switch_port_mirror" and isinstance(snap_data, Mapping):
+        dev_mac = _omada_mac(str(snap_data.get("mac") or ""))
+        mport = as_int(snap_data.get("mirroringPort"), 0)
+        raw_p = as_mapping(snap_data.get("rawPort")) or {}
+        if dev_mac and mport > 0:
+            payload = _build_switch_port_patch(raw_p)
+            op = str(raw_p.get("operation") or "switching")
+            payload["operation"] = op
+            if op == "mirroring":
+                payload["mirroredPorts"] = list(raw_p.get("mirroredPorts") or [])
+            return _run_restore(
+                method="PATCH",
+                endpoint=f"sites/{site.site_id}/switches/{dev_mac}/ports/{mport}",
+                payload=payload,
+                live_before=None,
+                restore_preview=payload,
+                read_back_fn=lambda: client.api_result(f"sites/{site.site_id}/switches/{dev_mac}/ports/{mport}"),
+                verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("operation") or "switching") == op, "port mirror rollback failed"),
+            )
+
+    if orig_tool in ("upsert_switch_lag", "delete_switch_lag") and isinstance(snap_data, Mapping):
+        dev_mac = _omada_mac(str(snap_data.get("mac") or ""))
+        lid = as_int(snap_data.get("lagId"), 0)
+        if snap_data.get("action") == "create" and dev_mac and lid > 0:
+            live_lag = next((r for r in _fetch_switch_lags(client, site, dev_mac) if as_int(r.get("lagId"), -1) == lid), None)
+            if live_lag is None:
+                raise OmadaError(f"LAG {lid} not found on switch {dev_mac} for rollback delete")
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/switches/{dev_mac}/lags/{lid}",
+                payload=None,
+                live_before=live_lag,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_switch_lags(client, site, dev_mac),
+                verify_fn=lambda _b, a: (all(as_int(r.get("lagId"), -1) != lid for r in a), f"LAG {lid} still present"),
+            )
+        lag_obj = as_mapping(snap_data.get("lag"))
+        if lag_obj and dev_mac and lid > 0:
+            ports_rb = list(lag_obj.get("ports") or [])
+            if ports_rb:
+                body = {
+                    "name": lag_obj.get("name") or f"LAG {lid}",
+                    "profileId": str(lag_obj.get("profileId") or ""),
+                    "profileOverrideEnable": bool(lag_obj.get("profileOverrideEnable", False)),
+                    "operation": "aggregating",
+                    "lagSetting": {"lagId": lid, "lagType": lag_obj.get("lagType", 1), "ports": ports_rb},
+                }
+                return _run_restore(
+                    method="PATCH",
+                    endpoint=f"sites/{site.site_id}/switches/{dev_mac}/ports/{ports_rb[0]}",
+                    payload=body,
+                    live_before=None,
+                    restore_preview=lag_obj,
+                    read_back_fn=lambda: _fetch_switch_lags(client, site, dev_mac),
+                    verify_fn=lambda _b, a: (any(as_int(r.get("lagId"), -1) == lid for r in a), f"LAG {lid} restore failed"),
+                )
+
+    if orig_tool == "run_wlan_optimization" and isinstance(snap_data, Mapping):
+        cfg_before = as_mapping(snap_data.get("configBefore"))
+        if cfg_before and snap_data.get("action") == "configure":
+            if orig_target.endswith(":config"):
+                prev_mode = as_int(cfg_before.get("mode"), 0)
+                if prev_mode == 1:
+                    cfg_payload: dict[str, Any] = {
+                        "mode": 1,
+                        "customSetting": {
+                            "channelDeployEnable": bool(cfg_before.get("channelDeployEnable", True)),
+                            "powerAdjustEnable": bool(cfg_before.get("powerAdjustEnable", True)),
+                            "channelWidthDeployEnable": bool(cfg_before.get("channelWidthDeployEnable", True)),
+                            "bandDeployEnable": bool(cfg_before.get("bandDeployEnable", True)),
+                            "channelDeployEnable2g": bool(cfg_before.get("channelDeployEnable2g", True)),
+                            "channelDeployEnable5g": bool(cfg_before.get("channelDeployEnable5g", True)),
+                            "channelDeployEnable6g": bool(cfg_before.get("channelDeployEnable6g", True)),
+                            "powerAdjustEnable2g": bool(cfg_before.get("powerAdjustEnable2g", True)),
+                            "powerAdjustEnable5g": bool(cfg_before.get("powerAdjustEnable5g", True)),
+                            "powerAdjustEnable6g": bool(cfg_before.get("powerAdjustEnable6g", True)),
+                            "chanWidth2g": as_int(cfg_before.get("chanWidth2g"), 0),
+                            "chanWidth5g": as_int(cfg_before.get("chanWidth5g"), 0),
+                            "chanWidth6g": as_int(cfg_before.get("chanWidth6g"), 0),
+                        },
+                    }
+                else:
+                    cfg_payload = {"mode": 0}
+                return _run_restore(
+                    method="PUT",
+                    endpoint=f"sites/{site.site_id}/rfPlanning/config",
+                    payload=cfg_payload,
+                    live_before=None,
+                    restore_preview=cfg_before,
+                    read_back_fn=lambda: client.api_result(f"sites/{site.site_id}/rfPlanning"),
+                    verify_fn=lambda _b, a: (isinstance(a, Mapping) and as_int(a.get("mode"), -1) == prev_mode, "rfPlanning config rollback failed"),
+                )
+            return _run_restore(
+                method="PUT",
+                endpoint=f"sites/{site.site_id}/rfPlanning/schedule",
+                payload={
+                    "scheduleEnable": bool(cfg_before.get("scheduleEnable", False)),
+                    "occurrence": copy.deepcopy(cfg_before.get("occurrence") or {"timingType": 1, "hour": 0, "minute": 0}),
+                },
+                live_before=None,
+                restore_preview=cfg_before,
+                read_back_fn=lambda: client.api_result(f"sites/{site.site_id}/rfPlanning"),
+                verify_fn=lambda _b, a: (isinstance(a, Mapping), "rfPlanning rollback failed"),
+            )
+
+    if orig_tool == "set_ap_ssid_overrides" and isinstance(snap_data, Mapping):
+        dev_mac = _omada_mac(str(snap_data.get("mac") or orig_target))
+        wlan_id = str(snap_data.get("wlanId") or "")
+        overrides = [dict(o) for o in (snap_data.get("ssidOverrides") or []) if isinstance(o, Mapping)]
+        if dev_mac and wlan_id:
+            body = {"wlanId": wlan_id, "ssidOverrides": overrides}
+            live_ap = resolve_device_detail(client, site, dev_mac, expected_type="ap")
+            return _run_restore(
+                method="PUT",
+                endpoint=f"sites/{site.site_id}/eaps/{dev_mac}/config/wlans",
+                payload=body,
+                live_before=deep_redact(live_ap),
+                restore_preview=snap_data,
+                read_back_fn=lambda: deep_redact(resolve_device_detail(client, site, dev_mac, expected_type="ap")),
+                verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("wlanId") or "") == wlan_id, "AP SSID overrides rollback failed"),
+            )
 
     raise OmadaError(
         f"snapshot {sid!r} from tool {orig_tool!r} does not have an automatic rollback handler for its stored payload shape",

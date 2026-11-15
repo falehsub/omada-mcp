@@ -39,8 +39,10 @@ SERVER_NAME = "omada-mcp"
 
 INSTRUCTIONS = (
     "Read-only access by default to a TP-Link Omada SDN controller through its Web API v2. "
-    "Forty read-only tools are always available, including list_sites, get_site_info, "
+    "47 read-only tools are always available, including list_sites, get_site_info, "
     "get_config_snapshot, diff_config_snapshots, network_audit, get_switch_ports, get_ap_radios, "
+    "get_wifi_radio_features, get_ap_ssid_overrides, get_mesh_status, get_wlan_optimization_status, "
+    "list_switch_lags, get_switch_global_features, list_poe_schedules, "
     "get_wan_status, get_topology, diagnose_client, diagnose_wan, get_controller_status, "
     "list_blocked_clients, list_rate_limit_profiles, list_schedules, list_controller_users, "
     "list_devices / list_clients, get_device / get_client, and explain_error. Most tools accept an optional site name/ID. "

@@ -200,7 +200,7 @@ class Milestone3MonitorAndPackagingTests(unittest.TestCase):
             env=env, text=True,
         )
         data = json.loads(out)
-        self.assertEqual(len(data["tools"]), 40)
+        self.assertEqual(len(data["tools"]), 47)
 
 
 class OptimizationTests(unittest.TestCase):
@@ -522,7 +522,16 @@ class OptimizationTests(unittest.TestCase):
         line = buf.getvalue().strip()
         self.assertNotIn("\n", line)
         parsed = json.loads(line)
-        self.assertEqual({t["name"] for t in parsed["tools"]}, {"get_switch_ports", "list_port_profiles"})
+        self.assertEqual(
+            {t["name"] for t in parsed["tools"]},
+            {
+                "get_switch_ports",
+                "list_port_profiles",
+                "list_switch_lags",
+                "get_switch_global_features",
+                "list_poe_schedules",
+            },
+        )
 
         # OMADA_COMPACT_OUTPUT=true vs false and get_switch_ports(includeDownPorts=False, compact=True).
         ctrl = MockController(username="admin", password="pw", role="Administrator")
@@ -565,7 +574,7 @@ class OptimizationTests(unittest.TestCase):
         with mock.patch("sys.stdout", buf_ro), \
              mock.patch.dict(os.environ, {"OMADA_WRITE_TOOLS": "set_client_fixed_ip"}, clear=True):
             self.assertEqual(cli_main(["--list-tools"]), 0)
-        self.assertEqual(len(json.loads(buf_ro.getvalue())["tools"]), 40)
+        self.assertEqual(len(json.loads(buf_ro.getvalue())["tools"]), 47)
 
         buf_wr = io.StringIO()
         with mock.patch("sys.stdout", buf_wr), \
@@ -575,7 +584,7 @@ class OptimizationTests(unittest.TestCase):
                  clear=True,
              ):
             self.assertEqual(cli_main(["--list-tools"]), 0)
-        self.assertEqual(len(json.loads(buf_wr.getvalue())["tools"]), 41)
+        self.assertEqual(len(json.loads(buf_wr.getvalue())["tools"]), 48)
         srv_pretty = Server(cfg_pretty, client=client)
         r_pretty = srv_pretty.handle({
             "jsonrpc": "2.0", "id": 12, "method": "tools/call",

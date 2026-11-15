@@ -27,13 +27,25 @@ from .routing_dns_write import (
     upsert_lan_dns_rule,
     upsert_policy_route,
 )
-from .schedules_write import delete_schedule, upsert_schedule
+from .schedules_write import (
+    bind_poe_schedule,
+    delete_poe_schedule,
+    delete_schedule,
+    upsert_poe_schedule,
+    upsert_schedule,
+)
 from .security_acls_write import create_eap_acl, create_switch_acl
 from .security_groups_write import (
     delete_mac_group,
     delete_port_group,
     upsert_mac_group,
     upsert_port_group,
+)
+from .switch_l2_write import (
+    delete_switch_lag,
+    set_switch_port_mirror,
+    update_switch_global_features,
+    upsert_switch_lag,
 )
 from .switch_write import (
     cycle_poe_port,
@@ -42,7 +54,13 @@ from .switch_write import (
     update_switch_port,
     upsert_port_profile,
 )
-from .wireless_write import assign_ap_wlan_group
+from .wireless_write import (
+    assign_ap_wlan_group,
+    delete_rate_limit_profile,
+    run_wlan_optimization,
+    set_ap_ssid_overrides,
+    upsert_rate_limit_profile,
+)
 
 WRITE_TOOLS_B: list[Tool] = [
     Tool(
@@ -844,5 +862,310 @@ WRITE_TOOLS_B: list[Tool] = [
         read_only=False,
         destructive=True,
         idempotent=False,
+    ),
+    Tool(
+        name="upsert_rate_limit_profile",
+        title="Create or update rate-limit profile",
+        description=(
+            "Create or update a client bandwidth rate-limit profile (setting/profiles/rateLimits) "
+            "with download/upload Kbps caps."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Rate-limit profile name"},
+                "profileId": {"type": "string", "description": "Optional existing profile ID to update"},
+                "downLimitEnable": {"type": "boolean"},
+                "downLimitKbps": {"type": "integer", "minimum": 1, "description": "Download limit in Kbps"},
+                "upLimitEnable": {"type": "boolean"},
+                "upLimitKbps": {"type": "integer", "minimum": 1, "description": "Upload limit in Kbps"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=upsert_rate_limit_profile,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="delete_rate_limit_profile",
+        title="Delete rate-limit profile",
+        description=(
+            "Delete a rate-limit profile (refuses the built-in Default profile or profiles referenced by SSIDs/clients)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "profile": {"type": "string", "description": "Rate-limit profile ID or exact name"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["profile"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=delete_rate_limit_profile,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="set_ap_ssid_overrides",
+        title="Set per-AP SSID overrides",
+        description=(
+            "Configure per-AP SSID overrides (custom SSID name, enable/disable, VLAN, or PSK) via "
+            "PUT eaps/{MAC}/config/wlans; never logs or returns PSK secrets."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "AP MAC address or exact name"},
+                "wlanGroup": {"type": "string", "description": "Optional WLAN group ID or exact name"},
+                "overrides": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of override patch objects matching by index, globalSsid, or ssid",
+                },
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["mac", "overrides"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=set_ap_ssid_overrides,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="run_wlan_optimization",
+        title="Configure or trigger AI RF optimization",
+        description=(
+            "Configure AI RF Planning band/power/schedule settings and/or trigger or cancel WLAN optimization "
+            "(rfPlanning/config, rfPlanning/schedule, cmd/rfPlanning/optimization)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["trigger", "configure", "cancel"],
+                    "default": "trigger",
+                    "description": "Action to perform: trigger scan, configure settings only, or cancel running scan",
+                },
+                "mode": {"type": ["string", "integer"], "description": "'auto' (0) or 'custom' (1)"},
+                "channelDeployEnable2g": {"type": "boolean"},
+                "channelDeployEnable5g": {"type": "boolean"},
+                "channelDeployEnable6g": {"type": "boolean"},
+                "powerAdjustEnable2g": {"type": "boolean"},
+                "powerAdjustEnable5g": {"type": "boolean"},
+                "powerAdjustEnable6g": {"type": "boolean"},
+                "chanWidth2g": {"type": "integer"},
+                "chanWidth5g": {"type": "integer"},
+                "chanWidth6g": {"type": "integer"},
+                "scheduleEnable": {"type": "boolean"},
+                "timingType": {"type": "integer", "description": "1=daily, 2=weekly, 3=monthly"},
+                "hour": {"type": "integer", "minimum": 0, "maximum": 23},
+                "minute": {"type": "integer", "minimum": 0, "maximum": 59},
+                "dayOfWeek": {"type": "integer", "minimum": 0, "maximum": 6},
+                "dayOfMonth": {"type": "integer", "minimum": 1, "maximum": 31},
+                **_WRITE_CONTROL_PROPS,
+            },
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=run_wlan_optimization,
+        read_only=False,
+        destructive=True,
+        idempotent=False,
+    ),
+    Tool(
+        name="upsert_switch_lag",
+        title="Create or update switch LAG / LACP group",
+        description=(
+            "Create or update a switch LAG/LACP port-channel group (switches/{MAC}/lags or aggregating ports) "
+            "with anti-stranding uplink/controller-port safety checks."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Switch MAC address or exact name"},
+                "lagId": {"type": "integer", "minimum": 1, "maximum": 64, "description": "LAG ID (1..64)"},
+                "ports": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 1},
+                    "description": "Two or more switch port numbers in this LAG",
+                },
+                "lagType": {
+                    "type": ["string", "integer"],
+                    "default": "static",
+                    "description": "'static' (1), 'lacp' (2), 'lacp_active' (3), or 'lacp_passive' (4)",
+                },
+                "name": {"type": "string", "description": "Optional LAG interface label"},
+                "profileId": {"type": "string"},
+                "profileName": {"type": "string"},
+                "allowUplinkMutation": {"type": "boolean", "default": False},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["mac", "lagId", "ports"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=upsert_switch_lag,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="delete_switch_lag",
+        title="Delete switch LAG group",
+        description=(
+            "Remove a switch LAG/LACP port-channel group (DELETE switches/{MAC}/lags/{lagId}; "
+            "blocks removing an active uplink/controller-carrying LAG unless allowUplinkMutation=true)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Switch MAC address or exact name"},
+                "lagId": {"type": "integer", "minimum": 1, "maximum": 64},
+                "allowUplinkMutation": {"type": "boolean", "default": False},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["mac", "lagId"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=delete_switch_lag,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="update_switch_global_features",
+        title="Update switch global L2 features",
+        description=(
+            "Update switch-level STP/RSTP/MSTP mode and timers, loopback detection, and jumbo frame MTU "
+            "(switches/{MAC}/config/general and switches/{MAC}/config/services)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Switch MAC address or exact name"},
+                "stpMode": {"type": ["string", "integer"], "description": "'off' (0), 'stp' (1), 'rstp' (2), or 'mstp' (3)"},
+                "stpPriority": {"type": "integer", "minimum": 0, "maximum": 61440},
+                "helloTime": {"type": "integer", "minimum": 1, "maximum": 10},
+                "maxAge": {"type": "integer", "minimum": 6, "maximum": 40},
+                "forwardDelay": {"type": "integer", "minimum": 4, "maximum": 30},
+                "txHoldCount": {"type": "integer", "minimum": 1, "maximum": 20},
+                "maxHops": {"type": "integer", "minimum": 1, "maximum": 40},
+                "loopbackDetectEnable": {"type": "boolean"},
+                "jumboEnable": {"type": "boolean"},
+                "jumbo": {"type": "integer", "minimum": 1518, "maximum": 9216},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["mac"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=update_switch_global_features,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="set_switch_port_mirror",
+        title="Configure or clear switch port mirroring",
+        description=(
+            "Configure a switch port as a SPAN mirror destination monitoring mirroredPorts/mirroredLags, "
+            "or pass mirroredPorts=[] to restore normal switching (refuses mirroring destination on active uplink)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Switch MAC address or exact name"},
+                "mirroringPort": {"type": "integer", "minimum": 1, "description": "Destination analyzer port number"},
+                "mirroredPorts": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 1},
+                    "description": "Source port numbers to mirror (empty list [] clears mirroring)",
+                },
+                "mirroredLags": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+                "allowUplinkMutation": {"type": "boolean", "default": False},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["mac", "mirroringPort", "mirroredPorts"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=set_switch_port_mirror,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="upsert_poe_schedule",
+        title="Create or update PoE power schedule",
+        description=(
+            "Create or update a site PoE power schedule referencing a time-range profile and optional switch port bindings."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "PoE schedule name"},
+                "poeScheduleId": {"type": "string", "description": "Optional existing PoE schedule ID to update"},
+                "schedule": {"type": "string", "description": "Time-range profile ID or exact name (turnOnTime)"},
+                "enabled": {"type": "boolean", "default": True},
+                "portBindings": {
+                    "type": "object",
+                    "description": "Optional map of switch MAC/name -> list of PoE port numbers",
+                },
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=upsert_poe_schedule,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="bind_poe_schedule",
+        title="Bind switch ports to PoE schedule",
+        description=(
+            "Attach or replace a switch's PoE ports on an existing PoE schedule (setting/service/poeSchedules)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "poeSchedule": {"type": "string", "description": "PoE schedule ID or exact name"},
+                "mac": {"type": "string", "description": "Switch MAC address or exact name"},
+                "ports": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+                "replace": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Replace existing bindings for this switch (pass ports=[] + replace=true to unbind)",
+                },
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["poeSchedule", "mac", "ports"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=bind_poe_schedule,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="delete_poe_schedule",
+        title="Delete PoE power schedule",
+        description="Delete a PoE power schedule by ID or exact name.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "poeSchedule": {"type": "string", "description": "PoE schedule ID or exact name"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["poeSchedule"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=delete_poe_schedule,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
     ),
 ]

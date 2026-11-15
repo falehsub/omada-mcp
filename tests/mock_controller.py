@@ -188,6 +188,28 @@ class MockController:
 
         sw_detail = copy.deepcopy(sp_fx["switch_detail"])
         sw_detail.update({"mac": "AA-BB-CC-00-00-02", "name": "sw-access"})
+        sw_detail.setdefault("stp", 2)
+        sw_detail.setdefault("priority", 32768)
+        sw_detail.setdefault("helloTime", 2)
+        sw_detail.setdefault("maxAge", 20)
+        sw_detail.setdefault("forwardDelay", 15)
+        sw_detail.setdefault("txHoldCount", 5)
+        sw_detail.setdefault("maxHops", 20)
+        sw_detail.setdefault("loopbackDetectEnable", True)
+        sw_detail.setdefault("jumbo", 1518)
+        sw_detail.setdefault("jumboEnable", False)
+        sw_detail.setdefault("multicast", True)
+        sw_detail.setdefault("es", False)
+        sw_cap = sw_detail.setdefault("devCap", {})
+        sw_cap.setdefault("maxLagNum", 8)
+        sw_cap.setdefault("maxLagMember", 8)
+        sw_cap.setdefault("maxLacpMember", 8)
+        sw_cap.setdefault("lagCap", {"lacpModSupport": True})
+        sw_cap.setdefault("jumboSupport", True)
+        sw_cap.setdefault("stpExtendSupport", True)
+        sw_cap.setdefault("mirrorSupport", True)
+        sw_cap.setdefault("maxMirrorGroup", 4)
+        sw_cap.setdefault("maxMirroredPort", 4)
         if isinstance(sw_detail.get("uplink"), dict):
             sw_detail["uplink"].update({"mac": "AA-BB-CC-00-00-01", "name": "gw-core"})
         self.switch_details: dict[str, dict[str, Any]] = {"AA-BB-CC-00-00-02": sw_detail}
@@ -203,7 +225,19 @@ class MockController:
                 ps["chassisId"] = "AA-BB-CC-00-00-01"
                 ps["portId"] = "AA-BB-CC-00-00-01"
         self.switch_ports: dict[str, list[dict[str, Any]]] = {"AA-BB-CC-00-00-02": sw_ports}
-        self.switch_lags: dict[str, list[dict[str, Any]]] = {"AA-BB-CC-00-00-02": copy.deepcopy(sp_fx.get("lags", []))}
+        seed_lags = copy.deepcopy(sp_fx.get("lags", [])) or [
+            {
+                "lagId": 1,
+                "name": "LAG 1",
+                "lagType": 2,
+                "ports": [1, 2],
+                "disable": False,
+                "profileId": "650000000000000000000003",
+                "profileName": "All",
+                "profileOverrideEnable": False,
+            }
+        ]
+        self.switch_lags: dict[str, list[dict[str, Any]]] = {"AA-BB-CC-00-00-02": seed_lags}
 
         self.switch_insight_counters: dict[str, list[dict[str, Any]]] = {
             "AA-BB-CC-00-00-02": [
@@ -240,6 +274,23 @@ class MockController:
 
         ap_detail = copy.deepcopy(er_fx["eap_detail"])
         ap_detail.update({"mac": "AA-BB-CC-00-00-03", "name": "ap-living", "wlanId": "wlan-grp-1"})
+        ap_detail.setdefault("deviceMisc", {"supportMesh": True})
+        ap_cap = ap_detail.setdefault("devCap", {})
+        ap_cap.setdefault("meshChainNum", 4)
+        ap_detail.setdefault(
+            "ssidOverrides",
+            [
+                {
+                    "index": 0,
+                    "globalSsid": "Lab-WiFi",
+                    "ssid": "Lab-WiFi",
+                    "enable": False,
+                    "ssidEnable": True,
+                    "vlanEnable": False,
+                    "vlanId": None,
+                }
+            ],
+        )
         self.eap_details: dict[str, dict[str, Any]] = {"AA-BB-CC-00-00-03": ap_detail}
         self.eap_channel_info: dict[str, Any] = {
             "AA-BB-CC-00-00-03": copy.deepcopy(er_fx["eap_channel_info"])
@@ -316,6 +367,68 @@ class MockController:
                 "resource": 0,
             }
         ]
+        self.poe_schedules: list[dict[str, Any]] = [
+            {
+                "id": "poe-sched-1",
+                "name": "PoE-Night-Hours",
+                "status": True,
+                "turnOnTime": "",
+                "poeScheduleType": 0,
+                "poePortsMap": {"AA-BB-CC-00-00-02": [1]},
+            }
+        ]
+        self.wireless_feature: dict[str, Any] = {
+            "roaming": {
+                "fastRoamingEnable": True,
+                "aiRoamingEnable": False,
+                "dualBand11kReportEnable": True,
+                "forceDisassociationEnable": False,
+                "nonStickRoamingEnable": False,
+                "nonPingPongRoamingEnable": True,
+            },
+            "bandSteering": {"enable": True, "connectionThreshold": 10, "differenceThreshold": 12, "maxFailures": 3},
+            "bandSteeringForMultiBand": {"mode": 1},
+            "airtimeFairness": {"enable2g": False, "enable5g": True, "enable6g": False},
+            "mesh": {"meshEnable": True, "autoFailoverEnable": True, "defGatewayEnable": False, "fullSector": True},
+            "beaconControl": {"dtim2g": 1, "dtim5g": 1},
+            "lldp": {"enable": True},
+            "advancedFeature": {"enable": True},
+            "mcastRateLimit": {"enable": False},
+        }
+        self.eap_mesh_candidates: dict[str, list[dict[str, Any]]] = {
+            "AA-BB-CC-00-00-03": [
+                {
+                    "mac": "AA-BB-CC-00-00-09",
+                    "name": "ap-mesh-root",
+                    "rssi": -58,
+                    "channel": "36",
+                    "hop": 1,
+                    "linkStatus": 1,
+                    "recommend": True,
+                }
+            ]
+        }
+        self.rf_planning: dict[str, Any] = {
+            "mode": 0,
+            "scheduleEnable": False,
+            "occurrence": {"timingType": 1, "hour": 3, "minute": 0},
+            "channelDeployEnable": True,
+            "powerAdjustEnable": True,
+            "channelWidthDeployEnable": True,
+            "bandDeployEnable": True,
+            "channelDeployEnable2g": True,
+            "channelDeployEnable5g": True,
+            "channelDeployEnable6g": True,
+            "powerAdjustEnable2g": True,
+            "powerAdjustEnable5g": True,
+            "powerAdjustEnable6g": True,
+            "chanWidth2g": 0,
+            "chanWidth5g": 0,
+            "chanWidth6g": 0,
+        }
+        self.rf_planning_result: dict[str, Any] = {"status": 1, "planningHistoryId": "rf-hist-1"}
+        self.rf_planning_history: dict[str, Any] = {"firstDeploy": True}
+        self.experience_index: dict[str, Any] = {"lastScan": [{"time": 1700000000000, "score": 92}]}
         self.users: list[dict[str, Any]] = [
             {
                 "id": "usr-admin-1",
@@ -575,6 +688,27 @@ class MockController:
         m_dev = re.fullmatch(r"sites/([^/]+)/devices", ep)
         if m_dev and method == "GET":
             return self._ok(self._paginate_rows(self.devices, params))
+
+        m_sw_cfg = re.fullmatch(r"sites/([^/]+)/switches/(?:(es)/)?([^/]+)/config/(general|services)", ep)
+        if m_sw_cfg and method in ("PUT", "PATCH"):
+            is_es_req = bool(m_sw_cfg.group(2))
+            mac = _normalize_mac(urllib.parse.unquote(m_sw_cfg.group(3)))
+            section = m_sw_cfg.group(4)
+            dev = next((d for d in self.devices if _normalize_mac(d["mac"]) == mac and d.get("type") == "switch"), None)
+            if dev is None or mac not in self.switch_details:
+                return self._err(-39700, "Switch does not exist.")
+            if not isinstance(body, Mapping):
+                return self._err(-1001, "Switch config body must be JSON object.")
+            sw_detail = self.switch_details[mac]
+            if section == "general" and is_es_req != bool(sw_detail.get("es", False)):
+                return self._err(-1600, "Easy Smart path mismatch.")
+            for k, v in body.items():
+                dev[k] = copy.deepcopy(v)
+                sw_detail[k] = copy.deepcopy(v)
+            if section == "general" and "jumbo" in body and "jumboEnable" not in body:
+                sw_detail["jumboEnable"] = int(body["jumbo"]) > 1518
+                dev["jumboEnable"] = sw_detail["jumboEnable"]
+            return self._ok(copy.deepcopy(sw_detail))
 
         m_dev_cfg = re.fullmatch(r"sites/([^/]+)/(eaps|switches|gateways)/([^/]+)(?:/config/general)?", ep)
         if m_dev_cfg:
@@ -1136,7 +1270,7 @@ class MockController:
             return self._ok(copy.deepcopy(self.switch_ports[mac]))
 
         m_sw_port_item = re.fullmatch(r"sites/([^/]+)/switches/([^/]+)/ports/(\d+)", ep)
-        if m_sw_port_item and method == "PATCH":
+        if m_sw_port_item:
             mac = _normalize_mac(urllib.parse.unquote(m_sw_port_item.group(2)))
             pnum = int(m_sw_port_item.group(3))
             ports = self.switch_ports.get(mac)
@@ -1145,25 +1279,57 @@ class MockController:
             idx = next((i for i, r in enumerate(ports) if int(r.get("port", 0)) == pnum), None)
             if idx is None:
                 return self._err(-1001, f"Switch port {pnum} does not exist.")
+            if method == "GET":
+                return self._ok(copy.deepcopy(ports[idx]))
+            if method != "PATCH":
+                return self._err(-1600, "Method not supported.")
             if not isinstance(body, Mapping):
                 return self._err(-1001, "Invalid body.")
-            if not body.get("profileOverrideEnable") and any(
+            op = str(body.get("operation") or ports[idx].get("operation") or "switching")
+            if op == "switching" and not body.get("profileOverrideEnable") and any(
                 k in body for k in ("poe", "portIsolationEnable", "lldpMedEnable", "spanningTreeEnable")
             ):
                 return self._err(-1001, "Override fields require profileOverrideEnable=True.")
             updated = copy.deepcopy(ports[idx])
             for k, v in body.items():
                 updated[k] = copy.deepcopy(v)
-            if "profileId" in body:
+            if "profileId" in body and body["profileId"]:
                 prof = next((p for p in self.port_profiles if str(p.get("id")) == str(body["profileId"])), None)
                 if prof is None:
                     return self._err(-1001, f"Unknown profileId {body['profileId']!r}.")
                 updated["profileName"] = prof.get("name", updated.get("profileName"))
-                if int(prof.get("type", 0)) == 1:
-                    updated["disable"] = True
-                else:
-                    updated["disable"] = False
+                updated["disable"] = int(prof.get("type", 0)) == 1
             ports[idx] = updated
+            if op == "aggregating" and isinstance(body.get("lagSetting"), Mapping):
+                ls = body["lagSetting"]
+                lid = int(ls.get("lagId", 0))
+                ltype = int(ls.get("lagType", 1))
+                members = [int(x) for x in (ls.get("ports") or [])]
+                lags = self.switch_lags.setdefault(mac, [])
+                existing_idx = next((i for i, row in enumerate(lags) if int(row.get("lagId", -1)) == lid), None)
+                old_members = set(lags[existing_idx].get("ports") or []) if existing_idx is not None else set()
+                for row in ports:
+                    rp = int(row.get("port", 0))
+                    if rp in old_members and rp not in members:
+                        row["operation"] = "switching"
+                        row.pop("lagId", None)
+                    elif rp in members:
+                        row["operation"] = "aggregating"
+                        row["lagId"] = lid
+                lag_entry = {
+                    "lagId": lid,
+                    "name": str(body.get("name") or f"LAG {lid}"),
+                    "lagType": ltype,
+                    "ports": members,
+                    "disable": False,
+                    "profileId": str(updated.get("profileId") or ""),
+                    "profileName": str(updated.get("profileName") or ""),
+                    "profileOverrideEnable": bool(updated.get("profileOverrideEnable", False)),
+                }
+                if existing_idx is not None:
+                    lags[existing_idx] = lag_entry
+                else:
+                    lags.append(lag_entry)
             return self._ok({})
 
         m_sw_port_restart = re.fullmatch(r"sites/([^/]+)/cmd/switches/([^/]+)/ports/(\d+)/restart", ep)
@@ -1183,6 +1349,31 @@ class MockController:
         if m_sw_lags and method == "GET":
             mac = _normalize_mac(urllib.parse.unquote(m_sw_lags.group(2)))
             return self._ok(copy.deepcopy(self.switch_lags.get(mac, [])))
+
+        m_sw_lag_id = re.fullmatch(r"sites/([^/]+)/switches/([^/]+)/lags/(\d+)", ep)
+        if m_sw_lag_id:
+            mac = _normalize_mac(urllib.parse.unquote(m_sw_lag_id.group(2)))
+            lid = int(m_sw_lag_id.group(3))
+            lags = self.switch_lags.setdefault(mac, [])
+            idx = next((i for i, row in enumerate(lags) if int(row.get("lagId", -1)) == lid), None)
+            if idx is None:
+                return self._err(-1600, f"LAG {lid} not found.")
+            if method in ("PATCH", "PUT"):
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                updated = copy.deepcopy(lags[idx])
+                updated.update(copy.deepcopy(dict(body)))
+                updated["lagId"] = lid
+                lags[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                removed = lags.pop(idx)
+                for row in self.switch_ports.get(mac, []):
+                    if int(row.get("port", 0)) in (removed.get("ports") or []):
+                        row["operation"] = "switching"
+                        row.pop("lagId", None)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
 
         m_ins_cnt = re.fullmatch(r"sites/([^/]+)/insight/switch/port/counters", ep)
         if m_ins_cnt and method == "GET":
@@ -1329,8 +1520,40 @@ class MockController:
             return self._err(-1600, "Method not supported.")
 
         m_rate_limits = re.fullmatch(r"sites/([^/]+)/setting/profiles/rateLimits", ep)
-        if m_rate_limits and method == "GET":
-            return self._ok(self._paginate_rows(self.rate_limit_profiles, params))
+        if m_rate_limits:
+            if method == "GET":
+                return self._ok(self._paginate_rows(self.rate_limit_profiles, params))
+            if method == "POST":
+                if not isinstance(body, Mapping) or not body.get("name"):
+                    return self._err(-1001, "Rate-limit profile name required.")
+                new_id = self._next_id("rl-new")
+                created = copy.deepcopy(dict(body))
+                created["id"] = new_id
+                created.setdefault("isDefault", False)
+                self.rate_limit_profiles.append(created)
+                return self._ok({"id": new_id})
+            return self._err(-1600, "Method not supported.")
+
+        m_rate_limit_id = re.fullmatch(r"sites/([^/]+)/setting/profiles/rateLimits/([^/]+)", ep)
+        if m_rate_limit_id:
+            rid = m_rate_limit_id.group(2)
+            idx = next((i for i, r in enumerate(self.rate_limit_profiles) if str(r.get("id")) == rid), None)
+            if idx is None:
+                return self._err(-1600, "Rate-limit profile not found.")
+            if method in ("PATCH", "PUT"):
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                updated = copy.deepcopy(self.rate_limit_profiles[idx])
+                updated.update(copy.deepcopy(dict(body)))
+                updated["id"] = rid
+                self.rate_limit_profiles[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                if self.rate_limit_profiles[idx].get("isDefault"):
+                    return self._err(-1001, "Default rate-limit profile cannot be deleted.")
+                self.rate_limit_profiles.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
 
         m_wls = re.fullmatch(r"sites/([^/]+)/setting/wanlanstatus", ep)
         if m_wls and method == "GET":
@@ -1414,6 +1637,8 @@ class MockController:
                 self.schedules[idx] = updated
                 return self._ok({})
             if method == "DELETE":
+                if any(str(p.get("turnOnTime") or "") == tid for p in self.poe_schedules):
+                    return self._err(-33722, "Schedule is referenced by a PoE schedule.")
                 self.schedules.pop(idx)
                 return self._ok({})
             return self._err(-1600, "Method not supported.")
@@ -1583,6 +1808,108 @@ class MockController:
                 return self._ok({})
             if method == "DELETE":
                 self.lan_dns_rules.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
+
+        m_wless_feat = re.fullmatch(r"sites/([^/]+)/setting(?:/wireless/feature)?", ep)
+        if m_wless_feat:
+            if method == "GET":
+                return self._ok(copy.deepcopy(self.wireless_feature))
+            if method in ("PATCH", "PUT"):
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid wireless feature payload.")
+                for k, v in body.items():
+                    if isinstance(v, Mapping) and isinstance(self.wireless_feature.get(k), dict):
+                        self.wireless_feature[k].update(copy.deepcopy(dict(v)))
+                    else:
+                        self.wireless_feature[k] = copy.deepcopy(v)
+                return self._ok(copy.deepcopy(self.wireless_feature))
+            return self._err(-1600, "Method not supported.")
+
+        m_mesh_cand = re.fullmatch(r"sites/([^/]+)/eaps/([^/]+)/grid/mesh/candiParents", ep)
+        if m_mesh_cand and method == "GET":
+            mac = _normalize_mac(urllib.parse.unquote(m_mesh_cand.group(2)))
+            if mac not in self.eap_details:
+                return self._err(-39303, "EAP does not exist.")
+            rows = self.eap_mesh_candidates.get(mac, [])
+            return self._ok({"data": copy.deepcopy(rows), "totalRows": len(rows)})
+
+        m_rfp = re.fullmatch(r"sites/([^/]+)/rfPlanning", ep)
+        if m_rfp and method == "GET":
+            return self._ok(copy.deepcopy(self.rf_planning))
+
+        m_rfp_cfg = re.fullmatch(r"sites/([^/]+)/rfPlanning/config", ep)
+        if m_rfp_cfg and method in ("PUT", "PATCH"):
+            if not isinstance(body, Mapping):
+                return self._err(-1001, "Invalid rfPlanning config.")
+            self.rf_planning["mode"] = int(body.get("mode", 0))
+            if isinstance(body.get("customSetting"), Mapping):
+                self.rf_planning.update(copy.deepcopy(dict(body["customSetting"])))
+            return self._ok({})
+
+        m_rfp_sched = re.fullmatch(r"sites/([^/]+)/rfPlanning/schedule", ep)
+        if m_rfp_sched and method in ("PUT", "PATCH"):
+            if not isinstance(body, Mapping):
+                return self._err(-1001, "Invalid rfPlanning schedule.")
+            if "scheduleEnable" in body:
+                self.rf_planning["scheduleEnable"] = bool(body["scheduleEnable"])
+            if isinstance(body.get("occurrence"), Mapping):
+                self.rf_planning["occurrence"] = copy.deepcopy(dict(body["occurrence"]))
+            return self._ok({})
+
+        m_rfp_res = re.fullmatch(r"sites/([^/]+)/rfPlanning/result", ep)
+        if m_rfp_res and method == "GET":
+            return self._ok(copy.deepcopy(self.rf_planning_result))
+
+        m_exp_idx = re.fullmatch(r"sites/([^/]+)/experienceIndex", ep)
+        if m_exp_idx and method == "GET":
+            return self._ok(copy.deepcopy(self.experience_index))
+
+        m_rfp_hist = re.fullmatch(r"sites/([^/]+)/rfplanning/history", ep)
+        if m_rfp_hist and method == "GET":
+            return self._ok(copy.deepcopy(self.rf_planning_history))
+
+        m_rfp_cmd = re.fullmatch(r"sites/([^/]+)/cmd/rfPlanning(?:/(optimization|cancel))?", ep)
+        if m_rfp_cmd and method == "POST":
+            sub = m_rfp_cmd.group(2)
+            if sub == "cancel":
+                self.rf_planning_result["status"] = 1
+            else:
+                self.rf_planning_result["status"] = 2
+            return self._ok({})
+
+        m_poe_sched = re.fullmatch(r"sites/([^/]+)/setting/service/poeSchedules", ep)
+        if m_poe_sched:
+            if method == "GET":
+                return self._ok(self._paginate_rows(self.poe_schedules, params))
+            if method == "POST":
+                if not isinstance(body, Mapping) or not body.get("name"):
+                    return self._err(-1001, "PoE schedule name required.")
+                new_id = self._next_id("poe-new")
+                created = copy.deepcopy(dict(body))
+                created["id"] = new_id
+                created.setdefault("ports", [])
+                self.poe_schedules.append(created)
+                return self._ok({"id": new_id})
+            return self._err(-1600, "Method not supported.")
+
+        m_poe_sched_id = re.fullmatch(r"sites/([^/]+)/setting/service/poeSchedules/([^/]+)", ep)
+        if m_poe_sched_id:
+            pid = m_poe_sched_id.group(2)
+            idx = next((i for i, r in enumerate(self.poe_schedules) if str(r.get("id")) == pid), None)
+            if idx is None:
+                return self._err(-1600, "PoE schedule not found.")
+            if method in ("PUT", "PATCH"):
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                updated = copy.deepcopy(self.poe_schedules[idx])
+                updated.update(copy.deepcopy(dict(body)))
+                new_pid = self._next_id("poe-upd") if getattr(self, "poe_put_mints_new_id", False) else pid
+                updated["id"] = new_pid
+                self.poe_schedules[idx] = updated
+                return self._ok({"id": new_pid})
+            if method == "DELETE":
+                self.poe_schedules.pop(idx)
                 return self._ok({})
             return self._err(-1600, "Method not supported.")
 

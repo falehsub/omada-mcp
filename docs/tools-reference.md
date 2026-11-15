@@ -2,7 +2,7 @@
 
 # Tool & Configuration Reference
 
-Generated directly from `omada_mcp.tools.TOOLS` (**97 total**: **40 read-only**, **57 opt-in write**).
+Generated directly from `omada_mcp.tools.TOOLS` (**115 total**: **47 read-only**, **68 opt-in write**).
 
 - Required parameters are shown in **`bold`**; optional parameters carry `?`.
 - Site-scoped tools accept optional `site?` (pinned when `OMADA_SITE_NAME`/`OMADA_SITE_ID` is set unless `OMADA_ALLOW_CROSS_SITE=true`).
@@ -17,10 +17,10 @@ Generated directly from `omada_mcp.tools.TOOLS` (**97 total**: **40 read-only**,
 | `rollback` | 0 | 1 | 1 |
 | `routing` | 6 | 11 | 17 |
 | `security` | 5 | 13 | 18 |
-| `switch` | 2 | 4 | 6 |
-| `wifi` | 3 | 7 | 10 |
+| `switch` | 5 | 11 | 16 |
+| `wifi` | 7 | 11 | 18 |
 
-## Read-Only Tools (40)
+## Read-Only Tools (47)
 
 | Tool | Tier | Category | Hints | Parameters | Description |
 |---|---|---|---|---|---|
@@ -64,8 +64,15 @@ Generated directly from `omada_mcp.tools.TOOLS` (**97 total**: **40 read-only**,
 | `list_schedules` | read-only | `core` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List reusable time-range / schedule profiles used by ACLs, PoE schedules, and WLAN schedules. |
 | `list_controller_users` | read-only | `security` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List Omada controller user accounts and site/role privileges (non-secret fields only; Viewer accounts see only their own account). |
 | `get_controller_status` | read-only | `diagnostics` | `readOnly=true, destructive=false, idempotent=true` | `site?` | Read controller runtime status, redacted global controller settings summary, and site NTP settings. |
+| `get_wifi_radio_features` | read-only | `wifi` | `readOnly=true, destructive=false, idempotent=true` | `site?` | Read site-wide Wi-Fi roaming (802.11r/k, AI roaming), band steering, airtime fairness, mesh policy, beacon control, and multicast rate-limit settings. |
+| `get_ap_ssid_overrides` | read-only | `wifi` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `site?` | Read an AP's bound WLAN group and per-SSID overrides (enabled, custom SSID, VLAN ID, PSK flag; secret stripped). |
+| `get_mesh_status` | read-only | `wifi` | `readOnly=true, destructive=false, idempotent=true` | `mac?`, `site?` | Read site mesh settings and per-AP wireless mesh role, wired/wireless uplink state, downlink children, and candidate mesh parents. |
+| `get_wlan_optimization_status` | read-only | `wifi` | `readOnly=true, destructive=false, idempotent=true` | `site?` | Read AI WLAN / RF optimization configuration, schedule, active scan status, and experience score history. |
+| `list_switch_lags` | read-only | `switch` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `site?` | List configured LAG/LACP port-channel groups, member ports, and LAG hardware limits on a switch. |
+| `get_switch_global_features` | read-only | `switch` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `site?` | Read switch-level STP/RSTP/MSTP mode and timers, loopback detection, jumbo frame MTU, multicast, port-mirroring sessions, and hardware L2 capabilities. |
+| `list_poe_schedules` | read-only | `switch` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List PoE power schedules with resolved time-range schedule names and switch-port bindings. |
 
-## Opt-In Write Tools (57)
+## Opt-In Write Tools (68)
 
 | Tool | Tier | Category | Hints | Parameters | Description |
 |---|---|---|---|---|---|
@@ -126,6 +133,17 @@ Generated directly from `omada_mcp.tools.TOOLS` (**97 total**: **40 read-only**,
 | `run_traceroute` | opt-in write | `diagnostics` | `readOnly=false, destructive=false, idempotent=true` | **`deviceMac`**, **`target`**, `dryRun?`, `confirm?`, `site?` | Execute an active traceroute from an online adopted device (POST tools/network-check/1). |
 | `start_wan_speedtest` | opt-in write | `diagnostics` | `readOnly=false, destructive=true, idempotent=false` | `pure?`, `pollSeconds?`, `dryRun?`, `confirm?`, `site?` | Start a gateway WAN bandwidth speed test (POST cmd/speedTest or cmd/speedTestPure). |
 | `start_cable_test` | opt-in write | `diagnostics` | `readOnly=false, destructive=true, idempotent=false` | **`deviceMac`**, **`ports`**, `allowUplinkMutation?`, `dryRun?`, `confirm?`, `site?` | Start a switch TDR cable diagnostic test on port(s) (POST cable-test/switches/{MAC}/start; refuses uplink/controller-carrying ports unless allowUplinkMutation=true). |
+| `upsert_rate_limit_profile` | opt-in write | `wifi` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, `profileId?`, `downLimitEnable?`, `downLimitKbps?`, `upLimitEnable?`, `upLimitKbps?`, `dryRun?`, `confirm?`, `site?` | Create or update a client bandwidth rate-limit profile (setting/profiles/rateLimits) with download/upload Kbps caps. |
+| `delete_rate_limit_profile` | opt-in write | `wifi` | `readOnly=false, destructive=true, idempotent=true` | **`profile`**, `dryRun?`, `confirm?`, `site?` | Delete a rate-limit profile (refuses the built-in Default profile or profiles referenced by SSIDs/clients). |
+| `set_ap_ssid_overrides` | opt-in write | `wifi` | `readOnly=false, destructive=false, idempotent=true` | **`mac`**, **`overrides`**, `wlanGroup?`, `dryRun?`, `confirm?`, `site?` | Configure per-AP SSID overrides (custom SSID name, enable/disable, VLAN, or PSK) via PUT eaps/{MAC}/config/wlans; never logs or returns PSK secrets. |
+| `run_wlan_optimization` | opt-in write | `wifi` | `readOnly=false, destructive=true, idempotent=false` | `action?`, `mode?`, `channelDeployEnable2g?`, `channelDeployEnable5g?`, `channelDeployEnable6g?`, `powerAdjustEnable2g?`, `powerAdjustEnable5g?`, `powerAdjustEnable6g?`, `chanWidth2g?`, `chanWidth5g?`, `chanWidth6g?`, `scheduleEnable?`, `timingType?`, `hour?`, `minute?`, `dayOfWeek?`, `dayOfMonth?`, `dryRun?`, `confirm?`, `site?` | Configure AI RF Planning band/power/schedule settings and/or trigger or cancel WLAN optimization (rfPlanning/config, rfPlanning/schedule, cmd/rfPlanning/optimization). |
+| `upsert_switch_lag` | opt-in write | `switch` | `readOnly=false, destructive=true, idempotent=true` | **`mac`**, **`lagId`**, **`ports`**, `lagType?`, `name?`, `profileId?`, `profileName?`, `allowUplinkMutation?`, `dryRun?`, `confirm?`, `site?` | Create or update a switch LAG/LACP port-channel group (switches/{MAC}/lags or aggregating ports) with anti-stranding uplink/controller-port safety checks. |
+| `delete_switch_lag` | opt-in write | `switch` | `readOnly=false, destructive=true, idempotent=true` | **`mac`**, **`lagId`**, `allowUplinkMutation?`, `dryRun?`, `confirm?`, `site?` | Remove a switch LAG/LACP port-channel group (DELETE switches/{MAC}/lags/{lagId}; blocks removing an active uplink/controller-carrying LAG unless allowUplinkMutation=true). |
+| `update_switch_global_features` | opt-in write | `switch` | `readOnly=false, destructive=true, idempotent=true` | **`mac`**, `stpMode?`, `stpPriority?`, `helloTime?`, `maxAge?`, `forwardDelay?`, `txHoldCount?`, `maxHops?`, `loopbackDetectEnable?`, `jumboEnable?`, `jumbo?`, `dryRun?`, `confirm?`, `site?` | Update switch-level STP/RSTP/MSTP mode and timers, loopback detection, and jumbo frame MTU (switches/{MAC}/config/general and switches/{MAC}/config/services). |
+| `set_switch_port_mirror` | opt-in write | `switch` | `readOnly=false, destructive=true, idempotent=true` | **`mac`**, **`mirroringPort`**, **`mirroredPorts`**, `mirroredLags?`, `allowUplinkMutation?`, `dryRun?`, `confirm?`, `site?` | Configure a switch port as a SPAN mirror destination monitoring mirroredPorts/mirroredLags, or pass mirroredPorts=[] to restore normal switching (refuses mirroring destination on active uplink). |
+| `upsert_poe_schedule` | opt-in write | `switch` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, `poeScheduleId?`, `schedule?`, `enabled?`, `portBindings?`, `dryRun?`, `confirm?`, `site?` | Create or update a site PoE power schedule referencing a time-range profile and optional switch port bindings. |
+| `bind_poe_schedule` | opt-in write | `switch` | `readOnly=false, destructive=true, idempotent=true` | **`poeSchedule`**, **`mac`**, **`ports`**, `replace?`, `dryRun?`, `confirm?`, `site?` | Attach or replace a switch's PoE ports on an existing PoE schedule (setting/service/poeSchedules). |
+| `delete_poe_schedule` | opt-in write | `switch` | `readOnly=false, destructive=true, idempotent=true` | **`poeSchedule`**, `dryRun?`, `confirm?`, `site?` | Delete a PoE power schedule by ID or exact name. |
 
 ## Environment Variables (`server.json`)
 

@@ -258,6 +258,7 @@ _SNAPSHOT_DEFAULT_OBJECTS: tuple[str, ...] = ("networks", "acls", "groups", "wla
 _SNAPSHOT_ALL_OBJECTS: tuple[str, ...] = (
     "networks", "acls", "groups", "schedules", "wlans", "devices", "clients",
     "dhcpReservations", "portForwards", "staticRoutes", "mdnsRules", "services",
+    "rateLimitProfiles", "poeSchedules", "wirelessFeature", "rfPlanning",
 )
 
 
@@ -374,6 +375,26 @@ def _get_config_snapshot_impl(
 
     if "services" in selected:
         snapshot["services"] = _get_network_services(client)
+
+    if "rateLimitProfiles" in selected:
+        from .security_read import _list_rate_limit_profiles
+        snapshot["rateLimitProfiles"] = _list_rate_limit_profiles(client)
+
+    if "poeSchedules" in selected:
+        from .switch_wifi_read import _list_poe_schedules
+        try:
+            snapshot["poeSchedules"] = _list_poe_schedules(client)
+        except OmadaError as exc:
+            warnings.append(f"poeSchedules skipped: {exc.message}")
+            snapshot["poeSchedules"] = []
+
+    if "wirelessFeature" in selected:
+        from .switch_wifi_read import _get_wifi_radio_features
+        snapshot["wirelessFeature"] = _get_wifi_radio_features(client)
+
+    if "rfPlanning" in selected:
+        from .switch_wifi_read import _get_wlan_optimization_status
+        snapshot["rfPlanning"] = _get_wlan_optimization_status(client)
 
     return snapshot
 
@@ -502,6 +523,10 @@ _SNAPSHOT_SCHEMA: dict[str, Any] = {
         "staticRoutes": {"type": "array", "items": _STATIC_ROUTE_SCHEMA},
         "mdnsRules": {"type": "array", "items": {"type": "object"}},
         "services": _SERVICES_SCHEMA,
+        "rateLimitProfiles": {"type": "array", "items": {"type": "object"}},
+        "poeSchedules": {"type": "array", "items": {"type": "object"}},
+        "wirelessFeature": {"type": "object"},
+        "rfPlanning": {"type": "object"},
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["site", "objects", "warnings"],
@@ -690,11 +715,11 @@ def _diff_config_snapshots(
     sections_changed = 0
 
     for section in sections_list:
-        if section == "services":
-            b_clean = _strip_volatile_and_redact(baseline.get("services") or {})
-            c_clean = _strip_volatile_and_redact(target_snapshot.get("services") or {})
+        if section in ("services", "wirelessFeature", "rfPlanning"):
+            b_clean = _strip_volatile_and_redact(baseline.get(section) or {})
+            c_clean = _strip_volatile_and_redact(target_snapshot.get(section) or {})
             delta = _diff_field_changes(b_clean, c_clean)
-            sec_changed = [{"key": "services", "label": "services", "changes": delta}] if delta else []
+            sec_changed = [{"key": section, "label": section, "changes": delta}] if delta else []
             sec_diff: dict[str, Any] = {
                 "hasChanges": bool(sec_changed),
                 "added": [],
