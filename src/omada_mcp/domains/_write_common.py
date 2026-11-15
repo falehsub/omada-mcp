@@ -229,6 +229,10 @@ _NON_REVERSIBLE_SNAPSHOT_TOOLS = frozenset({
     "reconnect_client",
     "cycle_poe_port",
     "start_rf_scan",
+    "run_ping",
+    "run_traceroute",
+    "start_wan_speedtest",
+    "start_cable_test",
 })
 
 

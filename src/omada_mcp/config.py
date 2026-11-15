@@ -105,6 +105,16 @@ WRITE_TOOL_NAMES: tuple[str, ...] = (
     "create_eap_acl",
     "set_client_lock_to_ap",
     "set_client_rate_limit",
+    "upsert_port_group",
+    "delete_port_group",
+    "upsert_mac_group",
+    "delete_mac_group",
+    "upsert_schedule",
+    "delete_schedule",
+    "run_ping",
+    "run_traceroute",
+    "start_wan_speedtest",
+    "start_cable_test",
 )
 
 _READ_ONLY_TOOL_NAMES = frozenset({
@@ -143,6 +153,11 @@ _READ_ONLY_TOOL_NAMES = frozenset({
     "list_wlan_groups",
     "list_policy_routes",
     "list_lan_dns_rules",
+    "list_blocked_clients",
+    "list_rate_limit_profiles",
+    "list_schedules",
+    "list_controller_users",
+    "get_controller_status",
 })
 
 _TRUE = {"1", "true", "yes", "on", "y", "t"}

@@ -11,11 +11,20 @@ from ._write_common import (
     _committed_result,
     _delete_entity,
     _dry_run_result,
+    _field_diff,
+    _normalize_mac,
+    _port_range_valid,
     _require_confirm,
     _site,
     json_summary,
 )
-from ._write_fetchers import _fetch_acls, _fetch_groups, _fetch_lan_collection
+from ._write_fetchers import (
+    _fetch_acls,
+    _fetch_groups,
+    _fetch_lan_collection,
+    _fetch_typed_acls,
+    _omada_mac,
+)
 from ._write_safety import (
     _check_acl_safety,
     _group_id,
@@ -25,19 +34,29 @@ from ._write_safety import (
 )
 
 
-def _find_ip_group(groups: Sequence[Mapping[str, Any]], needle: str) -> dict[str, Any]:
-    ip_groups = [dict(g) for g in groups if int(g.get("type", 0)) == 0]
+def _find_typed_group(
+    groups: Sequence[Mapping[str, Any]],
+    needle: str,
+    *,
+    group_type: int,
+    type_label: str,
+) -> dict[str, Any]:
+    typed = [dict(g) for g in groups if int(g.get("type", 0)) == group_type]
     key = str(needle or "").strip()
-    by_id = [g for g in ip_groups if _group_id(g) == key]
+    by_id = [g for g in typed if _group_id(g) == key]
     if by_id:
         return by_id[0]
-    by_name = [g for g in ip_groups if str(g.get("name", "")).strip().lower() == key.lower()]
+    by_name = [g for g in typed if str(g.get("name", "")).strip().lower() == key.lower()]
     if len(by_name) == 1:
         return by_name[0]
     if len(by_name) > 1:
         ids = ", ".join(_group_id(g) for g in by_name)
-        raise OmadaError(f"group {needle!r} matched multiple IP groups ({ids}); specify id")
-    raise OmadaError(f"no IPv4 IP group (type=0) matches {needle!r}")
+        raise OmadaError(f"group {needle!r} matched multiple {type_label} groups ({ids}); specify id")
+    raise OmadaError(f"no {type_label} group (type={group_type}) matches {needle!r}")
+
+
+def _find_ip_group(groups: Sequence[Mapping[str, Any]], needle: str) -> dict[str, Any]:
+    return _find_typed_group(groups, needle, group_type=0, type_label="IPv4 IP")
 
 
 def create_ip_group(
@@ -490,5 +509,350 @@ def delete_ip_group(
         dry_run=dryRun,
         confirm=confirm,
         label="ipGroup",
+    )
+
+
+def _pack_port_entries(ports: Sequence[Any]) -> list[str]:
+    if not ports:
+        raise OmadaError(
+            "at least one port or port range is required",
+            hint="provide ports e.g. ['80', '443', '8000-8080']",
+        )
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in ports:
+        norm = _port_range_valid(str(raw), label="portList entry").replace(" ", "")
+        if norm not in seen:
+            seen.add(norm)
+            out.append(norm)
+    return out
+
+
+def _pack_mac_entries(entries: Sequence[Any]) -> list[dict[str, str]]:
+    if not entries:
+        raise OmadaError(
+            "at least one MAC address entry is required",
+            hint="provide entries e.g. [{'name': 'printer', 'mac': 'AA:BB:CC:DD:EE:01'}] or ['AA:BB:CC:DD:EE:01']",
+        )
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for idx, raw in enumerate(entries, start=1):
+        if isinstance(raw, Mapping):
+            raw_mac = str(raw.get("macAddress") or raw.get("mac") or "").strip()
+            entry_name = str(raw.get("name") or f"entry-{idx}").strip() or f"entry-{idx}"
+        else:
+            raw_mac = str(raw or "").strip()
+            entry_name = f"entry-{idx}"
+        norm = _normalize_mac(raw_mac)
+        if len(norm) != 17 or ":" not in norm:
+            raise OmadaError(f"invalid MAC address {raw_mac!r}")
+        wire_mac = _omada_mac(norm)
+        if wire_mac in seen:
+            continue
+        seen.add(wire_mac)
+        out.append({"name": entry_name[:64], "macAddress": wire_mac})
+    return out
+
+
+def _acl_refs_for_group(client: OmadaClient, site: Any, gid: str) -> list[str]:
+    refs: list[str] = []
+    for acl_type in (0, 1, 2):
+        try:
+            rules = _fetch_typed_acls(client, site, acl_type)
+        except OmadaError:
+            continue
+        for rule in rules:
+            sids = [str(x) for x in (rule.get("sourceIds") or [])]
+            dids = [str(x) for x in (rule.get("destinationIds") or [])]
+            if gid in sids or gid in dids:
+                refs.append(str(rule.get("name") or rule.get("id")))
+    return refs
+
+
+def _upsert_profile_group(
+    client: OmadaClient,
+    *,
+    tool_name: str,
+    group_type: int,
+    type_label: str,
+    name: str,
+    group_id: str | None,
+    body: dict[str, Any],
+    diff_keys: tuple[str, ...],
+    canon_fn: Any,
+    rollback_builder: Any,
+    dry_run: bool,
+    confirm: str | None,
+) -> dict[str, Any]:
+    clean_name = str(name or "").strip()
+    if not clean_name or len(clean_name) > 64:
+        raise OmadaError(f"{type_label} group name must be 1..64 characters")
+
+    site = _site(client)
+    groups = _fetch_groups(client, site)
+    existing: dict[str, Any] | None = None
+    if group_id:
+        existing = _find_typed_group(groups, group_id, group_type=group_type, type_label=type_label)
+    else:
+        existing = next(
+            (dict(g) for g in groups if int(g.get("type", 0)) == group_type and str(g.get("name") or "").strip() == clean_name),
+            None,
+        )
+
+    is_update = existing is not None
+    existing_id = _group_id(existing) if existing is not None else ""
+    if existing is not None and (int(existing.get("resource", 0) or 0) != 0 or bool(existing.get("default"))):
+        raise OmadaError(f"refusing to modify built-in/protected {type_label} group {existing.get('name') or existing_id!r}")
+
+    target_id = existing_id if is_update and existing_id else clean_name
+    _require_confirm(tool_name, target_id, dry_run, confirm)
+
+    diff = _field_diff(existing or {}, body, diff_keys)
+    dry_rollback = rollback_builder(existing) if is_update and existing is not None else None
+    if dry_run:
+        return _dry_run_result(
+            tool_name=tool_name,
+            target_id=target_id,
+            before=existing,
+            after={**({"groupId": existing_id} if existing_id else {}), **body},
+            diff=diff,
+            warnings=[],
+            rollback=dry_rollback,
+        )
+
+    expected_canon = canon_fn(body)
+    existing_ids = [_group_id(g) for g in groups if _group_id(g)]
+    method = "PATCH" if is_update else "POST"
+    endpoint = (
+        f"sites/{site.site_id}/setting/profiles/groups/{group_type}/{existing_id}"
+        if is_update
+        else f"sites/{site.site_id}/setting/profiles/groups"
+    )
+    snap_payload = (
+        {"action": "update", "groupType": group_type, "group": copy.deepcopy(existing)}
+        if is_update
+        else {"action": "create", "groupType": group_type, "name": clean_name, "existingIds": existing_ids}
+    )
+
+    def _read_back() -> dict[str, Any]:
+        rows_now = [g for g in _fetch_groups(client, site) if int(g.get("type", 0)) == group_type]
+        if is_update:
+            found = next((g for g in rows_now if _group_id(g) == existing_id), None)
+        else:
+            found = next((g for g in rows_now if str(g.get("name") or "").strip() == clean_name), None)
+        return dict(found) if found is not None else {}
+
+    def _verify(_b: Any, after_now: Any) -> tuple[bool, str | None]:
+        if not isinstance(after_now, Mapping) or not after_now:
+            return False, f"{type_label} group {clean_name!r} missing after {method}"
+        if canon_fn(after_now) != expected_canon:
+            return False, f"{type_label} group {clean_name!r} entries mismatch after {method}"
+        return True, None
+
+    def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
+        live = _read_back()
+        ok, _ = _verify(existing, live)
+        return ok, body, live
+
+    write_res = client.write(
+        endpoint,
+        method=method,
+        data=body,
+        tool_name=tool_name,
+        target=target_id,
+        before=existing,
+        snapshot_payload=snap_payload,
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=sorted(diff.keys()) or [diff_keys[-1]],
+    )
+    after_obj = write_res["after"]
+    new_id = _group_id(after_obj) if isinstance(after_obj, Mapping) else existing_id
+    delete_tool = "delete_port_group" if group_type == 1 else "delete_mac_group"
+    committed_rollback = (
+        dry_rollback
+        if is_update
+        else {"tool": delete_tool, "arguments": {"group": new_id or clean_name, "dryRun": True}}
+    )
+    return _committed_result(
+        tool_name=tool_name,
+        target_id=target_id,
+        before=write_res["before"],
+        after=after_obj,
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=[],
+        rollback=committed_rollback,
+    )
+
+
+def _delete_profile_group(
+    client: OmadaClient,
+    *,
+    tool_name: str,
+    group: str,
+    group_type: int,
+    type_label: str,
+    label: str,
+    dry_run: bool,
+    confirm: str | None,
+) -> dict[str, Any]:
+    site = _site(client)
+    groups = _fetch_groups(client, site)
+    target_grp = _find_typed_group(groups, group, group_type=group_type, type_label=type_label)
+    target_id = _group_id(target_grp)
+    if bool(target_grp.get("default")) or int(target_grp.get("resource", 0) or 0) != 0:
+        raise OmadaError(f"refusing to delete built-in/protected {type_label} group {target_grp.get('name') or target_id!r}")
+
+    refs = _acl_refs_for_group(client, site, target_id)
+    if refs:
+        raise OmadaError(
+            f"cannot delete {type_label} group {target_grp.get('name')!r}: referenced by ACL rule(s) {', '.join(refs)} (-33717)",
+            code=-33717,
+            hint="update or delete the referencing ACL rule(s) first",
+        )
+
+    return _delete_entity(
+        client,
+        tool_name=tool_name,
+        target_id=target_id,
+        endpoint=f"sites/{site.site_id}/setting/profiles/groups/{group_type}/{target_id}",
+        before=target_grp,
+        snapshot_payload={"action": "delete", "groupType": group_type, "group": copy.deepcopy(target_grp)},
+        fetch_all=lambda: _fetch_groups(client, site),
+        match_fn=lambda row: _group_id(row) == target_id,
+        rollback=None,
+        warnings=[],
+        dry_run=dry_run,
+        confirm=confirm,
+        label=label,
+    )
+
+
+def _port_group_canon(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    ports = sorted(str(p).strip() for p in (row.get("portList") or []) if p is not None)
+    return (str(row.get("name") or ""), _ip_list_canonical(row.get("ipList") or []), tuple(ports))
+
+
+def _mac_group_canon(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    macs = sorted(
+        (str(m.get("name") or ""), _omada_mac(_normalize_mac(str(m.get("macAddress") or m.get("mac") or ""))))
+        for m in (row.get("macAddressList") or [])
+        if isinstance(m, Mapping)
+    )
+    return (str(row.get("name") or ""), tuple(macs))
+
+
+def upsert_port_group(
+    client: OmadaClient,
+    name: str,
+    ports: list[Any],
+    ips: list[Any] | None = None,
+    groupId: str | None = None,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Create or update a TCP/UDP port group (``type=1`` on ``setting/profiles/groups``)."""
+    clean_name = str(name or "").strip()
+    port_list = _pack_port_entries(ports)
+    ip_list = pack_ip_entries(cidrs=ips) if ips else []
+    body = {"name": clean_name, "type": 1, "ipList": ip_list, "portList": port_list}
+    return _upsert_profile_group(
+        client,
+        tool_name="upsert_port_group",
+        group_type=1,
+        type_label="IP-Port",
+        name=clean_name,
+        group_id=groupId,
+        body=body,
+        diff_keys=("name", "ipList", "portList"),
+        canon_fn=_port_group_canon,
+        rollback_builder=lambda ex: {
+            "tool": "upsert_port_group",
+            "arguments": {
+                "groupId": _group_id(ex),
+                "name": ex.get("name"),
+                "ports": list(ex.get("portList") or []),
+                "ips": [f"{i.get('ip')}/{i.get('mask', 32)}" for i in (ex.get("ipList") or []) if isinstance(i, Mapping)],
+                "dryRun": True,
+            },
+        },
+        dry_run=dryRun,
+        confirm=confirm,
+    )
+
+
+def delete_port_group(
+    client: OmadaClient,
+    group: str,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Delete an unreferenced IP-Port group (``DELETE setting/profiles/groups/1/{id}``)."""
+    return _delete_profile_group(
+        client,
+        tool_name="delete_port_group",
+        group=group,
+        group_type=1,
+        type_label="IP-Port",
+        label="portGroup",
+        dry_run=dryRun,
+        confirm=confirm,
+    )
+
+
+def upsert_mac_group(
+    client: OmadaClient,
+    name: str,
+    entries: list[Any],
+    groupId: str | None = None,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Create or update a MAC address group (``type=2`` on ``setting/profiles/groups``)."""
+    clean_name = str(name or "").strip()
+    mac_list = _pack_mac_entries(entries)
+    body = {"name": clean_name, "type": 2, "macAddressList": mac_list}
+    return _upsert_profile_group(
+        client,
+        tool_name="upsert_mac_group",
+        group_type=2,
+        type_label="MAC",
+        name=clean_name,
+        group_id=groupId,
+        body=body,
+        diff_keys=("name", "macAddressList"),
+        canon_fn=_mac_group_canon,
+        rollback_builder=lambda ex: {
+            "tool": "upsert_mac_group",
+            "arguments": {
+                "groupId": _group_id(ex),
+                "name": ex.get("name"),
+                "entries": list(ex.get("macAddressList") or []),
+                "dryRun": True,
+            },
+        },
+        dry_run=dryRun,
+        confirm=confirm,
+    )
+
+
+def delete_mac_group(
+    client: OmadaClient,
+    group: str,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Delete an unreferenced MAC address group (``DELETE setting/profiles/groups/2/{id}``)."""
+    return _delete_profile_group(
+        client,
+        tool_name="delete_mac_group",
+        group=group,
+        group_type=2,
+        type_label="MAC",
+        label="macGroup",
+        dry_run=dryRun,
+        confirm=confirm,
     )
 

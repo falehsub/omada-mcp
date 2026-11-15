@@ -17,6 +17,7 @@ from ._write_fetchers import (
     _fetch_groups,
     _fetch_lan_collection,
     _fetch_mdns_rules,
+    _fetch_schedules,
 )
 from .clients_read import _fetch_clients
 from .devices_read import _list_devices, _list_wlans
@@ -255,7 +256,7 @@ _SNAPSHOT_DEFAULT_OBJECTS: tuple[str, ...] = ("networks", "acls", "groups", "wla
 
 
 _SNAPSHOT_ALL_OBJECTS: tuple[str, ...] = (
-    "networks", "acls", "groups", "wlans", "devices", "clients",
+    "networks", "acls", "groups", "schedules", "wlans", "devices", "clients",
     "dhcpReservations", "portForwards", "staticRoutes", "mdnsRules", "services",
 )
 
@@ -335,13 +336,20 @@ def _get_config_snapshot_impl(
     if "groups" in selected:
         groups = [project_controller_row("groups", group) for group in _fetch_groups(client, site)]
         ip_groups = [g for g in groups if _parse_group_type(g) == 0]
+        port_groups = [g for g in groups if _parse_group_type(g) == 1]
+        mac_groups = [g for g in groups if _parse_group_type(g) == 2]
         other_groups = [g for g in groups if _parse_group_type(g) != 0]
         snapshot["groups"] = {
             "count": len(groups),
             "ipGroups": ip_groups,
+            "portGroups": port_groups,
+            "macGroups": mac_groups,
             "otherGroups": other_groups,
             "all": groups,
         }
+
+    if "schedules" in selected:
+        snapshot["schedules"] = [project_controller_row("schedules", s) for s in _fetch_schedules(client, site)]
 
     if "wlans" in selected:
         snapshot["wlans"] = _list_wlans(client)
@@ -478,11 +486,14 @@ _SNAPSHOT_SCHEMA: dict[str, Any] = {
             "properties": {
                 "count": {"type": "integer"},
                 "ipGroups": {"type": "array", "items": {"type": "object"}},
+                "portGroups": {"type": "array", "items": {"type": "object"}},
+                "macGroups": {"type": "array", "items": {"type": "object"}},
                 "otherGroups": {"type": "array", "items": {"type": "object"}},
                 "all": {"type": "array", "items": {"type": "object"}},
             },
             "required": ["count", "ipGroups", "otherGroups", "all"],
         },
+        "schedules": {"type": "array", "items": {"type": "object"}},
         "wlans": {"type": "array", "items": {"type": "object"}},
         "devices": {"type": "array", "items": {"type": "object"}},
         "clients": {"type": "array", "items": {"type": "object"}},
@@ -526,7 +537,7 @@ def _diff_item_identity(section: str, item: Any) -> tuple[str, str]:
     if not isinstance(item, dict):
         canon = json.dumps(item, sort_keys=True, separators=(",", ":"), default=str)
         return canon, canon
-    raw_id = item.get("id")
+    raw_id = item.get("id") or item.get("groupId")
     label = str(item.get("name") or item.get("ssid") or item.get("mac") or raw_id or "")
     if raw_id not in (None, ""):
         return f"id:{raw_id}", label or str(raw_id)

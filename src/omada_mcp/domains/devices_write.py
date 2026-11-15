@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import time
+import uuid
 from collections.abc import Mapping
 from typing import Any
 
@@ -28,7 +30,7 @@ from ._write_common import (
     _resolve_by_id_or_name,
     _site,
 )
-from ._write_fetchers import _fetch_devices, _omada_mac
+from ._write_fetchers import _fetch_devices, _omada_mac, _require_gateway
 
 
 def update_device(
@@ -497,6 +499,251 @@ def start_rf_scan(
         target_id=norm_mac,
         before=write_res["before"],
         after={**before, "rfScanTriggered": True},
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=warnings,
+        rollback=None,
+    )
+
+
+_NETCHECK_DEVICE_TYPE: dict[str, int] = {
+    "ap": 0,
+    "eap": 0,
+    "switch": 1,
+    "stack": 1,
+    "gateway": 2,
+}
+
+
+def _validate_diag_target(target: str) -> str:
+    clean = str(target or "").strip()
+    if not clean or len(clean) > 255 or any(ch.isspace() or ord(ch) < 32 for ch in clean):
+        raise OmadaError(
+            f"invalid diagnostic target {target!r}",
+            hint="pass an IPv4/IPv6 address or hostname without spaces (e.g. '8.8.8.8' or '192.168.1.1')",
+        )
+    return clean
+
+
+def _run_network_check(
+    client: OmadaClient,
+    *,
+    tool_name: str,
+    test_code: int,
+    deviceMac: str,
+    target: str,
+    count: int | None = None,
+    packetSize: int | None = None,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    clean_target = _validate_diag_target(target)
+    site = _site(client)
+    dev_stub = resolve_raw_device(client, site, deviceMac)
+    norm_mac = _normalize_mac(str(dev_stub.get("mac") or deviceMac))
+    dev_mac = _omada_mac(norm_mac)
+    dev_type = str(dev_stub.get("type") or "").strip().lower()
+    dev_type_code = _NETCHECK_DEVICE_TYPE.get(dev_type)
+    if dev_type_code is None:
+        raise OmadaError(f"device {norm_mac} has unsupported type {dev_type!r} for network-check")
+
+    status_cat = dev_stub.get("statusCategory")
+    status_val = dev_stub.get("status")
+    is_offline = (status_cat is not None and status_cat != 1) or (
+        status_cat is None and status_val is not None and status_val not in (1, 14)
+    )
+    if is_offline:
+        raise OmadaError(
+            f"device {dev_stub.get('name') or norm_mac} ({norm_mac}) is offline",
+            hint="select an online device to run active network diagnostics",
+        )
+
+    target_id = f"{norm_mac}:{clean_target}"
+    _require_confirm(tool_name, target_id, dryRun, confirm)
+
+    nid = uuid.uuid4().hex
+    payload: dict[str, Any] = {
+        "deviceType": dev_type_code,
+        "source": [dev_mac],
+        "destType": 0,
+        "dest": clean_target,
+        "nid": nid,
+    }
+    if test_code == 0:
+        cnt = 4 if count is None else count
+        pkt = 56 if packetSize is None else packetSize
+        if isinstance(cnt, bool) or not isinstance(cnt, int) or not (1 <= cnt <= 20):
+            raise OmadaError("count must be an integer between 1 and 20")
+        if isinstance(pkt, bool) or not isinstance(pkt, int) or not (4 <= pkt <= 1472):
+            raise OmadaError("packetSize must be an integer between 4 and 1472 bytes")
+        payload["count"] = cnt
+        payload["packetSize"] = pkt
+
+    test_label = "ping" if test_code == 0 else "traceroute"
+    before = {"mac": norm_mac, "name": dev_stub.get("name"), "deviceType": dev_type, "target": clean_target}
+    after_preview = {**before, "test": test_label, **({"count": payload.get("count"), "packetSize": payload.get("packetSize")} if test_code == 0 else {})}
+    diff = {"networkCheckTriggered": {"before": False, "after": f"{test_label}:{clean_target}"}}
+    warnings = [
+        f"Controller executes {test_label} asynchronously on device {norm_mac} (results stream over controller WebSocket when UI-attached)."
+    ]
+
+    if dryRun:
+        return _dry_run_result(
+            tool_name=tool_name,
+            target_id=target_id,
+            before=before,
+            after=after_preview,
+            diff=diff,
+            warnings=warnings,
+            rollback=None,
+        )
+
+    write_res = client.write(
+        f"sites/{site.site_id}/tools/network-check/{test_code}",
+        method="POST",
+        data=payload,
+        tool_name=tool_name,
+        target=target_id,
+        before=before,
+        snapshot_payload={"device": dev_stub, "request": payload},
+        fields_changed=[test_label],
+    )
+    return _committed_result(
+        tool_name=tool_name,
+        target_id=target_id,
+        before=write_res["before"],
+        after={**after_preview, "nid": nid, "controllerResult": write_res.get("result")},
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=warnings,
+        rollback=None,
+    )
+
+
+def run_ping(
+    client: OmadaClient,
+    deviceMac: str,
+    target: str,
+    count: int = 4,
+    packetSize: int = 56,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Run an active ICMP ping from an adopted AP, switch, or gateway (``POST tools/network-check/0``)."""
+    return _run_network_check(
+        client,
+        tool_name="run_ping",
+        test_code=0,
+        deviceMac=deviceMac,
+        target=target,
+        count=count,
+        packetSize=packetSize,
+        dryRun=dryRun,
+        confirm=confirm,
+    )
+
+
+def run_traceroute(
+    client: OmadaClient,
+    deviceMac: str,
+    target: str,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Run an active traceroute from an adopted AP, switch, or gateway (``POST tools/network-check/1``)."""
+    return _run_network_check(
+        client,
+        tool_name="run_traceroute",
+        test_code=1,
+        deviceMac=deviceMac,
+        target=target,
+        dryRun=dryRun,
+        confirm=confirm,
+    )
+
+
+def start_wan_speedtest(
+    client: OmadaClient,
+    pure: bool = False,
+    pollSeconds: int = 0,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Trigger an active WAN gateway speed test (``POST cmd/speedTest`` or ``cmd/speedTestPure``)."""
+    if isinstance(pollSeconds, bool) or not isinstance(pollSeconds, int) or not (0 <= pollSeconds <= 15):
+        raise OmadaError("pollSeconds must be an integer between 0 and 15")
+    site = _site(client)
+    gws = _require_gateway(client, site, "WAN speed test")
+    target_id = f"site:{site.site_id}"
+    _require_confirm("start_wan_speedtest", target_id, dryRun, confirm)
+
+    warnings = [
+        "WARNING: Active WAN speed tests briefly saturate the Internet uplink and can raise latency for connected clients."
+    ]
+    before_status: dict[str, Any] = {}
+    try:
+        res = client.api_result(f"sites/{site.site_id}/cmd/getSpeedTestResult")
+        if isinstance(res, Mapping):
+            before_status = dict(res)
+    except OmadaError:
+        pass
+
+    before = {
+        "siteId": site.site_id,
+        "gateway": gws[0].get("name") or gws[0].get("mac"),
+        "speedTestStatus": before_status.get("speedTestStatus"),
+    }
+    diff = {"speedTestTriggered": {"before": False, "after": True}}
+    if dryRun:
+        return _dry_run_result(
+            tool_name="start_wan_speedtest",
+            target_id=target_id,
+            before=before,
+            after={**before, "speedTestTriggered": True, "pure": bool(pure)},
+            diff=diff,
+            warnings=warnings,
+            rollback=None,
+        )
+
+    cmd = "cmd/speedTestPure" if pure else "cmd/speedTest"
+    write_res = client.write(
+        f"sites/{site.site_id}/{cmd}",
+        method="POST",
+        data={},
+        tool_name="start_wan_speedtest",
+        target=target_id,
+        before=before,
+        snapshot_payload={"gateway": gws[0], "beforeStatus": before_status},
+        fields_changed=["speedTest"],
+    )
+
+    polled_result: dict[str, Any] | None = None
+    if pollSeconds > 0:
+        deadline = time.monotonic() + pollSeconds
+        while True:
+            try:
+                raw_poll = client.api_result(f"sites/{site.site_id}/cmd/getSpeedTestResult")
+                if isinstance(raw_poll, Mapping):
+                    polled_result = dict(raw_poll)
+                    status_val = polled_result.get("speedTestStatus")
+                    if status_val not in (None, 0, "running") or polled_result.get("speedTestResults"):
+                        break
+            except OmadaError:
+                break
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(min(2.0, max(0.1, deadline - time.monotonic())))
+
+    return _committed_result(
+        tool_name="start_wan_speedtest",
+        target_id=target_id,
+        before=write_res["before"],
+        after={
+            **before,
+            "speedTestTriggered": True,
+            "pure": bool(pure),
+            "result": polled_result or write_res.get("result"),
+        },
         diff=diff,
         snapshot=write_res["snapshot"],
         warnings=warnings,

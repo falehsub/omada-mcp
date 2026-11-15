@@ -31,6 +31,7 @@ from ._write_fetchers import (
     _fetch_mdns_rules,
     _fetch_policy_routes,
     _fetch_port_forwards,
+    _fetch_schedules,
     _fetch_static_routes,
     _fetch_typed_acls,
     _omada_mac,
@@ -567,6 +568,79 @@ def rollback_from_snapshot(
             restore_preview=None,
             read_back_fn=lambda: _fetch_groups(client, site),
             verify_fn=lambda _b, a: (all(str(r.get("groupId") or r.get("id") or "") != gid for r in a), f"IP group {gid} still present"),
+        )
+
+    if orig_tool in ("upsert_port_group", "delete_port_group", "upsert_mac_group", "delete_mac_group") and isinstance(snap_data, Mapping):
+        gtype = int(snap_data.get("groupType", 1 if "port_group" in orig_tool else 2))
+        if snap_data.get("action") == "create":
+            existing_ids = set(snap_data.get("existingIds") or [])
+            rows = [r for r in _fetch_groups(client, site) if int(r.get("type", 0)) == gtype]
+            target = next(
+                (r for r in rows if str(r.get("name")) == str(snap_data.get("name")) and str(r.get("groupId") or r.get("id") or "") not in existing_ids),
+                None,
+            )
+            if target is None:
+                raise OmadaError(f"cannot locate created group {snap_data.get('name')!r} to delete on rollback")
+            gid = str(target.get("groupId") or target.get("id") or "")
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/profiles/groups/{gtype}/{gid}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_groups(client, site),
+                verify_fn=lambda _b, a: (all(str(r.get("groupId") or r.get("id") or "") != gid for r in a), f"group {gid} still present"),
+            )
+        grp = as_mapping(snap_data.get("group")) or snap_data
+        gid = str(grp.get("groupId") or grp.get("id") or "")
+        grp_name_rb = str(grp.get("name") or "")
+        rows = [r for r in _fetch_groups(client, site) if int(r.get("type", 0)) == gtype]
+        live = next((r for r in rows if str(r.get("groupId") or r.get("id") or "") == gid), None)
+        body = {k: copy.deepcopy(v) for k, v in grp.items() if k not in ("id", "groupId", "site", "resource", "count", "portType", "portMaskList")}
+        method = "PATCH" if live is not None and gid else "POST"
+        ep = f"sites/{site.site_id}/setting/profiles/groups/{gtype}/{gid}" if method == "PATCH" else f"sites/{site.site_id}/setting/profiles/groups"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=grp,
+            read_back_fn=lambda: next((r for r in _fetch_groups(client, site) if int(r.get("type", 0)) == gtype and str(r.get("name")) == grp_name_rb), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == grp_name_rb, "group rollback verification failed"),
+        )
+
+    if orig_tool in ("upsert_schedule", "delete_schedule") and isinstance(snap_data, Mapping):
+        if snap_data.get("action") == "create":
+            existing_ids = set(snap_data.get("existingIds") or [])
+            rows = _fetch_schedules(client, site)
+            target = next((r for r in rows if str(r.get("name")) == str(snap_data.get("name")) and str(r.get("id") or "") not in existing_ids), None)
+            if target is None or not target.get("id"):
+                raise OmadaError(f"cannot locate created schedule {snap_data.get('name')!r} to delete on rollback")
+            tid = str(target["id"])
+            return _run_restore(
+                method="DELETE",
+                endpoint=f"sites/{site.site_id}/setting/profiles/timeranges/{tid}",
+                payload=None,
+                live_before=target,
+                restore_preview=None,
+                read_back_fn=lambda: _fetch_schedules(client, site),
+                verify_fn=lambda _b, a: (all(str(r.get("id")) != tid for r in a), f"schedule {tid} still present"),
+            )
+        sched = as_mapping(snap_data.get("schedule")) or snap_data
+        tid = str(sched.get("id") or "")
+        sched_name_rb = str(sched.get("name") or "")
+        body = {k: copy.deepcopy(v) for k, v in sched.items() if k not in ("id", "site", "resource", "entryId")}
+        live = next((r for r in _fetch_schedules(client, site) if str(r.get("id")) == tid), None)
+        method = "PATCH" if live is not None and tid else "POST"
+        ep = f"sites/{site.site_id}/setting/profiles/timeranges/{tid}" if method == "PATCH" else f"sites/{site.site_id}/setting/profiles/timeranges"
+        return _run_restore(
+            method=method,
+            endpoint=ep,
+            payload=body,
+            live_before=live,
+            restore_preview=sched,
+            read_back_fn=lambda: next((r for r in _fetch_schedules(client, site) if str(r.get("name")) == sched_name_rb), None),
+            verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("name")) == sched_name_rb, "schedule rollback verification failed"),
         )
 
     if orig_tool in ("upsert_port_profile", "delete_port_profile") and isinstance(snap_data, Mapping):
