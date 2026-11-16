@@ -36,6 +36,19 @@ python scripts/anonymize_capture.py capture.json --verify-clean --strict-private
 
 ## Reporting a New Controller Build
 
+### Operator-reported live home-network verification (`v2.3.0`, 2026-11-16)
+
+The [dated Hermes validation record](live-validation-2026-11-16.md) documents a
+`2.0.0` to `2.3.0` MCP upgrade against software controller `6.3.0.45` with four
+adopted devices. Hermes reported 13 baseline checks passed, a single authorized
+`create_ip_group` / `delete_ip_group` cycle with verified cleanup, and no drift in
+the compared `networks`, `acls`, `groups` and `wlans` snapshot sections. Follow-up
+verification resolved a cached supervisor environment and confirmed the running
+read-only configuration, a 54-read/zero-write catalog, and fail-closed `-32003`
+responses. The record distinguishes helper-process catalog checks from direct
+running-process inspection and preserves the limits of this operator-reported
+evidence. It does not validate all read/write tools or authorize future live writes.
+
 ### Latest local Docker verification (`v2.3.0`, 2026-11-15)
 
 On isolated Docker software controller `6.2.14.11` (`viewer.env` and
