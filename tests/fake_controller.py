@@ -161,6 +161,13 @@ class FakeController:
         if fragment.startswith("users/current"):
             return 200, json.dumps({"errorCode": 0, "result": {
                 "id": "u1", "privilege": 0}}).encode()
+        if fragment == "users":
+            rows = [{"id": "u1", "name": self.username, "type": 0, "roleType": 0, "roleId": "r0", "roleName": "Administrator", "verified": True, "alert": False, "privilege": {"all": True, "sites": []}}]
+            return 200, json.dumps({"errorCode": 0, "result": {"data": rows, "totalRows": len(rows)}}).encode()
+        if fragment == "maintenance/controllerStatus":
+            return 200, json.dumps({"errorCode": 0, "result": {"name": "FakeController", "cloudAccessEnable": False}}).encode()
+        if fragment == "controller/setting":
+            return 200, json.dumps({"errorCode": 0, "result": {"dataBackupEnable": False}}).encode()
         if fragment.startswith("sites?") or fragment == "sites":
             return 200, json.dumps({"errorCode": 0, "result": {
                 "data": self.sites, "totalRows": len(self.sites)}}).encode()
@@ -198,6 +205,12 @@ class FakeController:
             return 200, json.dumps({"errorCode": 0, "result": {"aclDisable": True, "data": self.acls, "totalRows": len(self.acls)}}).encode()
         if fragment.startswith(site_prefix + "/setting/profiles/groups"):
             return 200, json.dumps({"errorCode": 0, "result": {"data": self.groups, "totalRows": len(self.groups)}}).encode()
+        if fragment.startswith(site_prefix + "/setting/profiles/rateLimits"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
+        if fragment.startswith(site_prefix + "/setting/profiles/timeranges"):
+            return 200, json.dumps({"errorCode": 0, "result": {"data": [], "totalRows": 0}}).encode()
+        if fragment.startswith(site_prefix + "/setting/ntp"):
+            return 200, json.dumps({"errorCode": 0, "result": {"mode": 0, "timezone": "UTC"}}).encode()
         if fragment.startswith(site_prefix + "/setting/transmission/portForwardings"):
             return 200, json.dumps({"errorCode": 0, "result": {"data": self.port_forwards, "totalRows": len(self.port_forwards)}}).encode()
         if fragment.startswith(site_prefix + "/setting/transmission/staticRoutings"):

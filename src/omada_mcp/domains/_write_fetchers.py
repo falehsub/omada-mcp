@@ -386,6 +386,12 @@ def _fetch_rate_limit_profiles(client: OmadaClient, site: SiteInfo) -> list[dict
     return _unwrap_rows(client.api_result(f"sites/{site.site_id}/setting/profiles/rateLimits"))
 
 
+def _fetch_schedules(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
+    """Fetch time-range / schedule profiles (``setting/profiles/timeranges``)."""
+    rows, _ = client.paginate(f"sites/{site.site_id}/setting/profiles/timeranges")
+    return rows
+
+
 def _require_gateway(client: OmadaClient, site: SiteInfo, feature: str) -> list[dict[str, Any]]:
     devs = _fetch_devices(client, site)
     gws = [d for d in devs if str(d.get("type") or "").lower() == "gateway"]

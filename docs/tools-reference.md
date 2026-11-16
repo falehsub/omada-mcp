@@ -2,7 +2,7 @@
 
 # Tool & Configuration Reference
 
-Generated directly from `omada_mcp.tools.TOOLS` (**82 total**: **35 read-only**, **47 opt-in write**).
+Generated directly from `omada_mcp.tools.TOOLS` (**97 total**: **40 read-only**, **57 opt-in write**).
 
 - Required parameters are shown in **`bold`**; optional parameters carry `?`.
 - Site-scoped tools accept optional `site?` (pinned when `OMADA_SITE_NAME`/`OMADA_SITE_ID` is set unless `OMADA_ALLOW_CROSS_SITE=true`).
@@ -12,15 +12,15 @@ Generated directly from `omada_mcp.tools.TOOLS` (**82 total**: **35 read-only**,
 
 | Category | Read-only | Opt-in write | Total |
 |---|---:|---:|---:|
-| `core` | 15 | 15 | 30 |
-| `diagnostics` | 6 | 0 | 6 |
+| `core` | 17 | 17 | 34 |
+| `diagnostics` | 7 | 4 | 11 |
 | `rollback` | 0 | 1 | 1 |
 | `routing` | 6 | 11 | 17 |
-| `security` | 3 | 9 | 12 |
+| `security` | 5 | 13 | 18 |
 | `switch` | 2 | 4 | 6 |
 | `wifi` | 3 | 7 | 10 |
 
-## Read-Only Tools (35)
+## Read-Only Tools (40)
 
 | Tool | Tier | Category | Hints | Parameters | Description |
 |---|---|---|---|---|---|
@@ -59,8 +59,13 @@ Generated directly from `omada_mcp.tools.TOOLS` (**82 total**: **35 read-only**,
 | `list_wlan_groups` | read-only | `wifi` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List configured WLAN groups and their SSIDs for assigning APs cleanly. |
 | `list_policy_routes` | read-only | `routing` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List policy routing rules (gracefully reports unavailability if no gateway exists). |
 | `list_lan_dns_rules` | read-only | `routing` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List local LAN DNS records (gracefully warns on controller versions without LAN DNS). |
+| `list_blocked_clients` | read-only | `security` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List clients currently blocked on the site (prefers clients?filters.block=true and falls back to insight/clients?filters.block=true for Viewer accounts). |
+| `list_rate_limit_profiles` | read-only | `core` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List configured client bandwidth rate-limit profiles (upload/download caps and defaults). |
+| `list_schedules` | read-only | `core` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List reusable time-range / schedule profiles used by ACLs, PoE schedules, and WLAN schedules. |
+| `list_controller_users` | read-only | `security` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List Omada controller user accounts and site/role privileges (non-secret fields only; Viewer accounts see only their own account). |
+| `get_controller_status` | read-only | `diagnostics` | `readOnly=true, destructive=false, idempotent=true` | `site?` | Read controller runtime status, redacted global controller settings summary, and site NTP settings. |
 
-## Opt-In Write Tools (47)
+## Opt-In Write Tools (57)
 
 | Tool | Tier | Category | Hints | Parameters | Description |
 |---|---|---|---|---|---|
@@ -111,6 +116,16 @@ Generated directly from `omada_mcp.tools.TOOLS` (**82 total**: **35 read-only**,
 | `create_eap_acl` | opt-in write | `security` | `readOnly=false, destructive=false, idempotent=false` | **`name`**, **`policy`**, **`source`**, **`destination`**, `status?`, `protocols?`, `syslog?`, `dryRun?`, `confirm?`, `site?` | Create an EAP ACL rule (POST setting/firewall/acls?type=2) with anti-stranding checks. Supports source/destination type 'ssid' in addition to network/group selectors. |
 | `set_client_lock_to_ap` | opt-in write | `wifi` | `readOnly=false, destructive=false, idempotent=true` | **`clientMac`**, **`enabled`**, `apMacs?`, `dryRun?`, `confirm?`, `site?` | Configure clientLockToApSetting on a wireless client (PATCH clients/{MAC}) using volatile-stripped RMW and wire AP MAC string normalization. |
 | `set_client_rate_limit` | opt-in write | `core` | `readOnly=false, destructive=false, idempotent=true` | **`clientMac`**, **`enabled`**, `rateLimitProfileId?`, `rateLimitProfileName?`, `downLimitKbps?`, `upLimitKbps?`, `dryRun?`, `confirm?`, `site?` | Apply or disable a client rate-limit profile or custom Kbps upload/download limits via PATCH clients/{MAC}. |
+| `upsert_port_group` | opt-in write | `security` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, **`ports`**, `ips?`, `groupId?`, `dryRun?`, `confirm?`, `site?` | Create or update a TCP/UDP port group (type=1 on setting/profiles/groups) for gateway/switch/EAP ACLs. |
+| `delete_port_group` | opt-in write | `security` | `readOnly=false, destructive=true, idempotent=true` | **`group`**, `dryRun?`, `confirm?`, `site?` | Delete an unreferenced IP-Port group (DELETE setting/profiles/groups/1/{id}). |
+| `upsert_mac_group` | opt-in write | `security` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, **`entries`**, `groupId?`, `dryRun?`, `confirm?`, `site?` | Create or update a MAC address group (type=2 on setting/profiles/groups) for ACLs and filtering. |
+| `delete_mac_group` | opt-in write | `security` | `readOnly=false, destructive=true, idempotent=true` | **`group`**, `dryRun?`, `confirm?`, `site?` | Delete an unreferenced MAC address group (DELETE setting/profiles/groups/2/{id}). |
+| `upsert_schedule` | opt-in write | `core` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, **`windows`**, `dayMode?`, `days?`, `scheduleId?`, `dryRun?`, `confirm?`, `site?` | Create or update a reusable schedule/time-range profile (setting/profiles/timeranges). |
+| `delete_schedule` | opt-in write | `core` | `readOnly=false, destructive=true, idempotent=true` | **`schedule`**, `dryRun?`, `confirm?`, `site?` | Delete an unreferenced schedule/time-range profile (DELETE setting/profiles/timeranges/{id}). |
+| `run_ping` | opt-in write | `diagnostics` | `readOnly=false, destructive=false, idempotent=true` | **`deviceMac`**, **`target`**, `count?`, `packetSize?`, `dryRun?`, `confirm?`, `site?` | Execute an active ICMP ping test from an online adopted device (POST tools/network-check/0). |
+| `run_traceroute` | opt-in write | `diagnostics` | `readOnly=false, destructive=false, idempotent=true` | **`deviceMac`**, **`target`**, `dryRun?`, `confirm?`, `site?` | Execute an active traceroute from an online adopted device (POST tools/network-check/1). |
+| `start_wan_speedtest` | opt-in write | `diagnostics` | `readOnly=false, destructive=true, idempotent=false` | `pure?`, `pollSeconds?`, `dryRun?`, `confirm?`, `site?` | Start a gateway WAN bandwidth speed test (POST cmd/speedTest or cmd/speedTestPure). |
+| `start_cable_test` | opt-in write | `diagnostics` | `readOnly=false, destructive=true, idempotent=false` | **`deviceMac`**, **`ports`**, `allowUplinkMutation?`, `dryRun?`, `confirm?`, `site?` | Start a switch TDR cable diagnostic test on port(s) (POST cable-test/switches/{MAC}/start; refuses uplink/controller-carrying ports unless allowUplinkMutation=true). |
 
 ## Environment Variables (`server.json`)
 

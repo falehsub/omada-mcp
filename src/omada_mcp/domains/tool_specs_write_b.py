@@ -11,7 +11,15 @@ from .clients_write import (
     set_client_rate_limit,
     update_client,
 )
-from .devices_write import reboot_device, start_rf_scan, update_ap_radio, update_device
+from .devices_write import (
+    reboot_device,
+    run_ping,
+    run_traceroute,
+    start_rf_scan,
+    start_wan_speedtest,
+    update_ap_radio,
+    update_device,
+)
 from .rollback import rollback_from_snapshot
 from .routing_dns_write import (
     delete_lan_dns_rule,
@@ -19,10 +27,18 @@ from .routing_dns_write import (
     upsert_lan_dns_rule,
     upsert_policy_route,
 )
+from .schedules_write import delete_schedule, upsert_schedule
 from .security_acls_write import create_eap_acl, create_switch_acl
+from .security_groups_write import (
+    delete_mac_group,
+    delete_port_group,
+    upsert_mac_group,
+    upsert_port_group,
+)
 from .switch_write import (
     cycle_poe_port,
     delete_port_profile,
+    start_cable_test,
     update_switch_port,
     upsert_port_profile,
 )
@@ -598,5 +614,235 @@ WRITE_TOOLS_B: list[Tool] = [
         read_only=False,
         destructive=False,
         idempotent=True,
+    ),
+    Tool(
+        name="upsert_port_group",
+        title="Create or update IP-Port group",
+        description=(
+            "Create or update a TCP/UDP port group (type=1 on setting/profiles/groups) for gateway/switch/EAP ACLs."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Port group name (1-64 chars)"},
+                "ports": {
+                    "type": "array",
+                    "items": {"type": ["string", "integer"]},
+                    "description": "Port numbers or ranges e.g. ['80', '443', '8000-8080']",
+                },
+                "ips": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional associated IPv4 CIDRs or ranges (defaults to empty)",
+                },
+                "groupId": {"type": "string", "description": "Existing port group ID when updating/renaming"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name", "ports"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=upsert_port_group,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="delete_port_group",
+        title="Delete IP-Port group",
+        description="Delete an unreferenced IP-Port group (DELETE setting/profiles/groups/1/{id}).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "group": {"type": "string", "description": "Port group ID or exact name"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["group"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=delete_port_group,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="upsert_mac_group",
+        title="Create or update MAC group",
+        description=(
+            "Create or update a MAC address group (type=2 on setting/profiles/groups) for ACLs and filtering."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "MAC group name (1-64 chars)"},
+                "entries": {
+                    "type": "array",
+                    "items": {"type": ["string", "object"]},
+                    "description": "List of MAC strings or {'name': '...', 'mac': '...'} objects",
+                },
+                "groupId": {"type": "string", "description": "Existing MAC group ID when updating/renaming"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name", "entries"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=upsert_mac_group,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="delete_mac_group",
+        title="Delete MAC group",
+        description="Delete an unreferenced MAC address group (DELETE setting/profiles/groups/2/{id}).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "group": {"type": "string", "description": "MAC group ID or exact name"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["group"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=delete_mac_group,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="upsert_schedule",
+        title="Create or update time-range schedule",
+        description="Create or update a reusable schedule/time-range profile (setting/profiles/timeranges).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Schedule profile name (1-64 chars)"},
+                "windows": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Time windows e.g. [{'start': '08:00', 'end': '17:30'}]",
+                },
+                "dayMode": {
+                    "type": ["string", "integer"],
+                    "default": "everyday",
+                    "description": "'everyday' (0), 'weekday' (1), 'weekend' (2), or 'custom' (3)",
+                },
+                "days": {
+                    "type": "array",
+                    "items": {"type": ["string", "integer"]},
+                    "description": "Days of week when dayMode='custom' e.g. ['mon', 'wed', 'fri']",
+                },
+                "scheduleId": {"type": "string", "description": "Existing schedule ID when updating/renaming"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["name", "windows"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=upsert_schedule,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="delete_schedule",
+        title="Delete time-range schedule",
+        description="Delete an unreferenced schedule/time-range profile (DELETE setting/profiles/timeranges/{id}).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "schedule": {"type": "string", "description": "Schedule ID or exact name"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["schedule"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=delete_schedule,
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+    ),
+    Tool(
+        name="run_ping",
+        title="Run active ICMP ping from device",
+        description="Execute an active ICMP ping test from an online adopted device (POST tools/network-check/0).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "deviceMac": {"type": "string", "description": "Source AP, switch, or gateway MAC or exact name"},
+                "target": {"type": "string", "description": "Destination IPv4/IPv6 address or hostname"},
+                "count": {"type": "integer", "minimum": 1, "maximum": 20, "default": 4},
+                "packetSize": {"type": "integer", "minimum": 4, "maximum": 1472, "default": 56},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["deviceMac", "target"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=run_ping,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="run_traceroute",
+        title="Run active traceroute from device",
+        description="Execute an active traceroute from an online adopted device (POST tools/network-check/1).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "deviceMac": {"type": "string", "description": "Source AP, switch, or gateway MAC or exact name"},
+                "target": {"type": "string", "description": "Destination IPv4/IPv6 address or hostname"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["deviceMac", "target"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=run_traceroute,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="start_wan_speedtest",
+        title="Trigger WAN gateway speed test",
+        description="Start a gateway WAN bandwidth speed test (POST cmd/speedTest or cmd/speedTestPure).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "pure": {"type": "boolean", "default": False, "description": "Use speedTestPure endpoint when true"},
+                "pollSeconds": {"type": "integer", "minimum": 0, "maximum": 15, "default": 0},
+                **_WRITE_CONTROL_PROPS,
+            },
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=start_wan_speedtest,
+        read_only=False,
+        destructive=True,
+        idempotent=False,
+    ),
+    Tool(
+        name="start_cable_test",
+        title="Run TDR switch cable test",
+        description=(
+            "Start a switch TDR cable diagnostic test on port(s) (POST cable-test/switches/{MAC}/start; "
+            "refuses uplink/controller-carrying ports unless allowUplinkMutation=true)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "deviceMac": {"type": "string", "description": "Switch MAC address or exact name"},
+                "ports": {
+                    "type": ["array", "integer"],
+                    "items": {"type": "integer", "minimum": 1},
+                    "description": "Port number or list of port numbers to test",
+                },
+                "allowUplinkMutation": {"type": "boolean", "default": False},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["deviceMac", "ports"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=start_cable_test,
+        read_only=False,
+        destructive=True,
+        idempotent=False,
     ),
 ]

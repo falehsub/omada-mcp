@@ -773,6 +773,55 @@ _DIAGNOSE_CLIENT_SCHEMA: dict[str, Any] = {
 }
 
 
+def _get_controller_status(client: OmadaClient) -> dict[str, Any]:
+    """Read controller runtime status, redacted global settings summary, and site NTP state."""
+    site = _site(client)
+    warnings: list[str] = []
+    status_raw, ok_status = try_api_result(
+        client,
+        "maintenance/controllerStatus",
+        warnings,
+        label="controller status",
+    )
+    setting_raw, ok_setting = try_api_result(
+        client,
+        "controller/setting",
+        warnings,
+        label="controller settings",
+    )
+    ntp_raw, ok_ntp = try_api_result(
+        client,
+        f"sites/{site.site_id}/setting/ntp",
+        warnings,
+        label="site NTP settings",
+    )
+
+    status_map = deep_redact(dict(status_raw)) if ok_status and isinstance(status_raw, dict) else {}
+    setting_map = deep_redact(dict(setting_raw)) if ok_setting and isinstance(setting_raw, dict) else {}
+    ntp_map = deep_redact(dict(ntp_raw)) if ok_ntp and isinstance(ntp_raw, dict) else None
+
+    return {
+        "controllerId": client.controller_id,
+        "controllerVersion": getattr(client.auth_info, "controller_version", None),
+        "controllerFamily": getattr(client.auth_info, "controller_family", None),
+        "site": {"id": site.site_id, "name": site.name},
+        "status": status_map,
+        "settings": {
+            "controllerName": setting_map.get("controllerName"),
+            "general": setting_map.get("general"),
+            "portSettings": setting_map.get("portSettings"),
+            "mailServer": setting_map.get("mailServer"),
+            "remoteLogging": setting_map.get("remoteLogging"),
+            "radius": setting_map.get("radius"),
+            "retain": setting_map.get("retain"),
+            "autoBackup": setting_map.get("autoBackup"),
+            "cloud": setting_map.get("cloud"),
+        } if setting_map else {},
+        "siteNtp": ntp_map,
+        "warnings": warnings,
+    }
+
+
 _DIAGNOSE_WAN_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -784,5 +833,21 @@ _DIAGNOSE_WAN_SCHEMA: dict[str, Any] = {
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["wan", "vpnSummary", "recentLogs", "findings", "nextSteps", "warnings"],
+}
+
+
+_CONTROLLER_STATUS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "controllerId": {"type": ["string", "null"]},
+        "controllerVersion": {"type": ["string", "null"]},
+        "controllerFamily": {"type": ["string", "null"]},
+        "site": {"type": "object"},
+        "status": {"type": "object"},
+        "settings": {"type": "object"},
+        "siteNtp": {"type": ["object", "null"]},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["site", "status", "settings", "warnings"],
 }
 

@@ -48,11 +48,11 @@ class WriteConfigTests(unittest.TestCase):
     def test_tool_name_sets_match_tools_module(self):
         ro_names = {t.name for t in TOOLS if t.read_only}
         wr_names = {t.name for t in TOOLS if not t.read_only}
-        self.assertEqual(len(ro_names), 35)
-        self.assertEqual(len(wr_names), 47)
+        self.assertEqual(len(ro_names), 40)
+        self.assertEqual(len(wr_names), 57)
         self.assertEqual(config_mod._READ_ONLY_TOOL_NAMES, ro_names)
         self.assertEqual(set(WRITE_TOOL_NAMES), wr_names)
-        self.assertEqual(len(TOOLS), 82)
+        self.assertEqual(len(TOOLS), 97)
 
     def test_parse_write_tools_validation(self):
         self.assertEqual(parse_write_tools(None), ())
@@ -167,7 +167,7 @@ class GateAndProtocolTests(unittest.TestCase):
                 tmp, read_only=False, write_tools=("set_client_fixed_ip",)
             )
             listed = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]
-            self.assertEqual(len(listed), 36)
+            self.assertEqual(len(listed), 41)
             names = {t["name"] for t in listed}
             self.assertIn("set_client_fixed_ip", names)
             self.assertNotIn("release_client_fixed_ip", names)
@@ -289,6 +289,16 @@ class GateAndProtocolTests(unittest.TestCase):
             "create_eap_acl": (False, False, False),
             "set_client_lock_to_ap": (False, False, True),
             "set_client_rate_limit": (False, False, True),
+            "upsert_port_group": (False, False, True),
+            "delete_port_group": (False, True, True),
+            "upsert_mac_group": (False, False, True),
+            "delete_mac_group": (False, True, True),
+            "upsert_schedule": (False, False, True),
+            "delete_schedule": (False, True, True),
+            "run_ping": (False, False, True),
+            "run_traceroute": (False, False, True),
+            "start_wan_speedtest": (False, True, False),
+            "start_cable_test": (False, True, False),
         }
         for name, (ro, dest, idemp) in expected.items():
             t = TOOL_MAP[name]
@@ -297,6 +307,8 @@ class GateAndProtocolTests(unittest.TestCase):
             "list_devices", "list_clients", "list_wifi_clients", "list_wired_clients",
             "get_device", "get_client", "list_wlans", "get_site_info",
             "network_audit", "explain_error",
+            "list_blocked_clients", "list_rate_limit_profiles",
+            "list_schedules", "list_controller_users", "get_controller_status",
         })
 
 

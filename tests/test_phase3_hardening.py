@@ -279,6 +279,24 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "type": 0,
                 "distance": 1,
             })
+            ctrl.groups.extend([
+                {
+                    "groupId": "grp-port-seed",
+                    "name": "Seed-Ports",
+                    "type": 1,
+                    "portType": 0,
+                    "ipList": [],
+                    "portList": ["80", "443"],
+                    "portMaskList": [],
+                },
+                {
+                    "groupId": "grp-mac-seed",
+                    "name": "Seed-MACs",
+                    "type": 2,
+                    "ipList": [],
+                    "macAddressList": [{"name": "seed-cam", "macAddress": "AA-BB-CC-DD-EE-01"}],
+                },
+            ])
 
             # Create one real reversible write so rollback_from_snapshot has a live snapshot target
             prep_dry = unwrap_ok(call_tool(server, "set_vlan_isolation", {"vlan": 20, "isolation": True}))
@@ -326,10 +344,13 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "delete_ip_group": {"group": "grp-printers-02"},
                 "delete_lan_dns_rule": {"ruleId": "dns-seed-1"},
                 "delete_lan_network": {"vlan": 40},
+                "delete_mac_group": {"group": "grp-mac-seed"},
                 "delete_mdns_rule": {"rule": "mdns-seed-1"},
                 "delete_policy_route": {"routeId": "pr-seed-1"},
                 "delete_port_forward": {"rule": "pf-seed-1"},
+                "delete_port_group": {"group": "grp-port-seed"},
                 "delete_port_profile": {"profile": "65000000000000000000001e"},
+                "delete_schedule": {"schedule": "sched-seed-1"},
                 "delete_ssid": {"ssid": "Lab-Guest", "wlanGroup": "Default"},
                 "delete_static_route": {"rule": "sr-seed-1"},
                 "reboot_device": {"mac": "AA-BB-CC-00-00-03"},
@@ -337,6 +358,8 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "release_client_fixed_ip": {"mac": "AA-BB-CC-11-11-01"},
                 "replace_ip_group": {"group": "grp-printers-02", "cidrs": ["10.20.30.0/24"]},
                 "rollback_from_snapshot": {"snapshotId": snap_id},
+                "run_ping": {"deviceMac": "AA-BB-CC-00-00-01", "target": "1.1.1.1"},
+                "run_traceroute": {"deviceMac": "AA-BB-CC-00-00-01", "target": "1.1.1.1"},
                 "set_acl_rule_status": {"rule": "acl-001", "status": False, "aclType": "gateway"},
                 "set_client_blocked": {"mac": "AA-BB-CC-11-11-01", "blocked": True},
                 "set_client_fixed_ip": {"mac": "AA-BB-CC-11-11-01", "ip": "192.168.20.55", "vlan": 20},
@@ -345,7 +368,9 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "set_upnp": {"enable": True},
                 "set_vlan_dhcp_pools": {"vlan": 20, "pools": [{"start": "192.168.20.100", "end": "192.168.20.200"}]},
                 "set_vlan_isolation": {"vlan": 20, "isolation": False},
+                "start_cable_test": {"deviceMac": "AA-BB-CC-00-00-02", "ports": [3]},
                 "start_rf_scan": {"deviceMac": "AA-BB-CC-00-00-03"},
+                "start_wan_speedtest": {},
                 "update_ap_radio": {"deviceMac": "AA-BB-CC-00-00-03", "band": "5g", "channel": 36},
                 "update_client": {"mac": "AA-BB-CC-11-11-01", "name": "workstation-1"},
                 "update_device": {"mac": "AA-BB-CC-00-00-03", "name": "ap-living-renamed"},
@@ -355,6 +380,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "update_switch_port": {"deviceMac": "AA-BB-CC-00-00-02", "port": 3, "name": "ap-port"},
                 "upsert_dhcp_reservation": {"mac": "AA-BB-CC-11-22-88", "ip": "192.168.20.88", "vlan": 20},
                 "upsert_lan_dns_rule": {"name": "printer-host", "domain": "printer.lab.arpa", "ipAddresses": ["192.168.20.44"]},
+                "upsert_mac_group": {"name": "New-MACs", "entries": ["AA-BB-CC-DD-EE-02"]},
                 "upsert_mdns_rule": {
                     "name": "cast-rule",
                     "profiles": ["buildIn-1"],
@@ -375,10 +401,12 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                     "forwardIp": "192.168.40.10",
                     "forwardPort": "22",
                 },
+                "upsert_port_group": {"name": "New-Ports", "ports": ["8080", "8443"]},
                 "upsert_port_profile": {"name": "IoT-Access", "nativeNetworkId": "net-iot-20"},
+                "upsert_schedule": {"name": "Work-Hours", "dayMode": "weekday", "windows": [{"start": "09:00", "end": "17:00"}]},
                 "upsert_static_route": {"name": "lab-subnet", "destination": "10.88.0.0/16", "nextHop": "192.168.40.254"},
             }
-            self.assertEqual(len(WRITE_TOOL_NAMES), 47)
+            self.assertEqual(len(WRITE_TOOL_NAMES), 57)
             self.assertEqual(set(sample_args.keys()), set(WRITE_TOOL_NAMES))
 
             for tool_name in sorted(WRITE_TOOL_NAMES):

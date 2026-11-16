@@ -288,16 +288,73 @@ class MockController:
             {
                 "id": "rl-prof-1",
                 "name": "Guest-10M",
+                "isDefault": False,
                 "downLimit": {"enable": True, "limit": 10000, "unit": 1},
                 "upLimit": {"enable": True, "limit": 5000, "unit": 1},
             },
             {
                 "id": "rl-prof-2",
                 "name": "IoT-2M",
+                "isDefault": False,
                 "downLimit": {"enable": True, "limit": 2000, "unit": 1},
                 "upLimit": {"enable": True, "limit": 1000, "unit": 1},
             },
         ]
+        self.schedules: list[dict[str, Any]] = [
+            {
+                "id": "sched-seed-1",
+                "name": "Work-Hours",
+                "dayMode": 1,
+                "dayMon": True,
+                "dayTue": True,
+                "dayWed": True,
+                "dayThu": True,
+                "dayFri": True,
+                "daySat": False,
+                "daySun": False,
+                "timeList": [{"dayType": -1, "startTimeH": 8, "startTimeM": 0, "endTimeH": 17, "endTimeM": 30}],
+                "resource": 0,
+            }
+        ]
+        self.users: list[dict[str, Any]] = [
+            {
+                "id": "usr-admin-1",
+                "type": 0,
+                "roleType": 0,
+                "roleId": "role-admin",
+                "roleName": "Main Administrator",
+                "name": username,
+                "verified": True,
+                "alert": True,
+                "privilege": {"all": True, "sites": []},
+            },
+            {
+                "id": "usr-viewer-1",
+                "type": 0,
+                "roleType": 2,
+                "roleId": "role-viewer",
+                "roleName": "Viewer",
+                "name": "mock_viewer",
+                "verified": True,
+                "alert": False,
+                "privilege": {"all": False, "sites": [MOCK_SITE_ID]},
+            },
+        ]
+        self.controller_status: dict[str, Any] = {
+            "controllerVer": controller_ver,
+            "apiVer": "v2",
+            "configured": True,
+        }
+        self.controller_setting: dict[str, Any] = {
+            "controllerName": "Mock-Omada-Controller",
+            "general": {"httpsPort": 8043},
+            "mailServer": {"enable": False},
+            "remoteLogging": {"enable": False},
+            "autoBackup": {"enable": True},
+        }
+        self.site_ntp: dict[str, Any] = {"ntpEnable": True, "ntpServer1": "pool.ntp.org"}
+        self.network_checks: list[dict[str, Any]] = []
+        self.cable_test_runs: list[dict[str, Any]] = []
 
         self.has_gateway: bool = True
         self.lan_dns_supported: bool = True
@@ -571,8 +628,12 @@ class MockController:
 
         m_ic = re.fullmatch(r"sites/([^/]+)/insight/clients", ep)
         if m_ic and method == "GET":
+            want_block = params["filters.block"][0].lower() == "true" if "filters.block" in params else None
             rows = []
             for c in self.clients.values():
+                is_blocked = bool(c.get("block") or c.get("blocked", False))
+                if want_block is not None and is_blocked != want_block:
+                    continue
                 rows.append({
                     "mac": c["mac"],
                     "name": c.get("name") or c["mac"],
@@ -581,6 +642,7 @@ class MockController:
                     "wireless": bool(c.get("wireless")),
                     "guest": bool(c.get("guest")),
                     "active": bool(c.get("active", True)),
+                    "block": is_blocked,
                     "ssid": c.get("ssid", ""),
                     "apName": c.get("apName") or c.get("switchName", ""),
                     "networkName": c.get("networkName", ""),
@@ -597,6 +659,13 @@ class MockController:
         if m_clients_col and method == "GET":
             if "viewer" in self.role.lower():
                 return self._err(-1007, "Insufficient user permissions for clients endpoint.")
+            if "filters.block" in params:
+                want_block = params["filters.block"][0].lower() == "true"
+                rows = [
+                    copy.deepcopy(c) for c in self.clients.values()
+                    if bool(c.get("block") or c.get("blocked", False)) == want_block
+                ]
+                return self._ok(self._paginate_rows(rows, params))
             if "filters.active" not in params:
                 return self._err(-1, "filters.active parameter is required.")
             want_active = params["filters.active"][0].lower() == "true"
@@ -617,8 +686,10 @@ class MockController:
                 return self._err(-41011, "Client not found.")
             if action == "block":
                 client_obj["blocked"] = True
+                client_obj["block"] = True
             elif action == "unblock":
                 client_obj["blocked"] = False
+                client_obj["block"] = False
             elif action == "reconnect":
                 if not client_obj.get("wireless") or not client_obj.get("active", True):
                     return self._err(-41002, "Client is not an online wireless client.")
@@ -840,8 +911,27 @@ class MockController:
         if m_group_typed:
             gtype = int(m_group_typed.group(2))
             gid = m_group_typed.group(3)
+            if method == "PATCH":
+                if gtype == 0:
+                    return self._err(-1600, "IP groups (type=0) do not support PATCH.")
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                idx = next(
+                    (
+                        i for i, g in enumerate(self.groups)
+                        if str(g.get("groupId") or g.get("id")) == gid and int(g.get("type", 0)) == gtype
+                    ),
+                    None,
+                )
+                if idx is None:
+                    return self._err(-1600, "Group not found.")
+                updated = copy.deepcopy(self.groups[idx])
+                updated.update(copy.deepcopy(dict(body)))
+                updated["groupId"] = gid
+                self.groups[idx] = updated
+                return self._ok({})
             if method != "DELETE":
-                return self._err(-1600, "Only DELETE is supported on /groups/{type}/{id}.")
+                return self._err(-1600, "Only DELETE or type>=1 PATCH is supported on /groups/{type}/{id}.")
             # Check ACL reference (-33717)
             for acl in self.acls:
                 if (int(acl.get("sourceType", -1)) == 1 and gid in (acl.get("sourceIds") or [])) or (
@@ -1254,11 +1344,98 @@ class MockController:
                 return self._err(-1007, "No adopted gateway.")
             return self._ok(copy.deepcopy(self.port_state_details))
 
+        m_st_cmd = re.fullmatch(r"sites/([^/]+)/cmd/(speedTest|speedTestPure)", ep)
+        if m_st_cmd and method == "POST":
+            if not self.has_gateway:
+                return self._err(-1007, "No adopted gateway.")
+            self.speedtest_result = {
+                "speedTestStatus": 2,
+                "speedTestResults": [{"port": "WAN1", "downSpeed": 920.5, "upSpeed": 480.2, "latency": 8}],
+            }
+            return self._ok({"triggered": True})
+
         m_st = re.fullmatch(r"sites/([^/]+)/cmd/getSpeedTestResult", ep)
         if m_st and method == "GET":
             if self.speedtest_result is None:
                 return self._err(-1600, "No speedtest result available.")
             return self._ok(copy.deepcopy(self.speedtest_result))
+
+        m_netcheck = re.fullmatch(r"sites/([^/]+)/tools/network-check/(0|1)", ep)
+        if m_netcheck and method == "POST":
+            if not isinstance(body, Mapping):
+                return self._err(-1001, "Invalid body.")
+            rec = {"test": int(m_netcheck.group(2)), **copy.deepcopy(dict(body))}
+            self.network_checks.append(rec)
+            return self._ok({"nid": body.get("nid")})
+
+        m_cable_start = re.fullmatch(r"sites/([^/]+)/cable-test/switches/([^/]+)/start", ep)
+        if m_cable_start and method == "POST":
+            mac = _normalize_mac(urllib.parse.unquote(m_cable_start.group(2)))
+            ports = list((body or {}).get("ports") or []) if isinstance(body, Mapping) else []
+            self.cable_test_runs.append({"mac": mac, "ports": ports})
+            self.cable_test_results[mac] = {
+                "status": 0,
+                "data": [{"port": p, "cableState": 1, "cableLength": 12} for p in ports],
+            }
+            return self._ok({})
+
+        m_cable_res = re.fullmatch(r"sites/([^/]+)/cable-test/switches/([^/]+)/full-results", ep)
+        if m_cable_res and method == "GET":
+            mac = _normalize_mac(urllib.parse.unquote(m_cable_res.group(2)))
+            return self._ok(copy.deepcopy(self.cable_test_results.get(mac, {"status": 0, "data": []})))
+
+        m_timeranges = re.fullmatch(r"sites/([^/]+)/setting/profiles/timeranges", ep)
+        if m_timeranges:
+            if method == "GET":
+                return self._ok(self._paginate_rows(self.schedules, params))
+            if method == "POST":
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                new_id = self._next_id("sched-new")
+                created = copy.deepcopy(dict(body))
+                created["id"] = new_id
+                created.setdefault("resource", 0)
+                self.schedules.append(created)
+                return self._ok({"profileId": new_id})
+            return self._err(-1600, "Method not supported.")
+
+        m_timerange_id = re.fullmatch(r"sites/([^/]+)/setting/profiles/timeranges/([^/]+)", ep)
+        if m_timerange_id:
+            tid = m_timerange_id.group(2)
+            idx = next((i for i, r in enumerate(self.schedules) if str(r.get("id")) == tid), None)
+            if idx is None:
+                return self._err(-1600, "Schedule not found.")
+            if method == "PATCH":
+                if not isinstance(body, Mapping):
+                    return self._err(-1001, "Invalid body.")
+                updated = copy.deepcopy(self.schedules[idx])
+                updated.update(copy.deepcopy(dict(body)))
+                updated["id"] = tid
+                self.schedules[idx] = updated
+                return self._ok({})
+            if method == "DELETE":
+                self.schedules.pop(idx)
+                return self._ok({})
+            return self._err(-1600, "Method not supported.")
+
+        if ep == "users" and method == "GET":
+            if "viewer" in self.role.lower():
+                rows = [u for u in self.users if "viewer" in str(u.get("roleName") or "").lower()][:1]
+            else:
+                rows = self.users
+            return self._ok(self._paginate_rows(rows, params))
+
+        if ep == "maintenance/controllerStatus" and method == "GET":
+            return self._ok(copy.deepcopy(self.controller_status))
+
+        if ep == "controller/setting" and method == "GET":
+            return self._ok(copy.deepcopy(self.controller_setting))
+
+        m_site_ntp = re.fullmatch(r"sites/([^/]+)/setting/ntp", ep)
+        if m_site_ntp and method == "GET":
+            if "viewer" in self.role.lower():
+                return self._err(-1007, "Insufficient user permissions for NTP settings.")
+            return self._ok(copy.deepcopy(self.site_ntp))
 
         m_vpn_stats = re.fullmatch(r"sites/([^/]+)/setting/vpn/stats/(tunnel|ipsec|sslvpn)", ep)
         if m_vpn_stats and method == "GET":

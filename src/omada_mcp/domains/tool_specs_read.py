@@ -39,6 +39,7 @@ from .devices_read import (
     _list_wlans,
 )
 from .diagnostics_read import (
+    _CONTROLLER_STATUS_SCHEMA,
     _DIAGNOSE_CLIENT_SCHEMA,
     _DIAGNOSE_WAN_SCHEMA,
     _EXPLAIN_ERROR_SCHEMA,
@@ -46,6 +47,7 @@ from .diagnostics_read import (
     _diagnose_client,
     _diagnose_wan,
     _explain_error,
+    _get_controller_status,
     _list_logs,
 )
 from .networks_read import (
@@ -76,11 +78,19 @@ from .routing_dns_read import (
 )
 from .security_read import (
     _ACL_SCHEMA,
+    _BLOCKED_CLIENT_SCHEMA,
+    _CONTROLLER_USERS_RESULT_SCHEMA,
     _IP_GROUP_SCHEMA,
+    _RATE_LIMIT_SCHEMA,
+    _SCHEDULE_SCHEMA,
     _SECURITY_STATUS_SCHEMA,
     _get_security_status,
     _list_acls,
+    _list_blocked_clients,
+    _list_controller_users,
     _list_ip_groups,
+    _list_rate_limit_profiles,
+    _list_schedules,
 )
 
 READ_TOOLS: list[Tool] = [
@@ -227,7 +237,7 @@ READ_TOOLS: list[Tool] = [
                     "items": {"type": "string", "enum": list(_SNAPSHOT_ALL_OBJECTS)},
                     "description": (
                         "Optional subset of sections to fetch: networks, acls, groups, wlans, "
-                        "devices, clients, dhcpReservations, portForwards, staticRoutes, "
+                        "devices, clients, schedules, dhcpReservations, portForwards, staticRoutes, "
                         "mdnsRules, services (defaults to networks, acls, groups, wlans, devices)"
                     ),
                 },
@@ -639,5 +649,53 @@ READ_TOOLS: list[Tool] = [
         input_schema=_EMPTY,
         output_schema=_SUPPORTED_ITEMS_SCHEMA,
         handler=_list_lan_dns_rules,
+    ),
+    Tool(
+        name="list_blocked_clients",
+        title="List blocked clients",
+        description=(
+            "List clients currently blocked on the site (prefers clients?filters.block=true and "
+            "falls back to insight/clients?filters.block=true for Viewer accounts)."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_list_output_schema(_BLOCKED_CLIENT_SCHEMA),
+        handler=_list_blocked_clients,
+    ),
+    Tool(
+        name="list_rate_limit_profiles",
+        title="List bandwidth rate-limit profiles",
+        description="List configured client bandwidth rate-limit profiles (upload/download caps and defaults).",
+        input_schema=_EMPTY,
+        output_schema=_list_output_schema(_RATE_LIMIT_SCHEMA),
+        handler=_list_rate_limit_profiles,
+    ),
+    Tool(
+        name="list_schedules",
+        title="List time-range schedules",
+        description="List reusable time-range / schedule profiles used by ACLs, PoE schedules, and WLAN schedules.",
+        input_schema=_EMPTY,
+        output_schema=_list_output_schema(_SCHEDULE_SCHEMA),
+        handler=_list_schedules,
+    ),
+    Tool(
+        name="list_controller_users",
+        title="List controller users & roles",
+        description=(
+            "List Omada controller user accounts and site/role privileges (non-secret fields only; "
+            "Viewer accounts see only their own account)."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_CONTROLLER_USERS_RESULT_SCHEMA,
+        handler=_list_controller_users,
+    ),
+    Tool(
+        name="get_controller_status",
+        title="Get controller status & settings summary",
+        description=(
+            "Read controller runtime status, redacted global controller settings summary, and site NTP settings."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_CONTROLLER_STATUS_SCHEMA,
+        handler=_get_controller_status,
     ),
 ]

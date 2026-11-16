@@ -441,6 +441,11 @@ class V11FeatureTests(unittest.TestCase):
             ("list_wlan_groups", {}),
             ("list_policy_routes", {}),
             ("list_lan_dns_rules", {}),
+            ("list_blocked_clients", {}),
+            ("list_rate_limit_profiles", {}),
+            ("list_schedules", {}),
+            ("list_controller_users", {}),
+            ("get_controller_status", {}),
         ]
         self.assertEqual({name for name, _ in calls}, set(descriptors))
         for name, args in calls:

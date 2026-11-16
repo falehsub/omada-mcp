@@ -26,10 +26,16 @@ _NETWORK = {
     'lanNetworkIpv6Config': _fields('proto', 'enable', 'address', 'prefix', 'prefixLength'),
 }
 _GROUP = {
-    **_fields('id', 'groupId', 'name', 'type', 'resource', 'description'),
+    **_fields('id', 'groupId', 'name', 'type', 'portType', 'count', 'resource', 'description'),
     'ipList': [_fields('ip', 'mask', 'description')],
-    'portList': [_fields('portStart', 'portEnd', 'protocol', 'description')],
+    'portList': [(None, _fields('portStart', 'portEnd', 'protocol', 'description'))],
+    'portMaskList': [(None, _fields('port', 'mask', 'ip'))],
+    'macAddressList': [_fields('ruleId', 'name', 'macAddress')],
     'macList': [None],
+}
+_SCHEDULE = {
+    **_fields('id', 'name', 'dayMode', 'dayMon', 'dayTue', 'dayWed', 'dayThu', 'dayFri', 'daySat', 'daySun', 'resource', 'entryId'),
+    'timeList': [_fields('ruleId', 'dayType', 'startTimeH', 'startTimeM', 'endTimeH', 'endTimeM')],
 }
 _ACL = {
     **_fields('id', 'index', 'name', 'status', 'policy', 'sourceType',
@@ -64,10 +70,13 @@ _SHAPES = {
         'aliases': [None], 'ipAddresses': [None], 'ipv6Addresses': [None],
         'dnsServers': [None], 'lanNetworkIds': [None],
     },
+    'schedules': _SCHEDULE,
 }
 
 
 def _project(value: Any, shape: Any) -> Any:
+    if isinstance(shape, tuple):
+        return _project(value, shape[1] if isinstance(value, Mapping) else shape[0])
     if isinstance(shape, dict):
         if not isinstance(value, Mapping):
             return None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -434,6 +435,32 @@ def update_switch_port(
     )
 
 
+def _check_port_safety_guard(
+    port_info: Mapping[str, Any],
+    *,
+    action: str,
+    norm_mac: str,
+    port: int,
+    allow_uplink_mutation: bool,
+    warnings: list[str],
+) -> None:
+    guard_reasons: list[str] = []
+    if port_info.get("carriesController"):
+        guard_reasons.append("carries controller/MCP host traffic")
+    if port_info.get("isUplink"):
+        guard_reasons.append("detected switch uplink port")
+    if port_info.get("isLagMember"):
+        guard_reasons.append(f"LAG member port (lagId={port_info.get('lagId')})")
+    if guard_reasons:
+        msg = f"Refusing to {action} port {port} on {norm_mac}: " + "; ".join(guard_reasons)
+        if not allow_uplink_mutation:
+            raise OmadaError(
+                msg,
+                hint="Pass allowUplinkMutation=True only during an out-of-band maintenance window.",
+            )
+        warnings.append(f"ANTI-STRANDING GUARD BYPASSED (allowUplinkMutation=True): {'; '.join(guard_reasons)}.")
+
+
 def cycle_poe_port(
     client: OmadaClient,
     deviceMac: str,
@@ -463,21 +490,14 @@ def cycle_poe_port(
         )
 
     warnings: list[str] = []
-    guard_reasons: list[str] = []
-    if port_info.get("carriesController"):
-        guard_reasons.append("carries controller/MCP host traffic")
-    if port_info.get("isUplink"):
-        guard_reasons.append("detected switch uplink port")
-    if port_info.get("isLagMember"):
-        guard_reasons.append(f"LAG member port (lagId={port_info.get('lagId')})")
-    if guard_reasons:
-        msg = f"Refusing to PoE-cycle port {port} on {norm_mac}: " + "; ".join(guard_reasons)
-        if not allowUplinkMutation:
-            raise OmadaError(
-                msg,
-                hint="Pass allowUplinkMutation=True only during an out-of-band maintenance window.",
-            )
-        warnings.append(f"ANTI-STRANDING GUARD BYPASSED (allowUplinkMutation=True): {'; '.join(guard_reasons)}.")
+    _check_port_safety_guard(
+        port_info,
+        action="PoE-cycle",
+        norm_mac=norm_mac,
+        port=port,
+        allow_uplink_mutation=allowUplinkMutation,
+        warnings=warnings,
+    )
     downlinks = [d for d in (port_info.get("downlinkDevices") or []) if isinstance(d, Mapping)]
     adopted_targets = [
         f"{d.get('name') or d.get('mac')} ({d.get('type') or 'device'})"
@@ -775,5 +795,90 @@ def delete_port_profile(
         dry_run=dryRun,
         confirm=confirm,
         label="portProfile",
+    )
+
+
+def start_cable_test(
+    client: OmadaClient,
+    deviceMac: str,
+    ports: list[int] | int,
+    allowUplinkMutation: bool = False,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Run an active TDR Ethernet cable test on switch port(s) (``POST cable-test/switches/{MAC}/start``)."""
+    if isinstance(ports, bool):
+        raise OmadaError("ports must be a non-empty positive integer or list of positive port numbers")
+    raw_ports: list[int] = [ports] if isinstance(ports, int) else list(ports or [])
+    if not raw_ports or any(not isinstance(p, int) or isinstance(p, bool) or p <= 0 for p in raw_ports):
+        raise OmadaError("ports must be a non-empty positive integer or list of positive port numbers")
+    sorted_ports = sorted(set(raw_ports))
+
+    site = _site(client)
+    sw_dev = resolve_raw_device(client, site, deviceMac, expected_type="switch")
+    norm_mac = _normalize_mac(str(sw_dev.get("mac") or deviceMac))
+    dev_mac = _omada_mac(norm_mac)
+    target_id = f"{norm_mac}:{','.join(str(p) for p in sorted_ports)}"
+    _require_confirm("start_cable_test", target_id, dryRun, confirm)
+
+    ports_data = collect_switch_ports_data(client, site, sw_dev, include_cable_test=False)
+    ports_by_num = {as_int(p.get("port"), 0): p for p in (ports_data.get("ports") or [])}
+    warnings = [
+        "WARNING: TDR cable diagnostics briefly interrupt Ethernet link connectivity on tested port(s)."
+    ]
+    selected_infos: list[dict[str, Any]] = []
+    for port in sorted_ports:
+        info = ports_by_num.get(port)
+        if info is None:
+            raise OmadaError(f"port {port} was not found on switch {norm_mac}")
+        _check_port_safety_guard(
+            info,
+            action="cable-test",
+            norm_mac=norm_mac,
+            port=port,
+            allow_uplink_mutation=allowUplinkMutation,
+            warnings=warnings,
+        )
+        selected_infos.append(dict(info))
+
+    before = {
+        "mac": norm_mac,
+        "name": sw_dev.get("name"),
+        "ports": [{"port": p["port"], "name": p.get("name"), "linkUp": p.get("linkUp")} for p in selected_infos],
+    }
+    diff = {"cableTestTriggered": {"before": False, "after": sorted_ports}}
+    if dryRun:
+        return _dry_run_result(
+            tool_name="start_cable_test",
+            target_id=target_id,
+            before=before,
+            after={**before, "cableTestTriggered": True, "testedPorts": sorted_ports},
+            diff=diff,
+            warnings=warnings,
+            rollback=None,
+        )
+
+    write_res = client.write(
+        f"sites/{site.site_id}/cable-test/switches/{dev_mac}/start",
+        method="POST",
+        data={"ports": sorted_ports},
+        tool_name="start_cable_test",
+        target=target_id,
+        before=before,
+        snapshot_payload={"switch": sw_dev, "ports": selected_infos},
+        fields_changed=["cableTest"],
+    )
+    diag_results: Any = None
+    with contextlib.suppress(OmadaError):
+        diag_results = client.api_result(f"sites/{site.site_id}/cable-test/switches/{dev_mac}/full-results")
+    return _committed_result(
+        tool_name="start_cable_test",
+        target_id=target_id,
+        before=write_res["before"],
+        after={**before, "cableTestTriggered": True, "testedPorts": sorted_ports, "fullResults": diag_results},
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=warnings,
+        rollback=None,
     )
 
