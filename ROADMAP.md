@@ -1,29 +1,48 @@
 # Roadmap
 
-The current surface has 33 read-only tools, 47 explicitly allowlisted write
-tools, diagnostics and monitoring. Priorities are driven by successful user
-adoption and verifiable controller behavior.
+As of `v2.3.0`, the shipped control surface provides **54 read-only tools** and
+**78 explicitly allowlisted opt-in write tools** (**132 tools total**, zero
+runtime dependencies, **250 unit tests**). Priorities are driven by successful
+user adoption and verifiable controller behavior.
 
 Each item lists the evidence that it matters, so it can be re-prioritised when
 that evidence changes.
 
-## Next priorities after the November 2026 review
+## Shipped since the November 2026 review (`v2.0.0` → `v2.3.0`)
 
-The [local review](docs/review-2026-11-14.md) records the evidence, fixes and
-acceptance criteria. The next sequence is:
+The items queued after the [local review](docs/review-2026-11-14.md) and Phases A–C
+coverage expansion are now shipped on `main` and PyPI:
 
-1. Automate disposable Docker controller compatibility tests and retain
-   payload-free results across supported versions.
-2. Publish a validated MCP Registry listing and generate setup/tool documentation
-   from the actual descriptors. Published on PyPI via Trusted Publishing.
-3. Add site discovery and safe, explicit per-call site selection.
-4. Add deterministic configuration drift comparisons over redacted snapshots.
-5. Add client connection/roaming history diagnostics backed by captured endpoints.
-6. Collect real OC200/OC300, v5/v6, AP, switch and gateway compatibility fixtures.
-7. Expand write-preview/rollback fault injection, nested input validation,
-   pagination completeness reporting and monitoring resilience.
+1. **Automated Docker compatibility & CI matrix (`v2.0.0`):** [`.github/workflows/compat.yml`](.github/workflows/compat.yml)
+   plus multi-OS CI across Linux, macOS, and Windows (Python 3.10–3.14).
+2. **PyPI Trusted Publishing & MCP Registry metadata (`v2.0.0` → `v2.3.0`):**
+   [`server.json`](server.json), generated [`docs/tools-reference.md`](docs/tools-reference.md),
+   and OIDC publishing to PyPI & GHCR via [`.github/workflows/publish.yml`](.github/workflows/publish.yml).
+3. **Multi-site & cross-site fleet controls (`v2.0.0` → `v2.3.0`):** `list_sites`,
+   per-call `site`, strict `OMADA_ALLOW_CROSS_SITE` pinning, and `audit_all_sites`.
+4. **Deterministic configuration drift diff (`v2.0.0` → `v2.3.0`):**
+   `diff_config_snapshots` over redacted snapshots (expanded in `v2.3.0` to cover
+   schedules, rate-limit profiles, PoE schedules, wireless features, RF planning,
+   VPNs, WireGuard tunnels/peers, DDNS, traffic rules, and QoS).
+5. **Active diagnostics, deep switch L2, Wi-Fi/RF, VPN/WireGuard, Hotspot & Backup (`v2.1`–`v2.3` shipped as `v2.3.0`):**
+   Added 50 tools (`run_ping`, `run_traceroute`, `start_wan_speedtest`,
+   `start_cable_test`, port/MAC groups, schedules, switch LAGs/global L2/port mirror,
+   PoE schedules, AP SSID overrides, mesh & AI WLAN optimization, `get_wan_ip_details`,
+   `get_ipv6_status`, `list_traffic_rules`, `list_qos_rules`, `list_backups`,
+   `export_controller_backup`, `list_hotspot_vouchers` / `create_hotspot_vouchers` /
+   `revoke_hotspot_voucher`, WireGuard/DDNS/VPN toggle CRUD, `hotspot` category, and
+   `OMADA_TOOL_CATALOG=core|full`).
 
-The remaining sections retain historical milestones and their implementation notes.
+## Open & future priorities (`v2.4+`)
+
+1. **Live v5.x hardware & controller captures:** Collect anonymized `--doctor --json`
+   and `scripts/capture_fixtures.py` bundles from `OC200`/`OC300` hardware and
+   `TPEAP_SESSIONID` v5.x builds.
+2. **Guarded read-only Web API v2 discovery helpers / optional OpenAPI hybrid:** Only
+   consider if a clear user workflow needs endpoints beyond the typed 132-tool surface
+   without breaking zero-dependency defaults.
+3. **Home Assistant add-on packaging:** Reuse the non-root container (`Dockerfile`)
+   with Ingress / add-on config manifests.
 
 ## v1.1 — "works on the controllers people actually own" *(shipped in v1.1.0)*
 

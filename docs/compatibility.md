@@ -6,8 +6,8 @@
 
 | Controller Family | `controllerVer` | Session Cookie | Status | Notes |
 |---|---|---|---|---|
-| `software-6.x` | `6.2.10.17` | `TPOMADA_SESSIONID` | Verified live | `--doctor --json`, all 33 read-only tools (`list_wlans` expands WLAN groups to SSIDs, `network_audit`, `explain_error`, diagnostics), PSK redaction, `OMADA_READ_ONLY=true`, and CA-pinned `OMADA_TLS_SERVER_NAME=Omada` verified. |
-| `software-6.x` | `6.2.14.11` | `TPOMADA_SESSIONID` | Verified live (Docker lab) | `--doctor --json`, 20 baseline read-only tools + live probes for diagnostics, `get_config_snapshot` (11 object types), and controller-native write CRUD (`create/update/delete_lan_network` including `ipaddrStart`/`ipaddrEnd` pools, `set_vlan_dhcp_pools`, `upsert/delete_dhcp_reservation`, `create/replace/delete_ip_group`, `create/update/set_acl_rule_status/delete_gateway_acl` + 6-step swap, `create_switch_acl`/`create_eap_acl` + typed toggle/update/delete lifecycle, `upsert/delete_port_profile` with `profileIds` array delete, `create/update/delete_ssid` with PSK redaction, `upsert/delete_port_forward`, `upsert/delete_static_route`, `upsert/delete_mdns_rule`, `set_upnp` dry-run + live disable + `-33001` gateway check, `-33598` on hardwareless isolation, `-41011`/not-found probes). The full 80-tool surface (33 read-only diagnostics + 47 opt-in writes including switch/AP/routing/DNS/client controls and `rollback_from_snapshot`), missing-hardware fallback paths (`hasGateway=false`, absent WIDS/IPS, `topology-v2` -> `/devices`), and `--watch`/`--export-metrics` modes are verified across anonymized fixtures and `MockController`. |
+| `software-6.x` | `6.2.10.17` / `6.3.0.45` | `TPOMADA_SESSIONID` | Verified live | `--doctor --json`, `v2.0.0` 35-tool read-only surface (`list_wlans` expands WLAN groups to SSIDs, `network_audit`, `explain_error`, `diagnose_client` roaming, `diff_config_snapshots`), PSK redaction, `OMADA_READ_ONLY=true`, and CA-pinned `OMADA_TLS_SERVER_NAME=Omada` verified. |
+| `software-6.x` | `6.2.14.11` | `TPOMADA_SESSIONID` | Verified live (Docker lab) | `v2.3.0` (`54` read-only + `78` opt-in write = `132` tools): `read_selftest.py` passed 44 site/global read tools (10 skipped due to zero adopted physical hardware and default `OMADA_ALLOW_CROSS_SITE=false`), plus live `audit_all_sites`, WireGuard tunnel/peer CRUD (`upsert_wireguard_tunnel` with plain `localIp` validation & ephemeral `/setting/wireguard/key`, `upsert_wireguard_peer`, `delete_wireguard_tunnel` attached-peer guard, `delete_wireguard_peer`), Hotspot voucher group create/revoke (`create_hotspot_vouchers`, `revoke_hotspot_voucher`), bounded binary backup export (`export_controller_backup`), and zero-drift `diff_config_snapshots`, alongside full gateway/VLAN/ACL/SSID/routing/mDNS/UPnP CRUD (`set_vlan_dhcp_pools`, `create/replace/delete_ip_group`, 6-step ACL swap, `upsert/delete_port_profile`). Full hardware-dependent paths are covered across 250 tests using anonymized fixtures and `MockController`. |
 
 ## Expected / Community-Reportable Builds
 
@@ -32,20 +32,23 @@ python scripts/capture_fixtures.py --env-file /path/to/isolated.env -o capture.j
 python scripts/anonymize_capture.py capture.json --verify-clean --strict-private
 ```
 
-[`scripts/capture_fixtures.py`](../scripts/capture_fixtures.py) enforces GET-only HTTP requests (aside from `/api/v2/login`), scrubs MACs, IPs, CIDRs, IPv6 prefixes, `omadacId`/`site` IDs, serial numbers, SSIDs, hostnames, emails, tokens, and cookies via [`scripts/anonymize_capture.py`](../scripts/anonymize_capture.py), and verifies with `--verify-clean --strict-private` before writing output. Existing anonymized hardware fixtures under `tests/fixtures/` (`ER7206 v2.20`, `ES220GMP v1.0`, `EAP725-Wall(EU) v1.0`) exercise all 33 read tools (0 skipped on `MockController`) and all hardware-gated write dry-runs/confirmations.
+[`scripts/capture_fixtures.py`](../scripts/capture_fixtures.py) enforces GET-only HTTP requests (aside from `/api/v2/login`), scrubs MACs, IPs, CIDRs, IPv6 prefixes, `omadacId`/`site` IDs, serial numbers, SSIDs, hostnames, emails, tokens, and cookies via [`scripts/anonymize_capture.py`](../scripts/anonymize_capture.py), and verifies with `--verify-clean --strict-private` before writing output. Existing anonymized hardware fixtures under `tests/fixtures/` (`ER7206 v2.20`, `ES220GMP v1.0`, `EAP725-Wall(EU) v1.0`) exercise all 54 read tools (0 skipped on `MockController`) and all 78 write dry-runs/confirmations.
 
 ## Reporting a New Controller Build
 
-### Latest local read-only sweep (2026-11-14)
+### Latest local Docker verification (`v2.3.0`, 2026-11-15)
 
-On Docker software controller `6.2.14.11`, the explicit-config live sweep passed
-27 read-only tools for both Viewer and Admin accounts. Six device/client-specific
-tools were skipped because no hardware or clients were adopted. All six doctor
-phases passed with CA/SAN verification. Additional checks covered all 11 snapshot
-sections, typed ACL reads, logs, session expiry via HTTP 302, metrics and watch.
-Writes remained disabled; write flows were exercised with the stateful mock.
+On isolated Docker software controller `6.2.14.11` (`viewer.env` and
+`writer_e2e.env`), `scripts/read_selftest.py` passed 44 read-only tools (`0`
+failed, `10` skipped for absent adopted hardware and default
+`OMADA_ALLOW_CROSS_SITE=false`). Live E2E write/cleanup verification also passed
+`audit_all_sites`, `upsert_wireguard_tunnel`, `upsert_wireguard_peer`,
+`delete_wireguard_tunnel` peer ref-guard, `delete_wireguard_peer`,
+`create_hotspot_vouchers`, `revoke_hotspot_voucher`, `export_controller_backup`,
+and post-cleanup `diff_config_snapshots` (`hasChanges=false`). Earlier `2.0.0`
+read-only verification also passed 35/35 tools against live `6.3.0.45`.
 
-See [the full review](review-2026-11-14.md) for limitations and reproduction steps.
+See [the earlier 2026-11-14 review](review-2026-11-14.md) for historical notes.
 
 ```bash
 python scripts/read_selftest.py --env-file /path/to/isolated/viewer.env
