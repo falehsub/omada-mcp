@@ -19,10 +19,10 @@ Use this skill when:
 - an endpoint answers HTTP 200 with HTML instead of JSON;
 - you need to decide between the Web API and the Open API.
 
-The companion MCP server in this repository (`omada-mcp`) implements 33 read-only
-diagnostics and inspection tools (plus 47 opt-in guarded write tools when
-explicitly enabled). When it is installed, prefer its tools over hand-rolled
-HTTP; when it is not, the snippets below are the reference implementation.
+The companion MCP server in this repository (`omada-mcp` `v2.3.0`) implements
+54 read-only diagnostics and inspection tools (plus 78 opt-in guarded write tools
+when explicitly enabled = 132 total). When it is installed, prefer its tools over
+hand-rolled HTTP; when it is not, the snippets below are the reference implementation.
 
 ## Two APIs, one controller
 
@@ -353,3 +353,8 @@ not just the label.
   * Local DNS (`setting/dns/local`), policy routes (`setting/routing/policy`),
     and WIDS/IPS security endpoints vary across v5/v6 hardware and firmware; wrap
     with `-1007` / `-1600` / missing-feature handling before failing.
+  * **WireGuard & Hotspot (`v2.3.0` live findings on 6.2.14.11)**: `setting/wireguard`
+    validates `localIp` as a plain IP (`"10.66.0.1"`, rejecting `"10.66.0.1/24"`),
+    while `hotspot/sites/{siteId}/voucherGroups` requires `codeLength` `6..10`,
+    `codeForm` as an integer list (`[0]`, `[1]`, `[0, 1]`), `duration >= 1`, and
+    explicit `voucherValidityEnable: false`.

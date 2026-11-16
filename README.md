@@ -157,6 +157,7 @@ output pastes straight in.
 | `OMADA_PASSWORD` | — **required** | Never printed, never logged. |
 | `OMADA_SITE_NAME` | first site | Display name, e.g. `Home`. |
 | `OMADA_SITE_ID` | first site | Hex id **or** name — names are resolved, because the controller only accepts the hex id in URLs (that mismatch is exactly what `-1505` reports). |
+| `OMADA_ALLOW_CROSS_SITE` | `false` | Allow per-call `site` overrides and `audit_all_sites` when a default site is pinned. |
 | `OMADA_CA_BUNDLE` | system store | PEM bundle with the controller's CA. |
 | `OMADA_VERIFY_SSL` | `true` | `false` disables chain + hostname checks. Not for production. |
 | `OMADA_STRICT_X509` | `true` | `false` clears Python 3.13+'s `VERIFY_X509_STRICT` while keeping chain and hostname checks — the fix for "self-signed certificate" errors on 3.13/3.14. |
@@ -170,7 +171,8 @@ output pastes straight in.
 | `OMADA_MIN_INTERVAL_SECONDS` | `0.25` | Minimum spacing between controller calls; raise to `0.8` on large sites. |
 | `OMADA_WRITE_INTERVAL_SECONDS` | `1.0` | Minimum serialized spacing between write requests (writes never auto-retry `-1600`). |
 | `OMADA_SCHEMA_MODE` | `slim` | `tools/list` schema detail: `slim` (default, ~48% smaller payload while keeping `inputSchema` constraints and MCP `2025-06-18` `outputSchema` invariants intact) or `full`. |
-| `OMADA_TOOL_CATEGORIES` | all | Optional comma-separated tool categories (`core,diagnostics,switch,wifi,routing,security,rollback`) to expose in `tools/list`. |
+| `OMADA_TOOL_CATALOG` | `full` | Tool catalog surface: `full` (all 132 tools) or `core` (omits `hotspot` voucher tools unless requested in `OMADA_TOOL_CATEGORIES`). |
+| `OMADA_TOOL_CATEGORIES` | all | Optional comma-separated tool categories (`core,diagnostics,switch,wifi,routing,security,hotspot,rollback`) to expose in `tools/list`. |
 | `OMADA_COMPACT_OUTPUT` | `true` | Emit single-line compact JSON in `tools/call` `content[0].text` (`structuredContent` stays a typed JSON object). Set `false` for 2-space indented JSON. |
 
 `omada-mcp --show-config` prints the resolved values with the password masked;
@@ -448,7 +450,7 @@ docker run --rm -p 9108:9108 --env-file ~/.config/omada-mcp/.env omada-mcp --exp
 | Snapshot before & verify after | Saves pre-write JSON snapshot + `audit.jsonl` record (`0700`/`0600` on POSIX), re-reads state afterwards, and fails on silent controller no-ops or collateral field drift. |
 | Anti-stranding guards | Refuses VLAN isolation, DHCP pool overlaps, or deny ACL rules that isolate/conflict with controller IP, gateway, device IPs, or `OMADA_MANAGEMENT_CIDRS`. |
 | Credential handling | Password only ever rendered as `set (N chars)`; tokens never logged; stdout is reserved for JSON-RPC, diagnostics go to stderr. |
-| Secret redaction | `list_wlans` and `get_config_snapshot` omit `securityKey` / `pskSetting`; only `hasPresharedKey` is exposed. |
+| Secret redaction | `list_wlans`, `get_wan_ip_details`, `list_backups`, and `get_config_snapshot` omit or mask `securityKey`, `pskSetting`, `privateKey`, `presharedKey`, `password`, and `ddnsPwd` via `deep_redact`; only boolean hints (`hasPresharedKey` / `hasPassword`) are exposed. |
 | Session recovery | A 200 response containing the web UI shell triggers **one** re-login: reads replay once, writes re-read live state first and never auto-retry `-1600`. |
 | Pacing | Reads spaced by `OMADA_MIN_INTERVAL_SECONDS`; writes serialized at `OMADA_WRITE_INTERVAL_SECONDS` (default 1.0 s). |
 | Dotenv hygiene | `--doctor` warns when the dotenv file is readable by group/other, and flags Viewer accounts when write tools are enabled. |
@@ -481,20 +483,22 @@ table below maps the symptoms it cannot see.
 
 See [`docs/compatibility.md`](docs/compatibility.md) for the full compatibility table.
 
-* **Software controller v6.x** — read-only path (`--doctor --json` and all 35
-  read-only tools) verified live on v6.2.10.17 (`TPOMADA_SESSIONID`), and 20 baseline
-  read-only tools plus controller-native write CRUD (`create/update/delete_lan_network`
-  with explicit `ipaddrStart`/`ipaddrEnd` pools, `set_vlan_dhcp_pools`,
-  `upsert/delete_dhcp_reservation`, `create/replace/delete_ip_group`,
-  `create/update/set_acl_rule_status/delete_gateway_acl` including the 6-step swap,
-  `create_switch_acl`/`create_eap_acl` with typed toggle/update/delete lifecycle,
-  `create/update/delete_ssid` with PSK redaction, `upsert/delete_port_forward`,
-  `upsert/delete_static_route`, `upsert/delete_mdns_rule`, `set_upnp` dry-run + live
-  disable + `-33001` gateway check, `-33598` on hardwareless isolation, Viewer
-  `-1007 -> insight/clients` fallback, and `-41011`/not-found probes) verified live
-  against an isolated Docker Omada Controller v6.2.14.11; client fixed-IP lease-delayed
-  behavior (`set_client_fixed_ip`/`release_client_fixed_ip`), client actions, and device
-  controls (`update_device`, `reboot_device`) are covered by the stateful mock controller.
+* **Software controller v6.x** — read-only path (`--doctor --json` and 2.0.0's 35
+  read-only tools) verified live on `6.2.10.17` & `6.3.0.45` (`TPOMADA_SESSIONID`).
+  In the isolated Docker Omada Controller `6.2.14.11` lab (`v2.3.0`), `read_selftest.py`
+  passed all 44 site/global read-only tools (10 skipped due to no adopted hardware and
+  default `OMADA_ALLOW_CROSS_SITE=false`), alongside live verification of `audit_all_sites`,
+  WireGuard tunnel/peer CRUD (`upsert_wireguard_tunnel`, `upsert_wireguard_peer`,
+  `delete_wireguard_tunnel` peer guard, `delete_wireguard_peer`), Hotspot voucher group
+  lifecycle (`create_hotspot_vouchers`, `revoke_hotspot_voucher`), bounded binary backup
+  export (`export_controller_backup`), and zero-drift `diff_config_snapshots` (`hasChanges=false`),
+  adding to prior live `6.2.14.11` CRUD coverage (`create/update/delete_lan_network`,
+  `set_vlan_dhcp_pools`, `upsert/delete_dhcp_reservation`, `create/replace/delete_ip_group`,
+  `create/update/set_acl_rule_status/delete_gateway_acl`, `create_switch_acl`/`create_eap_acl`,
+  `upsert/delete_port_profile`, `create/update/delete_ssid`, `upsert/delete_port_forward`,
+  `upsert/delete_static_route`, `upsert/delete_mdns_rule`, `set_upnp`, `-33598`/`-41011`,
+  Viewer `-1007 -> insight/clients` fallback). Switch/AP/client actions are covered across
+  250 offline tests against anonymized hardware fixtures and the stateful `MockController`.
 * **Software controller v5.x** — expected (v5.13.30.8 core auth/list shapes
   supported; awaiting a `--doctor --json` capture via the issue template).
 * **OC200 / OC300 hardware & `TPEAP_SESSIONID` builds** — expected (`--doctor`

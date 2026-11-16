@@ -455,3 +455,50 @@ Section 1's invariants:
     management-host anti-stranding where applicable.
   - `set_client_lock_to_ap` (`clientLockToApSetting`) and `set_client_rate_limit`
     (`rateLimitSetting` / `setting/profiles/rateLimits`) via the stripped 20-volatile-key RMW pattern.
+
+---
+
+## 13. Phase A–C coverage expansion (`v2.3.0`: 54 RO + 78 write tools)
+
+The `v2.3.0` release expands the write control surface by 31 additional opt-in tools
+(**78 write tools total**; all fail closed behind `OMADA_READ_ONLY=false`,
+`OMADA_WRITE_TOOLS`, `dryRun=true` default, and `confirm="<tool>:<target>"`):
+
+- **Phase A — Diagnostics, Port/MAC groups & Schedules:**
+  - Active network checks (`run_ping`, `run_traceroute`, `start_wan_speedtest`,
+    `start_cable_test` with bounded probe counts/ports).
+  - Port (`type=1`) and MAC (`type=2`) groups (`upsert_port_group`, `delete_port_group`,
+    `upsert_mac_group`, `delete_mac_group`) reusing ACL reference checks before deletion.
+  - Time-range schedules (`upsert_schedule`, `delete_schedule` on `setting/profiles/schedules`).
+  - Client Lock-to-AP & rate-limit profile bindings (`set_client_lock_to_ap`, `set_client_rate_limit`).
+- **Phase B — Deep Switch L2, Wi-Fi/RF & PoE Schedules:**
+  - Switch LAGs (`upsert_switch_lag`, `delete_switch_lag`) rejecting changes that strand
+    controller-uplink LAGs unless `allowUplinkMutation=true`; switch global L2 features
+    (`update_switch_global_features`) and port mirroring (`set_switch_port_mirror`).
+  - PoE schedules (`upsert_poe_schedule`, `bind_poe_schedule`, `delete_poe_schedule`).
+  - Rate-limit profile CRUD (`upsert_rate_limit_profile`, `delete_rate_limit_profile` with
+    `Default` protection & in-use checks), per-AP SSID overrides (`set_ap_ssid_overrides`),
+    and AI WLAN optimization (`run_wlan_optimization`).
+- **Phase C — VPN/WireGuard/DDNS, Bounded Backup Export & Hotspot Vouchers:**
+  - **WireGuard (`upsert_wireguard_tunnel` / `delete_wireguard_tunnel` / `upsert_wireguard_peer` / `delete_wireguard_peer`):**
+    - Verified against live `6.2.14.11`: `setting/wireguard` validates `localIp` as a plain IP
+      address (`"10.66.0.1"`, NOT CIDR `"10.66.0.1/24"` — `upsert_wireguard_tunnel` strips
+      `/prefix` automatically if supplied), requests ephemeral keys from
+      `GET setting/wireguard/key` if `privateKey` is omitted on create, enforces attached-peer
+      reference checks on delete, and strips `privateKey` / `presharedKey` from all outputs
+      and snapshots.
+  - **VPN & DDNS (`set_vpn_tunnel_status`, `upsert_ddns`, `delete_ddns`):**
+    - Redacts `preSharedKey`, `password`, and `ddnsPwd` via `deep_redact`.
+    - `rollback_from_snapshot` supports `set_vpn_tunnel_status` and created
+      WireGuard/DDNS rows, and **fails closed** when attempting to roll back
+      `delete_wireguard_tunnel`, `delete_wireguard_peer`, or `delete_ddns` because deleted
+      secrets were redacted from snapshots.
+  - **Controller backup export (`export_controller_backup`):**
+    - Triggers `POST maintenance/backup/prepareBackup`, polls `maintenance/backup/result`,
+      and downloads bounded bytes (`64 MiB` cap) via `OmadaClient.download` strictly inside
+      `OMADA_SNAPSHOT_DIR/backups` with filename traversal guards. **Never auto-restores.**
+  - **Hotspot vouchers (`create_hotspot_vouchers`, `revoke_hotspot_voucher`):**
+    - Categorized under `hotspot` (hidden when `OMADA_TOOL_CATALOG=core` unless requested).
+    - Verified against live `6.2.14.11` `POST hotspot/sites/{siteId}/voucherGroups`:
+      requires `codeLength` in `6..10`, `codeForm` as an int array (`[0]`, `[1]`, or `[0, 1]`),
+      `duration >= 1`, and explicit `voucherValidityEnable: false` boolean.
