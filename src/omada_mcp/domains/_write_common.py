@@ -233,6 +233,7 @@ _NON_REVERSIBLE_SNAPSHOT_TOOLS = frozenset({
     "run_traceroute",
     "start_wan_speedtest",
     "start_cable_test",
+    "export_controller_backup",
 })
 
 
@@ -549,14 +550,17 @@ def _parse_code_map(value: Any, mapping: Mapping[str, int], *, label: str) -> in
 
 
 def _field_diff(
-    before: Mapping[str, Any],
-    after: Mapping[str, Any],
-    keys: Sequence[str],
+    before: Mapping[str, Any] | None,
+    after: Mapping[str, Any] | None,
+    keys: Sequence[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    before_map = before or {}
+    after_map = after or {}
+    scan_keys = tuple(dict.fromkeys([*before_map.keys(), *after_map.keys()])) if keys is None else keys
     out: dict[str, dict[str, Any]] = {}
-    for k in keys:
-        bv = before.get(k)
-        av = after.get(k)
+    for k in scan_keys:
+        bv = before_map.get(k)
+        av = after_map.get(k)
         if bv != av:
             out[str(k)] = {"before": copy.deepcopy(bv), "after": copy.deepcopy(av)}
     return out

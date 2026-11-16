@@ -167,8 +167,26 @@ def _merge_lan_networks(client: OmadaClient, site: SiteInfo) -> list[dict[str, A
     return merged_networks
 
 
+def _extract_lan_ipv6(iface: dict[str, Any], col: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    raw = iface.get("lanNetworkIpv6Config") or (col.get("lanNetworkIpv6Config") if isinstance(col, dict) else None)
+    if not isinstance(raw, dict) or not raw:
+        return None
+    proto = str(raw.get("proto") or raw.get("type") or "").strip().lower()
+    enable = bool(raw.get("enable")) if "enable" in raw else (proto not in ("", "none", "off", "0"))
+    return {
+        "enabled": enable,
+        "proto": proto or None,
+        "address": raw.get("addr") or raw.get("address") or raw.get("ipv6Addr"),
+        "prefix": raw.get("prefix") or raw.get("ipv6Prefix"),
+        "prefixLength": raw.get("prefixLength") or raw.get("prefixLen"),
+        "raEnable": bool(raw["raEnable"]) if "raEnable" in raw else None,
+        "dhcpv6Enable": bool(raw["dhcpv6Enable"]) if "dhcpv6Enable" in raw else None,
+    }
+
+
 def _project_lan_network(merged: dict[str, Any]) -> dict[str, Any]:
     iface = merged.get("interface") or merged.get("collection") or {}
+    col = merged.get("collection")
     dhcp = as_mapping(merged.get("dhcpSettings"))
     lease = dhcp.get("leasetime") if dhcp.get("leasetime") is not None else dhcp.get("leaseTime")
     domain = (
@@ -193,6 +211,7 @@ def _project_lan_network(merged: dict[str, Any]) -> dict[str, Any]:
         "igmpSnoopEnable": (
             bool(iface.get("igmpSnoopEnable")) if "igmpSnoopEnable" in iface else None
         ),
+        "ipv6": _extract_lan_ipv6(iface, col),
     }
 
 
@@ -403,6 +422,7 @@ _LAN_NETWORK_SCHEMA: dict[str, Any] = {
         "leaseTime": {"type": ["integer", "null"]},
         "domain": {"type": ["string", "null"]},
         "igmpSnoopEnable": {"type": ["boolean", "null"]},
+        "ipv6": {"type": ["object", "null"]},
     },
     "required": ["id", "name", "vlan", "dhcpEnabled", "dhcpPools"],
 }

@@ -27,12 +27,14 @@ def make_write_config(
     write_tools: tuple[str, ...] = WRITE_TOOL_NAMES,
     management_cidrs: tuple[str, ...] = (),
     write_min_interval: float = 0.0,
+    allow_cross_site: bool = False,
 ) -> Config:
     return Config(
         base_url=base_url,
         username="admin-writer",
         password="pw",
         verify_ssl=False,
+        allow_cross_site=allow_cross_site,
         read_only=read_only,
         write_tools=write_tools,
         snapshot_dir=Path(tmp_dir),

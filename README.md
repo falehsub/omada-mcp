@@ -10,8 +10,8 @@
 
 Your Omada controller already knows which AP is overloaded, which client is
 sitting on the guest VLAN, and which switch dropped a port. `omada-mcp` hands
-that to Claude, Cursor, Hermes or any other MCP host — as 40 read-only tools
-that return clean JSON (plus 57 optional write tools behind an explicit allowlist,
+that to Claude, Cursor, Hermes or any other MCP host — as 54 read-only tools
+that return clean JSON (plus 78 optional write tools behind an explicit allowlist,
 plus `--watch` and `--export-metrics` monitoring modes),
 with a self-test that tells you exactly what to fix when something is wrong.
 
@@ -26,11 +26,11 @@ PASS env      /home/you/.config/omada-mcp/.env | url=https://192.0.2.10:8043 use
 PASS tls      verified against /home/you/.config/omada-mcp/controller-ca.pem (serverName=Omada) | reachable, omadacId=0123456789abcdef01234567, controllerVer=6.2.10.17, family=software-6.x
 PASS login    token accepted for omada-readonly (role=Viewer, scope=all sites, cookie=TPOMADA_SESSIONID), Csrf-Token round-trip OK
 PASS site     Home (89abcdef0123456789abcdef) site 1 of 1; matched OMADA_SITE_NAME=Home
-PASS tools    list_devices -> 7 device(s); 40 read-only tools registered (0 write tool(s) enabled), 23 client(s)
+PASS tools    list_devices -> 7 device(s); 54 read-only tools registered (0 write tool(s) enabled), 23 client(s)
 PASS write    disabled (OMADA_WRITE_TOOLS is empty; read-only tools only)
 ------------------------------------------------------------------
 6/6 checks passed
-Ready: `omada-mcp` will serve 40 read-only tools on stdio.
+Ready: `omada-mcp` will serve 54 read-only tools on stdio.
 ```
 
 Add `--json` (`omada-mcp --doctor --json`) for machine-readable output validated against [`schemas/doctor.schema.json`](schemas/doctor.schema.json). JSON output redacts local `.env` and `OMADA_CA_BUNDLE` filesystem paths to origin labels (`OMADA_ENV_FILE`, `cwd`, `appdata`, `xdg`, `environment`) so reports are safe to paste into issues.
@@ -268,8 +268,8 @@ uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
 
 ## Tools
 
-Forty read-only tools are always registered;
-57 optional write tools stay hidden and disabled until both `OMADA_READ_ONLY=false`
+Fifty-four read-only tools are always registered;
+78 optional write tools stay hidden and disabled until both `OMADA_READ_ONLY=false`
 and `OMADA_WRITE_TOOLS` allowlist them explicitly. All site-scoped tools also accept
 an optional per-call `site` name or ID (strictly pinned when `OMADA_SITE_NAME`/
 `OMADA_SITE_ID` is set unless `OMADA_ALLOW_CROSS_SITE=true`). `list_clients` windowing
@@ -277,7 +277,7 @@ is bounded by `limit` (default 500, max 5000) and de-duplicated by MAC.
 
 ### Read-only tools (always available)
 
-Full generated parameter & safety reference across all 97 tools: [`docs/tools-reference.md`](docs/tools-reference.md).
+Full generated parameter & safety reference across all 132 tools: [`docs/tools-reference.md`](docs/tools-reference.md).
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -309,9 +309,23 @@ Full generated parameter & safety reference across all 97 tools: [`docs/tools-re
 | `get_network_services` | — | UPnP, DNS proxy, mDNS rules & built-in profiles, DDNS, and WAN port state |
 | `list_logs` | `category?`, `hours?`, `level?`, `limit?` | Controller `alerts`, `events`, or `audit` logs within time window |
 | `get_switch_ports` | `mac` | Per-switch port link/speed/duplex, PoE budget/power, LAG membership, uplink & controller-port flags, RX/TX errors, and cable tests |
+| `list_switch_lags` | `mac` | Switch LAG / LACP port-channel groups (`lagId`, `lagType`, member ports, link status, and switch LAG limits) |
+| `get_switch_global_features` | `mac` | Switch L2 features: STP/RSTP/MSTP state & timers, loopback detection, jumbo MTU, multicast, capabilities, and active port mirrors |
+| `list_poe_schedules` | — | PoE power-saving schedules (`setting/service/poeSchedules`) with bound switch ports and time-range names |
 | `get_ap_radios` | `mac` | Per-AP `2g`/`5g`/`5g2`/`6g` channel (resolved from `channelInfo` + `actualChannel`), width, TX power, utilization %, interference, and retry/drop rates |
+| `get_ap_ssid_overrides` | `mac` | Per-AP WLAN group binding and SSID overrides (name, enable, VLAN, and redacted `hasPresharedKey` flag) |
+| `get_wifi_radio_features` | — | Site Wi-Fi radio & roaming features (`802.11r`/`802.11k`, band steering, airtime fairness, mesh policy, beacon & multicast rate limits) |
+| `get_mesh_status` | `mac?` | Site mesh policy plus per-AP wireless mesh uplink/downlink tree and candidate parents (`candiParents`) |
+| `get_wlan_optimization_status` | — | AI RF Planning config, schedule, latest optimization scan state, and experience index history |
 | `get_rf_scan` | `mac` | Latest RF scan status and per-band interference summary for an AP |
 | `get_wan_status` | `maskWanIp?`, `includeSpeedtest?` | Live WAN link/internet state, failover/load-balance mode, gateway/DNS, latency/loss, and latest speedtest |
+| `get_wan_ip_details` | `maskWanIp?` | Detailed WAN IPv4/IPv6 configs, DNS resolvers, WAN port config, and redacted DDNS bindings |
+| `get_ipv6_status` | `maskWanIp?` | Site-wide WAN and LAN/VLAN IPv6 posture summary |
+| `list_traffic_rules` | — | URL filtering (gateway/AP), bandwidth control, session limits, and gateway ACL counts |
+| `list_qos_rules` | — | Gateway QoS BWC, class rules, VoIP QoS, WAN limits, and switch QoS queue profiles |
+| `list_backups` | — | Controller auto-backup schedule, stored auto-backup files (Admin), and backup status |
+| `list_hotspot_vouchers` | `groupId?`, `limit?` | Hotspot voucher groups and individual voucher statuses (category `hotspot`) |
+| `audit_all_sites` | `maxSites?` | Multi-site fleet health rollup (requires `OMADA_ALLOW_CROSS_SITE=true`) |
 | `list_vpn_tunnels` | — | WireGuard, OpenVPN, IPsec, and L2TP tunnel & peer state (all private keys, PSKs, and PEM blocks redacted) |
 | `get_topology` | — | Compact uplink tree (Gateway -> Switch[port] -> AP/Switch) using `topology-v2` with v5 device-list fallback |
 | `get_security_status` | — | IPS/IDS status and recent threat/WIDS alerts with graceful missing-hardware warnings |
@@ -329,8 +343,8 @@ Every write tool defaults `dryRun=true`, captures a pre-mutation JSON snapshot u
 | Category | Tools | Behaviour & Safety |
 |---|---|---|
 | Snapshot rollback | `rollback_from_snapshot` | Loads snapshot strictly inside `OMADA_SNAPSHOT_DIR`, previews drift on `dryRun=true`, and restores pre-mutation config on `dryRun=false` |
-| Switch ports & profiles | `update_switch_port`, `cycle_poe_port`, `start_cable_test`, `upsert_port_profile`, `delete_port_profile` | Port enable/PoE mode/profile updates, custom port profile CRUD, PoE power cycling, and switch TDR cable diagnostics (`start_cable_test`); refuses built-in profile deletion or stranding uplink, controller-hosting, or LAG member ports unless `allowUplinkMutation=true` |
-| AP radios, RF scan & WLAN groups | `update_ap_radio`, `start_rf_scan`, `assign_ap_wlan_group` | Preserves sibling band configs during `config/radios` PUT; pre-validates channel & width against `availableChannels` |
+| Switch ports & L2 features | `update_switch_port`, `cycle_poe_port`, `start_cable_test`, `upsert_port_profile`, `delete_port_profile`, `upsert_switch_lag`, `delete_switch_lag`, `update_switch_global_features`, `set_switch_port_mirror`, `upsert_poe_schedule`, `bind_poe_schedule`, `delete_poe_schedule` | Port enable/PoE mode/profile updates, static/LACP LAG CRUD, STP/RSTP/MSTP & loopback/jumbo L2 config, port mirroring, PoE power-saving schedules & port bindings, custom port profile CRUD, PoE power cycling, and switch TDR cable diagnostics (`start_cable_test`); refuses built-in profile deletion or stranding uplink, controller-hosting, or LAG member ports unless `allowUplinkMutation=true` |
+| AP radios, RF scan & WLAN groups | `update_ap_radio`, `start_rf_scan`, `assign_ap_wlan_group`, `set_ap_ssid_overrides`, `run_wlan_optimization`, `upsert_rate_limit_profile`, `delete_rate_limit_profile` | Preserves sibling band configs during `config/radios` PUT, pre-validates channel & width against `availableChannels`, sets redacted per-AP SSID overrides, configures/triggers/cancels AI WLAN RF optimization, and manages site rate-limit profiles (`Default` protected & in-use checked) |
 | Live client controls & fixed IP | `set_client_fixed_ip`, `release_client_fixed_ip`, `set_client_blocked`, `reconnect_client`, `update_client`, `set_client_lock_to_ap`, `set_client_rate_limit` | Full-object stripped client PATCH (`netId` preserved, 20 volatile keys stripped), Lock-to-AP (`clientLockToApSetting`), and rate limits |
 | Offline DHCP reservations | `upsert_dhcp_reservation`, `delete_dhcp_reservation` | Create/update/delete reservations in `setting/service/dhcp` with subnet & IP-overlap validation |
 | LAN & VLAN management | `create_lan_network`, `update_lan_network`, `delete_lan_network`, `set_vlan_dhcp_pools`, `set_vlan_isolation` | Two-endpoint LAN RMW, normalizes `lanNetworkIpv6Config` + `dhcpGuard`/`dhcpv6Guard`, uses `priDns`/`sndDns`, checks `ipRangePool`, refuses management/primary VLAN deletion |
@@ -338,9 +352,11 @@ Every write tool defaults `dryRun=true`, captures a pre-mutation JSON snapshot u
 | Wireless SSIDs | `create_ssid`, `update_ssid`, `delete_ssid` | Manage SSIDs under `setting/wlans/{groupId}/ssids`; PSK/secret keys scrubbed recursively from diffs, outputs, and snapshots |
 | Routing, DNS, NAT & services | `upsert_port_forward`, `delete_port_forward`, `upsert_static_route`, `delete_static_route`, `upsert_policy_route`, `delete_policy_route`, `upsert_lan_dns_rule`, `delete_lan_dns_rule`, `upsert_mdns_rule`, `delete_mdns_rule`, `set_upnp` | NAT port forwards, static & policy routing, local LAN DNS records, mDNS repeater rules, and UPnP toggle |
 | Active diagnostics & devices | `update_device`, `reboot_device`, `run_ping`, `run_traceroute`, `start_wan_speedtest` | Rename / LED / locate / reboot EAPs, switches, and gateways, run active ping/traceroute from adopted devices (`tools/network-check/{0,1}`), and trigger WAN gateway speed tests (`destructive=True` on reboot & speed test; firmware upgrade remains unshipped) |
+| VPN, WireGuard & DDNS | `set_vpn_tunnel_status`, `upsert_wireguard_tunnel`, `delete_wireguard_tunnel`, `upsert_wireguard_peer`, `delete_wireguard_peer`, `upsert_ddns`, `delete_ddns` | Toggle site-to-site/client-to-site VPN tunnels, manage WireGuard tunnels & peers (optional Curve25519 key generation via controller or ephemeral keypair, peer reference guard, secret redaction), and manage redacted DDNS profiles |
+| Controller backup & Hotspot | `export_controller_backup`, `create_hotspot_vouchers`, `revoke_hotspot_voucher` | Prepare/download bounded binary controller backups strictly under `OMADA_SNAPSHOT_DIR/backups` (`retentionDays`), and batch-create or revoke Hotspot voucher groups (`hotspot` category) |
 
 `omada-mcp --list-tools` prints active descriptors without touching the network
-(add `--all` to inspect all 97 tools including non-allowlisted writes).
+(add `--all` to inspect all 132 tools including non-allowlisted writes).
 
 Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18`
 `outputSchema`, so hosts can auto-approve reads and validate structured results:
@@ -372,7 +388,7 @@ Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18
 * **List tools** (`list_devices`, `list_clients`, `list_wifi_clients`,
   `list_wired_clients`, `search_clients`, `list_blocked_clients`, `list_wlans`,
   `list_wlan_groups`, `list_lan_networks`, `list_port_profiles`,
-  `list_rate_limit_profiles`, `list_schedules`, `list_dhcp_reservations`,
+  `list_rate_limit_profiles`, `list_schedules`, `list_poe_schedules`, `list_switch_lags`, `list_dhcp_reservations`,
   `list_acls`, `list_ip_groups`, `list_port_forwards`, `list_static_routes`,
   `list_policy_routes`, `list_lan_dns_rules`, `list_vpn_tunnels`, `list_logs`,
   `list_controller_users`):
@@ -383,14 +399,16 @@ Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18
   `{"devices": [...]}`) receive a JSON list directly, whereas MCP `2025-06-18`
   hosts read `structuredContent.items` and `structuredContent.count`.
 * **Object tools** (`get_device`, `get_client`, `get_site_info`, `get_controller_status`,
-  `get_network_services`, `get_switch_ports`, `get_ap_radios`, `get_rf_scan`,
+  `get_network_services`, `get_switch_ports`, `get_switch_global_features`,
+  `get_ap_radios`, `get_ap_ssid_overrides`, `get_wifi_radio_features`, `get_mesh_status`,
+  `get_wlan_optimization_status`, `get_rf_scan`,
   `get_wan_status`, `get_topology`, `get_security_status`, `diagnose_client`,
   `diagnose_wan`, `network_audit`, `explain_error`, `get_config_snapshot`,
   and write envelopes): both `content[0].text` and `structuredContent` contain
   the same JSON object matching `outputSchema`.
 
 `omada-mcp --list-tools` prints active descriptors without touching the network;
-`omada-mcp --list-tools --all` prints all 97 descriptors (add `--compact` for single-line JSON).
+`omada-mcp --list-tools --all` prints all 132 descriptors (add `--compact` for single-line JSON).
 Direct controller connections reuse persistent HTTP/1.1 keep-alive TLS sockets (`UrllibTransport`),
 and composite troubleshooters (`network_audit`, `diagnose_client`, `diagnose_wan`,
 `get_config_snapshot`, `--watch` / `--export-metrics`) deduplicate repeated site-wide GETs within
@@ -521,7 +539,7 @@ src/omada_mcp/errors.py         OmadaError taxonomy, ERROR_CATALOG, explain_erro
 src/omada_mcp/transport.py      pooled keep-alive HTTP/1.1 transport, TLS context, SiteInfo/AuthInfo
 src/omada_mcp/client.py         Web API v2 client: auth, pagination, write gate, snapshots/audit
 src/omada_mcp/domains/          cohesive read, write, diagnostic, rollback & schema modules
-src/omada_mcp/tools.py          tool registry facade (40 read-only + 57 write = 97 tools)
+src/omada_mcp/tools.py          tool registry facade (54 read-only + 78 write = 132 tools)
 src/omada_mcp/write_tools.py    backward-compatible write handler & validator facade
 src/omada_mcp/_helpers.py       backward-compatible shared diagnostic helper facade
 src/omada_mcp/monitor.py        single-session --watch JSON diff streamer & --export-metrics Prometheus exporter
@@ -529,7 +547,7 @@ src/omada_mcp/server.py         JSON-RPC stdio server, fail-closed gates, strict
 src/omada_mcp/doctor.py         6-phase self-test (env, tls, login, site, tools, write) with --json
 Dockerfile                      minimal non-root container (stdio default, --watch, --export-metrics)
 schemas/doctor.schema.json      JSON Schema for --doctor --json
-docs/tools-reference.md          auto-generated 97-tool parameter & safety reference
+docs/tools-reference.md          auto-generated 132-tool parameter & safety reference
 docs/compatibility.md           controller family and cookie compatibility matrix
 docs/write-support.md           write-support contract, verified endpoints, and controller traps
 server.json                     MCP Registry manifest (PyPI + GHCR OCI metadata)
@@ -575,7 +593,7 @@ eviction. Firmware upgrades remain unshipped pending a maintenance-window policy
 
 Read-only inspection, composite diagnostics (`get_switch_ports`, `get_ap_radios`,
 `get_wan_status`, `get_topology`, `diagnose_client`, `diagnose_wan`), `--doctor --json`,
-`network_audit`, the 97-tool control surface (`rollback_from_snapshot` + anti-stranding
+`network_audit`, the 132-tool control surface (`rollback_from_snapshot` + anti-stranding
 switch/AP/routing/DNS/ACL/client controls), multi-site workflows (`list_sites` + per-call
 `site`), `diff_config_snapshots`, `--watch`/`--export-metrics`, non-root multi-arch Docker
 packaging, and MCP Registry metadata ([`server.json`](server.json)) are implemented. See

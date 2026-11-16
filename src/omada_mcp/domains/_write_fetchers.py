@@ -392,6 +392,35 @@ def _fetch_schedules(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]
     return rows
 
 
+def _fetch_poe_schedules(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
+    """Fetch PoE schedule entries (``setting/service/poeSchedules``)."""
+    rows, _ = client.paginate(f"sites/{site.site_id}/setting/service/poeSchedules")
+    return rows
+
+
+def _fetch_switch_lags(
+    client: OmadaClient,
+    site: SiteInfo,
+    switch_mac: str,
+    *,
+    sw_detail: Mapping[str, Any] | None = None,
+    warnings: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch switch LAG/LACP groups via ``switches/{MAC}/lags`` with device detail fallback."""
+    omada_mac = _omada_mac(switch_mac)
+    try:
+        res = client.api_result(f"sites/{site.site_id}/switches/{omada_mac}/lags")
+        rows = _unwrap_rows(res)
+        if rows or res is not None:
+            return rows
+    except OmadaError as exc:
+        if warnings is not None:
+            warnings.append(f"switches/{omada_mac}/lags unavailable ({exc.message})")
+    if sw_detail and isinstance(sw_detail.get("lags"), list):
+        return [dict(r) for r in sw_detail["lags"] if isinstance(r, Mapping)]
+    return []
+
+
 def _require_gateway(client: OmadaClient, site: SiteInfo, feature: str) -> list[dict[str, Any]]:
     devs = _fetch_devices(client, site)
     gws = [d for d in devs if str(d.get("type") or "").lower() == "gateway"]

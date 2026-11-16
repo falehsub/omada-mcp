@@ -113,6 +113,11 @@ from .domains.networks_write import (
     set_vlan_isolation,
     update_lan_network,
 )
+from .domains.ops_hotspot_write import (
+    create_hotspot_vouchers,
+    export_controller_backup,
+    revoke_hotspot_voucher,
+)
 from .domains.rollback import rollback_from_snapshot
 from .domains.routing_dns_write import (
     delete_lan_dns_rule,
@@ -123,6 +128,13 @@ from .domains.routing_dns_write import (
     upsert_policy_route,
     upsert_port_forward,
     upsert_static_route,
+)
+from .domains.schedules_write import (
+    bind_poe_schedule,
+    delete_poe_schedule,
+    delete_schedule,
+    upsert_poe_schedule,
+    upsert_schedule,
 )
 from .domains.security_acls_write import (
     create_eap_acl,
@@ -140,6 +152,12 @@ from .domains.services_write import (
     upsert_dhcp_reservation,
     upsert_mdns_rule,
 )
+from .domains.switch_l2_write import (
+    delete_switch_lag,
+    set_switch_port_mirror,
+    update_switch_global_features,
+    upsert_switch_lag,
+)
 from .domains.switch_write import (
     _build_switch_port_patch as _build_switch_port_patch,
 )
@@ -154,51 +172,80 @@ from .domains.switch_write import (
 from .domains.switch_write import (
     delete_port_profile as delete_port_profile,
 )
+from .domains.vpn_ddns_write import (
+    delete_ddns,
+    delete_wireguard_peer,
+    delete_wireguard_tunnel,
+    set_vpn_tunnel_status,
+    upsert_ddns,
+    upsert_wireguard_peer,
+    upsert_wireguard_tunnel,
+)
 from .domains.wireless_write import (
     _parse_ssid_security as _parse_ssid_security,
 )
 from .domains.wireless_write import (
     assign_ap_wlan_group,
     create_ssid,
+    delete_rate_limit_profile,
     delete_ssid,
+    run_wlan_optimization,
+    set_ap_ssid_overrides,
     update_ssid,
+    upsert_rate_limit_profile,
 )
 
 __all__ = [
     "CLIENT_VOLATILE_KEYS",
     "WRITE_ENVELOPE_SCHEMA",
     "assign_ap_wlan_group",
+    "bind_poe_schedule",
     "create_eap_acl",
     "create_gateway_acl",
+    "create_hotspot_vouchers",
     "create_ip_group",
     "create_lan_network",
     "create_ssid",
     "create_switch_acl",
     "cycle_poe_port",
+    "delete_ddns",
     "delete_dhcp_reservation",
     "delete_gateway_acl",
     "delete_ip_group",
     "delete_lan_dns_rule",
     "delete_lan_network",
     "delete_mdns_rule",
+    "delete_poe_schedule",
     "delete_policy_route",
     "delete_port_forward",
+    "delete_port_profile",
+    "delete_rate_limit_profile",
+    "delete_schedule",
     "delete_ssid",
     "delete_static_route",
+    "delete_switch_lag",
+    "delete_wireguard_peer",
+    "delete_wireguard_tunnel",
+    "export_controller_backup",
     "pack_ip_entries",
     "reboot_device",
     "reconnect_client",
     "release_client_fixed_ip",
     "replace_ip_group",
+    "revoke_hotspot_voucher",
     "rollback_from_snapshot",
+    "run_wlan_optimization",
     "set_acl_rule_status",
+    "set_ap_ssid_overrides",
     "set_client_blocked",
     "set_client_fixed_ip",
     "set_client_lock_to_ap",
     "set_client_rate_limit",
+    "set_switch_port_mirror",
     "set_upnp",
     "set_vlan_dhcp_pools",
     "set_vlan_isolation",
+    "set_vpn_tunnel_status",
     "start_rf_scan",
     "update_ap_radio",
     "update_client",
@@ -206,12 +253,20 @@ __all__ = [
     "update_gateway_acl",
     "update_lan_network",
     "update_ssid",
+    "update_switch_global_features",
     "update_switch_port",
+    "upsert_ddns",
     "upsert_dhcp_reservation",
     "upsert_lan_dns_rule",
     "upsert_mdns_rule",
+    "upsert_poe_schedule",
     "upsert_policy_route",
     "upsert_port_forward",
     "upsert_port_profile",
+    "upsert_rate_limit_profile",
+    "upsert_schedule",
     "upsert_static_route",
+    "upsert_switch_lag",
+    "upsert_wireguard_peer",
+    "upsert_wireguard_tunnel",
 ]

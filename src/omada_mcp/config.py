@@ -115,6 +115,27 @@ WRITE_TOOL_NAMES: tuple[str, ...] = (
     "run_traceroute",
     "start_wan_speedtest",
     "start_cable_test",
+    "upsert_rate_limit_profile",
+    "delete_rate_limit_profile",
+    "set_ap_ssid_overrides",
+    "run_wlan_optimization",
+    "upsert_switch_lag",
+    "delete_switch_lag",
+    "update_switch_global_features",
+    "set_switch_port_mirror",
+    "upsert_poe_schedule",
+    "bind_poe_schedule",
+    "delete_poe_schedule",
+    "set_vpn_tunnel_status",
+    "upsert_wireguard_tunnel",
+    "delete_wireguard_tunnel",
+    "upsert_wireguard_peer",
+    "delete_wireguard_peer",
+    "upsert_ddns",
+    "delete_ddns",
+    "export_controller_backup",
+    "create_hotspot_vouchers",
+    "revoke_hotspot_voucher",
 )
 
 _READ_ONLY_TOOL_NAMES = frozenset({
@@ -158,6 +179,20 @@ _READ_ONLY_TOOL_NAMES = frozenset({
     "list_schedules",
     "list_controller_users",
     "get_controller_status",
+    "get_wifi_radio_features",
+    "get_ap_ssid_overrides",
+    "get_mesh_status",
+    "get_wlan_optimization_status",
+    "list_switch_lags",
+    "get_switch_global_features",
+    "list_poe_schedules",
+    "get_wan_ip_details",
+    "get_ipv6_status",
+    "list_traffic_rules",
+    "list_qos_rules",
+    "list_backups",
+    "list_hotspot_vouchers",
+    "audit_all_sites",
 })
 
 _TRUE = {"1", "true", "yes", "on", "y", "t"}
@@ -208,6 +243,7 @@ class Config:
     min_interval: float = DEFAULT_MIN_INTERVAL
     schema_mode: str = "slim"
     tool_categories: tuple[str, ...] = ()
+    tool_catalog: str = "full"
     compact_output: bool = True
     env_file: Path | None = None
     env_origin: str = "environment"
@@ -331,9 +367,24 @@ def default_snapshot_dir(environ: Mapping[str, str] | None = None) -> Path:
 
 
 VALID_SCHEMA_MODES: tuple[str, ...] = ("slim", "full")
+VALID_TOOL_CATALOGS: tuple[str, ...] = ("full", "core")
 VALID_TOOL_CATEGORIES: tuple[str, ...] = (
-    "core", "diagnostics", "switch", "wifi", "routing", "security", "rollback",
+    "core", "diagnostics", "switch", "wifi", "routing", "security", "hotspot", "rollback",
 )
+
+
+def parse_tool_catalog(raw: str | None) -> str:
+    """Parse ``OMADA_TOOL_CATALOG`` (``full`` [default] or ``core``)."""
+    text = (raw or "").strip().lower()
+    if not text:
+        return "full"
+    if text in VALID_TOOL_CATALOGS:
+        return text
+    raise ConfigError(
+        f"OMADA_TOOL_CATALOG={raw!r} must be 'full' or 'core'",
+        hint="use OMADA_TOOL_CATALOG=full (default) or OMADA_TOOL_CATALOG=core",
+        key="OMADA_TOOL_CATALOG",
+    )
 
 
 def parse_schema_mode(raw: str | None) -> str:
@@ -706,6 +757,7 @@ def load_config(
         min_interval=min_interval,
         schema_mode=parse_schema_mode(values.get("OMADA_SCHEMA_MODE")),
         tool_categories=parse_tool_categories(values.get("OMADA_TOOL_CATEGORIES")),
+        tool_catalog=parse_tool_catalog(values.get("OMADA_TOOL_CATALOG")),
         compact_output=parse_bool(values.get("OMADA_COMPACT_OUTPUT"),
                                   "OMADA_COMPACT_OUTPUT", True),
         env_file=env_file,

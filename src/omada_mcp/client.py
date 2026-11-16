@@ -560,6 +560,91 @@ class OmadaClient:
             )
         return payload.get("result")
 
+    def download(
+        self,
+        endpoint: str,
+        *,
+        require_auth: bool = True,
+        max_bytes: int = 64 * 1024 * 1024,
+        _retry: bool = True,
+        _burst: int = 0,
+    ) -> bytes:
+        """Download binary bytes from ``/{omadacId}/api/v2/{endpoint}`` with size cap."""
+        if require_auth and (not self.token or not self.controller_id):
+            self.authenticate()
+
+        clean = endpoint.lstrip("/")
+        separator = "&" if "?" in clean else "?"
+        url = (
+            f"{self.config.base_url}/{self.controller_id}/api/v2/"
+            f"{clean}{separator}token={self.token}"
+        )
+        status, raw = self._raw("GET", url, headers={"Csrf-Token": str(self.token)})
+
+        if self._looks_like_html(raw) or status in (301, 302, 303, 307, 308):
+            if not _retry:
+                raise OmadaError(
+                    "controller returned web UI HTML instead of binary payload twice",
+                    hint="verify account session is dedicated and has Admin backup privilege",
+                    endpoint=clean,
+                )
+            self.authenticate(force=True)
+            return self.download(
+                clean,
+                require_auth=False,
+                max_bytes=max_bytes,
+                _retry=False,
+                _burst=_burst,
+            )
+
+        if raw.lstrip().startswith(b"{"):
+            payload = self._decode(raw)
+            code = payload.get("errorCode")
+            if code == -30109:
+                if not _retry:
+                    raise OmadaError(
+                        "controller returned -30109 (session expired) twice",
+                        code=-30109,
+                        endpoint=clean,
+                    )
+                self.authenticate(force=True)
+                return self.download(
+                    clean,
+                    require_auth=False,
+                    max_bytes=max_bytes,
+                    _retry=False,
+                    _burst=_burst,
+                )
+            if code == -1600 and _burst < _MAX_BURST_RETRIES:
+                self._sleep(BURST_BACKOFF_SECONDS)
+                return self.download(
+                    clean,
+                    require_auth=False,
+                    max_bytes=max_bytes,
+                    _retry=_retry,
+                    _burst=_burst + 1,
+                )
+            if code not in (0, None):
+                raise OmadaError(
+                    describe_error(code, str(payload.get("msg") or ""), endpoint=clean, method="GET"),
+                    code=code,
+                    endpoint=clean,
+                )
+
+        if status != 200 or not raw:
+            raise OmadaError(
+                f"download failed (HTTP {status}, {len(raw)} bytes) from {clean}",
+                hint="ensure the account has Administrator privileges to export backups",
+                endpoint=clean,
+            )
+        if len(raw) > max_bytes:
+            raise OmadaError(
+                f"downloaded payload exceeds {max_bytes} byte safety limit ({len(raw)} bytes)",
+                hint="reduce retention history or omit historical data during backup export",
+                endpoint=clean,
+            )
+        return raw
+
     def paginate(
         self,
         endpoint: str,

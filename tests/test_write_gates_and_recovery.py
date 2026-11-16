@@ -48,11 +48,11 @@ class WriteConfigTests(unittest.TestCase):
     def test_tool_name_sets_match_tools_module(self):
         ro_names = {t.name for t in TOOLS if t.read_only}
         wr_names = {t.name for t in TOOLS if not t.read_only}
-        self.assertEqual(len(ro_names), 40)
-        self.assertEqual(len(wr_names), 57)
+        self.assertEqual(len(ro_names), 54)
+        self.assertEqual(len(wr_names), 78)
         self.assertEqual(config_mod._READ_ONLY_TOOL_NAMES, ro_names)
         self.assertEqual(set(WRITE_TOOL_NAMES), wr_names)
-        self.assertEqual(len(TOOLS), 97)
+        self.assertEqual(len(TOOLS), 132)
 
     def test_parse_write_tools_validation(self):
         self.assertEqual(parse_write_tools(None), ())
@@ -167,7 +167,7 @@ class GateAndProtocolTests(unittest.TestCase):
                 tmp, read_only=False, write_tools=("set_client_fixed_ip",)
             )
             listed = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]
-            self.assertEqual(len(listed), 41)
+            self.assertEqual(len(listed), 55)
             names = {t["name"] for t in listed}
             self.assertIn("set_client_fixed_ip", names)
             self.assertNotIn("release_client_fixed_ip", names)
@@ -299,6 +299,27 @@ class GateAndProtocolTests(unittest.TestCase):
             "run_traceroute": (False, False, True),
             "start_wan_speedtest": (False, True, False),
             "start_cable_test": (False, True, False),
+            "upsert_rate_limit_profile": (False, False, True),
+            "delete_rate_limit_profile": (False, True, True),
+            "set_ap_ssid_overrides": (False, False, True),
+            "run_wlan_optimization": (False, True, False),
+            "upsert_switch_lag": (False, True, True),
+            "delete_switch_lag": (False, True, True),
+            "update_switch_global_features": (False, True, True),
+            "set_switch_port_mirror": (False, True, True),
+            "upsert_poe_schedule": (False, False, True),
+            "bind_poe_schedule": (False, True, True),
+            "delete_poe_schedule": (False, True, True),
+            "set_vpn_tunnel_status": (False, False, True),
+            "upsert_wireguard_tunnel": (False, False, True),
+            "delete_wireguard_tunnel": (False, True, False),
+            "upsert_wireguard_peer": (False, False, True),
+            "delete_wireguard_peer": (False, True, False),
+            "upsert_ddns": (False, False, True),
+            "delete_ddns": (False, True, False),
+            "export_controller_backup": (False, False, True),
+            "create_hotspot_vouchers": (False, False, False),
+            "revoke_hotspot_voucher": (False, True, False),
         }
         for name, (ro, dest, idemp) in expected.items():
             t = TOOL_MAP[name]
@@ -309,6 +330,12 @@ class GateAndProtocolTests(unittest.TestCase):
             "network_audit", "explain_error",
             "list_blocked_clients", "list_rate_limit_profiles",
             "list_schedules", "list_controller_users", "get_controller_status",
+            "get_wifi_radio_features", "get_ap_ssid_overrides", "get_mesh_status",
+            "get_wlan_optimization_status", "list_switch_lags",
+            "get_switch_global_features", "list_poe_schedules",
+            "get_wan_ip_details", "get_ipv6_status", "list_traffic_rules",
+            "list_qos_rules", "list_backups", "list_hotspot_vouchers",
+            "audit_all_sites",
         })
 
 

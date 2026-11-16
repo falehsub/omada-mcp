@@ -239,15 +239,15 @@ class ReadSelftestHardwareSweepTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ctrl = MockController()
             client = OmadaClient(
-                make_write_config(tmp_dir=tmp),
+                make_write_config(tmp_dir=tmp, allow_cross_site=True),
                 transport=ctrl,
                 sleep=lambda _s: None,
                 clock=lambda: 0.0,
                 log_fn=lambda _m: None,
             )
             report = read_selftest.run_checks(client)
-        self.assertEqual(len(report["results"]), 40)
-        self.assertEqual(report["passed"], 40)
+        self.assertEqual(len(report["results"]), 54)
+        self.assertEqual(report["passed"], 54)
         self.assertEqual(report["failed"], 0)
         self.assertEqual(report["skipped"], 0)
         self.assertEqual(ctrl.write_request_count, 0)
@@ -266,7 +266,18 @@ class ReadSelftestHardwareSweepTests(unittest.TestCase):
         self.assertEqual(report["failed"], 0)
         self.assertEqual(
             skipped,
-            ["diagnose_client", "get_ap_radios", "get_client", "get_device", "get_rf_scan", "get_switch_ports"],
+            [
+                "audit_all_sites",
+                "diagnose_client",
+                "get_ap_radios",
+                "get_ap_ssid_overrides",
+                "get_client",
+                "get_device",
+                "get_rf_scan",
+                "get_switch_global_features",
+                "get_switch_ports",
+                "list_switch_lags",
+            ],
         )
 
 

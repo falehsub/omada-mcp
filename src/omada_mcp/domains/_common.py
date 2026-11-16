@@ -200,7 +200,7 @@ def deep_redact(value: Any) -> Any:
         out: dict[str, Any] = {}
         for k, v in cleaned.items():
             kl = str(k).lower()
-            if any(tok in kl for tok in ("privatekey", "preshared", "passphrase", "secret", "password", "community")) and v not in (None, "", False, True):
+            if any(tok in kl for tok in ("privatekey", "private_key", "preshared", "passphrase", "secret", "password", "ddnspwd", "community")) and v not in (None, "", False, True):
                 out[k] = "***REDACTED***"
                 continue
             out[k] = deep_redact(v)
@@ -349,3 +349,38 @@ def resolve_raw_device(
             hint=f"pass the MAC or name of an adopted {expected_type}",
         )
     return matched
+
+
+_DETAIL_ENDPOINT_PREFIX: dict[str, str] = {
+    "ap": "eaps",
+    "switch": "switches",
+    "gateway": "gateways",
+}
+
+
+def resolve_device_detail(
+    client: OmadaClient,
+    site: SiteInfo,
+    mac_or_query: str,
+    *,
+    expected_type: str | None = None,
+) -> dict[str, Any]:
+    """Resolve a device stub and merge its per-device detail endpoint when available."""
+    stub = resolve_raw_device(client, site, mac_or_query, expected_type=expected_type)
+    dev_type = str(stub.get("type") or expected_type or "").lower()
+    prefix = _DETAIL_ENDPOINT_PREFIX.get(dev_type)
+    wire_mac = normalize_mac(str(stub.get("mac") or "")).replace(":", "-").upper()
+    if not prefix or not wire_mac:
+        return dict(stub)
+    try:
+        detail = client.api_result(f"sites/{site.site_id}/{prefix}/{wire_mac}")
+    except OmadaSessionExpiredError:
+        raise
+    except OmadaError as exc:
+        if exc.code is None or exc.code in _OPTIONAL_UNAVAILABLE_CODES:
+            return dict(stub)
+        raise
+    merged = dict(stub)
+    if isinstance(detail, Mapping):
+        merged.update(dict(detail))
+    return merged

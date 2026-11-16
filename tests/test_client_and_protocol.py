@@ -192,7 +192,7 @@ class ProtocolTests(unittest.TestCase):
     def test_tools_list_annotations(self):
         server, _, _ = self._server()
         tools = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
-        self.assertEqual(len(tools), 40)
+        self.assertEqual(len(tools), 54)
         self.assertEqual({t["name"] for t in tools},
                          {"list_devices", "list_clients", "list_wifi_clients",
                           "list_wired_clients", "search_clients", "get_device",
@@ -209,7 +209,15 @@ class ProtocolTests(unittest.TestCase):
                           "list_policy_routes", "list_lan_dns_rules",
                           "list_blocked_clients", "list_rate_limit_profiles",
                           "list_schedules", "list_controller_users",
-                          "get_controller_status"})
+                          "get_controller_status",
+                          "get_wifi_radio_features", "get_ap_ssid_overrides",
+                          "get_mesh_status", "get_wlan_optimization_status",
+                          "list_switch_lags", "get_switch_global_features",
+                          "list_poe_schedules",
+                          "get_wan_ip_details", "get_ipv6_status",
+                          "list_traffic_rules", "list_qos_rules",
+                          "list_backups", "list_hotspot_vouchers",
+                          "audit_all_sites"})
         for tool in tools:
             annotations = tool["annotations"]
             self.assertIs(annotations["readOnlyHint"], True, tool["name"])

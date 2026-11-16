@@ -46,6 +46,9 @@ def run_checks(client):
         arguments = {}
         if tool.name == 'explain_error':
             arguments['code'] = -1600
+        elif tool.name == 'audit_all_sites' and not getattr(config, 'allow_cross_site', False):
+            results.append({'tool': tool.name, 'status': 'skip', 'reason': 'cross-site audit disabled (OMADA_ALLOW_CROSS_SITE=false)'})
+            continue
         elif tool.name == 'diff_config_snapshots':
             if snapshot_baseline is None:
                 results.append({'tool': tool.name, 'status': 'skip', 'reason': 'no baseline snapshot captured'})
@@ -54,9 +57,9 @@ def run_checks(client):
             arguments['current'] = snapshot_baseline
         if 'mac' in tool.input_schema.get('required', []):
             targets = clients if tool.name in ('get_client', 'diagnose_client') else devices
-            if tool.name == 'get_switch_ports':
+            if tool.name in ('get_switch_ports', 'list_switch_lags', 'get_switch_global_features'):
                 targets = [d for d in targets if d.get('type') == 'switch']
-            elif tool.name in ('get_ap_radios', 'get_rf_scan'):
+            elif tool.name in ('get_ap_radios', 'get_rf_scan', 'get_ap_ssid_overrides'):
                 targets = [d for d in targets if d.get('type') == 'ap']
             if not targets:
                 results.append({'tool': tool.name, 'status': 'skip', 'reason': 'no matching live target'})

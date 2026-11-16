@@ -50,6 +50,22 @@ from .diagnostics_read import (
     _get_controller_status,
     _list_logs,
 )
+from .fleet_vpn_read import (
+    _BACKUPS_SCHEMA,
+    _FLEET_AUDIT_SCHEMA,
+    _HOTSPOT_VOUCHERS_SCHEMA,
+    _IPV6_STATUS_SCHEMA,
+    _QOS_RULES_SCHEMA,
+    _TRAFFIC_RULES_SCHEMA,
+    _WAN_IP_DETAILS_SCHEMA,
+    _audit_all_sites,
+    _get_ipv6_status,
+    _get_wan_ip_details,
+    _list_backups,
+    _list_hotspot_vouchers,
+    _list_qos_rules,
+    _list_traffic_rules,
+)
 from .networks_read import (
     _DHCP_RES_SCHEMA,
     _LAN_NETWORK_SCHEMA,
@@ -91,6 +107,22 @@ from .security_read import (
     _list_ip_groups,
     _list_rate_limit_profiles,
     _list_schedules,
+)
+from .switch_wifi_read import (
+    _AP_SSID_OVERRIDES_SCHEMA,
+    _MESH_STATUS_SCHEMA,
+    _POE_SCHEDULE_SCHEMA,
+    _SWITCH_GLOBAL_FEATURES_SCHEMA,
+    _SWITCH_LAGS_SCHEMA,
+    _WIFI_RADIO_FEATURES_SCHEMA,
+    _WLAN_OPTIMIZATION_SCHEMA,
+    _get_ap_ssid_overrides,
+    _get_mesh_status,
+    _get_switch_global_features,
+    _get_wifi_radio_features,
+    _get_wlan_optimization_status,
+    _list_poe_schedules,
+    _list_switch_lags,
 )
 
 READ_TOOLS: list[Tool] = [
@@ -236,9 +268,10 @@ READ_TOOLS: list[Tool] = [
                     "type": "array",
                     "items": {"type": "string", "enum": list(_SNAPSHOT_ALL_OBJECTS)},
                     "description": (
-                        "Optional subset of sections to fetch: networks, acls, groups, wlans, "
-                        "devices, clients, schedules, dhcpReservations, portForwards, staticRoutes, "
-                        "mdnsRules, services (defaults to networks, acls, groups, wlans, devices)"
+                        "Optional subset of sections to fetch: networks, acls, groups, schedules, wlans, "
+                        "devices, clients, dhcpReservations, portForwards, staticRoutes, "
+                        "mdnsRules, services, rateLimitProfiles, poeSchedules, wirelessFeature, "
+                        "rfPlanning (defaults to networks, acls, groups, wlans, devices)"
                     ),
                 },
             },
@@ -697,5 +730,205 @@ READ_TOOLS: list[Tool] = [
         input_schema=_EMPTY,
         output_schema=_CONTROLLER_STATUS_SCHEMA,
         handler=_get_controller_status,
+    ),
+    Tool(
+        name="get_wifi_radio_features",
+        title="Get site Wi-Fi radio & roaming features",
+        description=(
+            "Read site-wide Wi-Fi roaming (802.11r/k, AI roaming), band steering, airtime fairness, "
+            "mesh policy, beacon control, and multicast rate-limit settings."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_WIFI_RADIO_FEATURES_SCHEMA,
+        handler=_get_wifi_radio_features,
+    ),
+    Tool(
+        name="get_ap_ssid_overrides",
+        title="Get per-AP SSID overrides",
+        description=(
+            "Read an AP's bound WLAN group and per-SSID overrides (enabled, custom SSID, VLAN ID, PSK flag; secret stripped)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "AP MAC address or exact name"},
+            },
+            "required": ["mac"],
+        },
+        output_schema=_AP_SSID_OVERRIDES_SCHEMA,
+        handler=_get_ap_ssid_overrides,
+    ),
+    Tool(
+        name="get_mesh_status",
+        title="Get Wi-Fi mesh status & links",
+        description=(
+            "Read site mesh settings and per-AP wireless mesh role, wired/wireless uplink state, "
+            "downlink children, and candidate mesh parents."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Optional AP MAC or exact name to inspect one AP cleanly"},
+            },
+        },
+        output_schema=_MESH_STATUS_SCHEMA,
+        handler=_get_mesh_status,
+    ),
+    Tool(
+        name="get_wlan_optimization_status",
+        title="Get AI RF optimization status",
+        description=(
+            "Read AI WLAN / RF optimization configuration, schedule, active scan status, and experience score history."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_WLAN_OPTIMIZATION_SCHEMA,
+        handler=_get_wlan_optimization_status,
+    ),
+    Tool(
+        name="list_switch_lags",
+        title="List switch LAG / LACP port channels",
+        description=(
+            "List configured LAG/LACP port-channel groups, member ports, and LAG hardware limits on a switch."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Switch MAC address or exact name"},
+            },
+            "required": ["mac"],
+        },
+        output_schema=_SWITCH_LAGS_SCHEMA,
+        handler=_list_switch_lags,
+    ),
+    Tool(
+        name="get_switch_global_features",
+        title="Get switch global L2 features",
+        description=(
+            "Read switch-level STP/RSTP/MSTP mode and timers, loopback detection, jumbo frame MTU, "
+            "multicast, port-mirroring sessions, and hardware L2 capabilities."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "mac": {"type": "string", "description": "Switch MAC address or exact name"},
+            },
+            "required": ["mac"],
+        },
+        output_schema=_SWITCH_GLOBAL_FEATURES_SCHEMA,
+        handler=_get_switch_global_features,
+    ),
+    Tool(
+        name="list_poe_schedules",
+        title="List PoE port schedules",
+        description=(
+            "List PoE power schedules with resolved time-range schedule names and switch-port bindings."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_list_output_schema(_POE_SCHEDULE_SCHEMA),
+        handler=_list_poe_schedules,
+    ),
+    Tool(
+        name="get_wan_ip_details",
+        title="Get WAN IPv4/IPv6 & DDNS details",
+        description=(
+            "Read per-WAN IPv4 and IPv6 configuration, DNS resolvers, WAN port config, and redacted DDNS bindings "
+            "(passwords and keys never returned)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "maskWanIp": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Mask host octets of public WAN IP addresses (default true)",
+                },
+            },
+        },
+        output_schema=_WAN_IP_DETAILS_SCHEMA,
+        handler=_get_wan_ip_details,
+    ),
+    Tool(
+        name="get_ipv6_status",
+        title="Get site IPv6 status",
+        description=(
+            "Summarize IPv6 configuration across WAN ports (SLAAC/DHCPv6/PPPoEv6/PD) and LAN/VLAN interfaces."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "maskWanIp": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Mask WAN IPv6 address suffix",
+                },
+            },
+        },
+        output_schema=_IPV6_STATUS_SCHEMA,
+        handler=_get_ipv6_status,
+    ),
+    Tool(
+        name="list_traffic_rules",
+        title="List URL filtering, bandwidth & session rules",
+        description=(
+            "Aggregate gateway and AP URL filtering rules, transmission bandwidth controls, session limits, "
+            "and gateway ACL rule count."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_TRAFFIC_RULES_SCHEMA,
+        handler=_list_traffic_rules,
+    ),
+    Tool(
+        name="list_qos_rules",
+        title="List gateway & switch QoS rules",
+        description=(
+            "Read gateway QoS BWC, class rules, VoIP QoS, WAN rate limits, and switch QoS queue profiles."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_QOS_RULES_SCHEMA,
+        handler=_list_qos_rules,
+    ),
+    Tool(
+        name="list_backups",
+        title="List controller backups & schedule",
+        description=(
+            "Read controller auto-backup schedule, stored auto-backup files (Admin), and manual backup status "
+            "without exposing file-server credentials."
+        ),
+        input_schema=_EMPTY,
+        output_schema=_BACKUPS_SCHEMA,
+        handler=_list_backups,
+        site_scoped=False,
+    ),
+    Tool(
+        name="list_hotspot_vouchers",
+        title="List hotspot voucher groups & codes",
+        description=(
+            "Read hotspot voucher groups and individual voucher statuses (category 'hotspot')."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "groupId": {"type": "string", "description": "Optional voucher group ID to inspect vouchers inside one group"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Max groups/vouchers to return"},
+            },
+        },
+        output_schema=_HOTSPOT_VOUCHERS_SCHEMA,
+        handler=_list_hotspot_vouchers,
+    ),
+    Tool(
+        name="audit_all_sites",
+        title="Audit all visible sites",
+        description=(
+            "Cross-site fleet health rollup across visible sites (strictly refused unless OMADA_ALLOW_CROSS_SITE=true)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "maxSites": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "Max sites to audit per call (default 20)"},
+            },
+        },
+        output_schema=_FLEET_AUDIT_SCHEMA,
+        handler=_audit_all_sites,
+        site_scoped=False,
     ),
 ]
