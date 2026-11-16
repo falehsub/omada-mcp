@@ -178,5 +178,6 @@ Generated directly from `omada_mcp.tools.TOOLS` (**132 total**: **54 read-only**
 | `OMADA_VERIFY_SSL` | no | no | Verify TLS certificate chain and hostname (default true) |
 | `OMADA_CA_BUNDLE` | no | no | Optional path to a controller CA PEM bundle |
 | `OMADA_SCHEMA_MODE` | no | no | tools/list descriptor mode: slim (default) or full |
-| `OMADA_TOOL_CATEGORIES` | no | no | Optional comma-separated category filter: core,diagnostics,switch,wifi,routing,security,rollback |
+| `OMADA_TOOL_CATALOG` | no | no | Tool catalog surface: full (default) or core (omits hotspot voucher tools) |
+| `OMADA_TOOL_CATEGORIES` | no | no | Optional comma-separated category filter: core,diagnostics,switch,wifi,routing,security,hotspot,rollback |
 | `OMADA_SNAPSHOT_DIR` | no | no | Directory for pre-write snapshots and JSONL write audit logs |
