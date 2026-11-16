@@ -3,7 +3,7 @@
   "name": "io.github.falehsub/omada-mcp",
   "title": "TP-Link Omada SDN MCP Server",
   "description": "Read-only-first MCP server for TP-Link Omada SDN controllers (Web API v2, zero dependencies).",
-  "version": "2.0.0",
+  "version": "2.3.0",
   "websiteUrl": "https://github.com/falehsub/omada-mcp",
   "repository": {
     "url": "https://github.com/falehsub/omada-mcp",
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "omada-mcp",
-      "version": "2.0.0",
+      "version": "2.3.0",
       "transport": {
         "type": "stdio"
       },
@@ -85,8 +85,14 @@
           "isSecret": false
         },
         {
+          "name": "OMADA_TOOL_CATALOG",
+          "description": "Tool catalog surface: full (default) or core (omits hotspot voucher tools)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
           "name": "OMADA_TOOL_CATEGORIES",
-          "description": "Optional comma-separated category filter: core,diagnostics,switch,wifi,routing,security,rollback",
+          "description": "Optional comma-separated category filter: core,diagnostics,switch,wifi,routing,security,hotspot,rollback",
           "isRequired": false,
           "isSecret": false
         },
@@ -100,7 +106,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/falehsub/omada-mcp:2.0.0",
+      "identifier": "ghcr.io/falehsub/omada-mcp:2.3.0",
       "transport": {
         "type": "stdio"
       },

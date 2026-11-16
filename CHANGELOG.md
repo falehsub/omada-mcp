@@ -4,6 +4,43 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-11-16
+
+Major API & Network Coverage expansion across Phases A, B, and C (**250 passing tests**,
+**54 read-only + 78 opt-in write = 132 tools**, zero runtime dependencies).
+
+### Added
+
+- **Phase A — Active Diagnostics, Groups, Schedules & Controller Hygiene (97 tools):**
+  - Read-only visibility (`list_blocked_clients`, `list_rate_limit_profiles`, `list_schedules`,
+    `list_controller_users`, `get_controller_status`) with graceful Viewer privilege fallbacks.
+  - Opt-in active network checks & triggers (`run_ping`, `run_traceroute`, `start_wan_speedtest`,
+    `start_cable_test`), port/MAC group CRUD (`upsert_port_group`, `delete_port_group`,
+    `upsert_mac_group`, `delete_mac_group` with ACL reference checks), time-range schedule CRUD
+    (`upsert_schedule`, `delete_schedule`), client Lock-to-AP & rate-limit bindings
+    (`set_client_lock_to_ap`, `set_client_rate_limit`), and expanded snapshot/diff parity.
+- **Phase B — Deep Switch L2, Wi-Fi/RF & PoE Schedules (115 tools):**
+  - Read-only RF, mesh, switch L2 & PoE schedule tools (`get_wifi_radio_features`,
+    `get_ap_ssid_overrides`, `get_mesh_status`, `get_wlan_optimization_status`,
+    `list_switch_lags`, `get_switch_global_features`, `list_poe_schedules`).
+  - Opt-in L2 & Wi-Fi controls (`upsert_rate_limit_profile`, `delete_rate_limit_profile`,
+    `set_ap_ssid_overrides`, `run_wlan_optimization`, `upsert_switch_lag`, `delete_switch_lag`
+    with controller-uplink LAG anti-stranding, `update_switch_global_features`,
+    `set_switch_port_mirror`, `upsert_poe_schedule`, `bind_poe_schedule`, `delete_poe_schedule`),
+    with redacted PSKs and rollback support.
+- **Phase C — Gateway Routing, VPN Write CRUD, Hotspot, Backup & Multi-Site Fleet (132 tools):**
+  - Read-only WAN IPv4/IPv6, traffic filtering, QoS, backup & fleet visibility
+    (`get_wan_ip_details`, `get_ipv6_status`, `ipv6` on `list_lan_networks`,
+    `list_traffic_rules`, `list_qos_rules`, `list_backups`, `list_hotspot_vouchers`,
+    `audit_all_sites` guarded by `OMADA_ALLOW_CROSS_SITE=true`).
+  - Opt-in VPN/WireGuard/DDNS, backup export, and Hotspot voucher CRUD
+    (`set_vpn_tunnel_status`, `upsert_wireguard_tunnel`, `delete_wireguard_tunnel` with
+    attached-peer guard, `upsert_wireguard_peer`, `delete_wireguard_peer`, `upsert_ddns`,
+    `delete_ddns`, `export_controller_backup` bounded under `OMADA_SNAPSHOT_DIR/backups`,
+    `create_hotspot_vouchers`, `revoke_hotspot_voucher`).
+  - New `hotspot` category, `OMADA_TOOL_CATALOG=full|core` context control, `deep_redact`
+    coverage for `privateKey` and `ddnsPwd`, and fail-closed rollback on secret-redacted deletes.
+
 ## [2.0.0] - 2026-11-14
 
 Major feature, multi-site, drift comparison, and ecosystem release (**224 passing tests**,
