@@ -1,0 +1,18 @@
+{
+  "list_50": {
+    "requests": 20,
+    "controller_bytes": 980877,
+    "peak_traced_bytes": 6391063,
+    "wall_seconds": 0.12737669999478385
+  },
+  "get_first": {
+    "requests": 20,
+    "controller_bytes": 980877,
+    "peak_traced_bytes": 6370403,
+    "wall_seconds": 0.12039629998616874
+  },
+  "source_commit": "ffe33e1b5a7438c266aa050b247ac5677def46c4",
+  "python": "3.10.11",
+  "samples": 1,
+  "method": "Archived v2.3.0 package and same synthetic page source; unused new fixture budget/store imports shimmed; no HTTP latency or auth"
+}

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import platform
 import subprocess
 import sys
@@ -537,10 +536,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     report = build_report(tuple(args.sizes), require_tokens=args.require_tokens)
-    rendered = json.dumps(report, indent=2, sort_keys=True) + os.linesep
+    rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(rendered, encoding="utf-8")
+        args.output.write_text(rendered, encoding="utf-8", newline="\n")
     sys.stdout.write(rendered)
     return 1 if args.check and not report["deterministic_checks"]["passed"] else 0
 
