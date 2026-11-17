@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Documentation
+
+- Clarified `v2.4.0` host/parameter compatibility in [README](README.md) and
+  [client queries](docs/client-queries.md): `fields` drives the ~76–78% payload
+  token reduction, while `resultFormat="envelope"` increases delivered tokens on
+  hosts that forward both `content[0].text` and `structuredContent` (observed live
+  on Hermes: `958` vs `1,042` `o200k_base` tokens on 13 clients); confirmed zero
+  tool parameter renames (`delete_ip_group.group` and `diff_config_snapshots.baseline/current`
+  have been unchanged since `v2.0.0`); and documented that invalid option schemas
+  fail pre-execution with `-32602` while runtime cursor scope mismatches return
+  MCP `isError=true`.
+
 ## [2.4.0] - 2026-11-17
 
 Resumable bounded client queries, opt-in field projection, and token-efficient envelopes (**312 passing tests**, **54 read-only + 78 opt-in write = 132 tools**, zero runtime dependencies).
