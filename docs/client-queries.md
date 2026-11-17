@@ -62,10 +62,20 @@ for exact filtered totals. Use `pageSize` when you want resumable bounded pages.
 
 `resultFormat="envelope"` returns one text block whose parsed JSON is exactly
 `structuredContent`: an object with `items`, `count`, and metadata. Hosts that
-recognize this equality can avoid forwarding duplicate content to a model. The
-wire protocol still includes both forms; this option cannot guarantee how a
-particular host bills or stores tokens. The default `legacy` format remains a
-text array plus structured output and an incompleteness note when needed.
+recognize this equality (or read `structuredContent` alone) can avoid forwarding
+duplicate content to a model. However, the wire protocol still includes both
+forms: on hosts that forward **both** `content[0].text` and `structuredContent`
+(verified live on Hermes), `resultFormat="envelope"` repeats the envelope metadata
+and uses slightly more tokens than `fields` + default `legacy` format (`1,042` vs
+`958` `o200k_base` tokens on 13 clients). When in doubt on such hosts, pass
+`fields` without `resultFormat="envelope"`.
+
+Note on error surfaces: invalid schema arguments (`limit` combined with
+`pageSize`/`cursor`, unknown/empty/duplicate `fields`) fail before execution as
+JSON-RPC `-32602`, while runtime cursor errors (expired, unknown, or wrong
+tool/site scope) return an MCP tool result with `isError=true`. No existing tool
+arguments were renamed in `v2.4.0` (`delete_ip_group` uses `group`, and
+`diff_config_snapshots` uses `baseline`/`current` as in `v2.0.0`+).
 
 ## Interpret completeness
 

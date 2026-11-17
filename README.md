@@ -16,8 +16,8 @@ plus `--watch` and `--export-metrics` monitoring modes),
 with a self-test that tells you exactly what to fix when something is wrong.
 
 Release `v2.4.0` adds [paged client queries and smaller outputs](docs/client-queries.md):
-optional `pageSize`/`cursor`, selected `fields`, and `resultFormat="envelope"`.
-Existing calls keep their full fields and array output.
+optional `pageSize`/`cursor`, selected `fields` (the primary ~76–78% token/byte saver), and `resultFormat="envelope"`.
+Existing calls keep their full fields, JSON array output, and unchanged parameter names across all tools (including `delete_ip_group(group=...)` and `diff_config_snapshots(baseline=..., current=...)` since `v2.0.0`). On hosts that forward both `content` and `structuredContent` (such as Hermes), pass `fields` without `resultFormat="envelope"` for lowest context tokens.
 
 ```
 uvx omada-mcp --doctor
