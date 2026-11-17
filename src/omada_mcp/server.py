@@ -358,6 +358,9 @@ class Server:
             )
 
         self._check_arguments(spec, arguments)
+        if (name in {"list_clients", "list_wifi_clients", "list_wired_clients", "search_clients"}
+                and "limit" in arguments and ("pageSize" in arguments or "cursor" in arguments)):
+            raise RpcError(-32602, "limit cannot be combined with pageSize or cursor")
         site_override = arguments.pop("site", None) if spec.site_scoped else None
 
         # Authentication problems are protocol-level, not tool results: the host
