@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-17
+
+Resumable bounded client queries, opt-in field projection, and token-efficient envelopes (**312 passing tests**, **54 read-only + 78 opt-in write = 132 tools**, zero runtime dependencies).
+
 ### Added
 
 - Resumable `pageSize`/`cursor` queries, optional allowlisted `fields`, and opt-in

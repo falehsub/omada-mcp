@@ -1,6 +1,6 @@
 # Client queries and output size
 
-These additions are implemented locally for the next release. They extend
+Added in `v2.4.0`. These options extend
 `list_clients`, `list_wifi_clients`, `list_wired_clients`, and `search_clients`;
 the tool inventory stays at 54 read tools and 78 optional write tools.
 
