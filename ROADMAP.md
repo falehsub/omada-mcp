@@ -1,8 +1,8 @@
 # Roadmap
 
-As of `v2.3.0`, the shipped control surface provides **54 read-only tools** and
+As of `v2.4.0`, the shipped control surface provides **54 read-only tools** and
 **78 explicitly allowlisted opt-in write tools** (**132 tools total**, zero
-runtime dependencies, **250 unit tests**). Priorities are driven by successful
+runtime dependencies, **312 unit tests**). Priorities are driven by successful
 user adoption and verifiable controller behavior.
 
 Each item lists the evidence that it matters, so it can be re-prioritised when
@@ -33,14 +33,17 @@ coverage expansion are now shipped on `main` and PyPI:
    `revoke_hotspot_voucher`, WireGuard/DDNS/VPN toggle CRUD, `hotspot` category, and
    `OMADA_TOOL_CATALOG=core|full`).
 
-## Open & future priorities (`v2.4+`)
+6. **Bounded resumable client reads & token-efficient output (`v2.4.0`):**
+   Shipped [`docs/client-queries.md`](docs/client-queries.md) (`pageSize`/`cursor`,
+   allowlisted `fields`, `resultFormat="envelope"`, early `limit` / `get_client`
+   short-circuiting, strict `totalRowsExact`/`complete` reporting, scoped HTTP
+   request budgets, and deterministic CI efficiency gates).
 
-The proposed [client retrieval and token-efficiency implementation plan](tasks/plan.md)
-and [execution checklist](tasks/todo.md) cover bounded large-site client reads,
-continuation, optional field projection and compatible envelope output. This work
-is implemented and being qualified locally, not shipped; it preserves the existing
-default output and write safety contracts. The [public query guide](docs/client-queries.md)
-and [local evidence](docs/testing/client-queries-2026-11-17.md) track the release gates.
+## Open & future priorities (`v2.5+`)
+
+See [client retrieval plan](tasks/plan.md), [execution checklist](tasks/todo.md),
+and [local qualification record](docs/testing/client-queries-2026-11-17.md) for
+remaining external host/hardware qualification scope.
 
 1. **Live v5.x hardware & controller captures:** Collect anonymized `--doctor --json`
    and `scripts/capture_fixtures.py` bundles from `OC200`/`OC300` hardware and

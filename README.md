@@ -15,7 +15,7 @@ that return clean JSON (plus 78 optional write tools behind an explicit allowlis
 plus `--watch` and `--export-metrics` monitoring modes),
 with a self-test that tells you exactly what to fix when something is wrong.
 
-The next release adds [paged client queries and smaller outputs](docs/client-queries.md):
+Release `v2.4.0` adds [paged client queries and smaller outputs](docs/client-queries.md):
 optional `pageSize`/`cursor`, selected `fields`, and `resultFormat="envelope"`.
 Existing calls keep their full fields and array output.
 
