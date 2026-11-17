@@ -35,6 +35,12 @@ coverage expansion are now shipped on `main` and PyPI:
 
 ## Open & future priorities (`v2.4+`)
 
+The proposed [client retrieval and token-efficiency implementation plan](tasks/plan.md)
+and [execution checklist](tasks/todo.md) cover bounded large-site client reads,
+continuation, optional field projection and compatible envelope output. This work
+is planned, not shipped; it preserves the existing default output and write safety
+contracts and defines quantitative public-release gates.
+
 1. **Live v5.x hardware & controller captures:** Collect anonymized `--doctor --json`
    and `scripts/capture_fixtures.py` bundles from `OC200`/`OC300` hardware and
    `TPEAP_SESSIONID` v5.x builds.
