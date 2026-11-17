@@ -1,0 +1,118 @@
+{
+  "controllerVersion": "6.2.14.11",
+  "reportedPrivilege": "Viewer",
+  "readOnlyTransport": true,
+  "passed": 12,
+  "failed": 0,
+  "limitation": "An empty lab qualifies endpoints and envelopes, not hardware or large fleets.",
+  "checks": [
+    {
+      "tool": "list_clients",
+      "mode": "legacy",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 1,
+      "source": "clients"
+    },
+    {
+      "tool": "list_clients",
+      "mode": "paged",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 1,
+      "source": "clients"
+    },
+    {
+      "tool": "list_clients",
+      "mode": "sparse-envelope",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 1,
+      "source": "clients"
+    },
+    {
+      "tool": "list_wifi_clients",
+      "mode": "legacy",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 1,
+      "source": "clients"
+    },
+    {
+      "tool": "list_wifi_clients",
+      "mode": "paged",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 1,
+      "source": "clients"
+    },
+    {
+      "tool": "list_wifi_clients",
+      "mode": "sparse-envelope",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 1,
+      "source": "clients"
+    },
+    {
+      "tool": "list_wired_clients",
+      "mode": "legacy",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 1,
+      "source": "clients"
+    },
+    {
+      "tool": "list_wired_clients",
+      "mode": "paged",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 1,
+      "source": "clients"
+    },
+    {
+      "tool": "list_wired_clients",
+      "mode": "sparse-envelope",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 1,
+      "source": "clients"
+    },
+    {
+      "tool": "search_clients",
+      "mode": "legacy",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 2,
+      "source": "clients"
+    },
+    {
+      "tool": "search_clients",
+      "mode": "paged",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 2,
+      "source": "clients"
+    },
+    {
+      "tool": "search_clients",
+      "mode": "sparse-envelope",
+      "passed": true,
+      "count": 0,
+      "complete": true,
+      "requests": 2,
+      "source": "clients"
+    }
+  ]
+}

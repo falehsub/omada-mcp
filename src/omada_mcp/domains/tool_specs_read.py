@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from ._tool_model import _EMPTY, _LIMIT_PROP, _SUPPORTED_ITEMS_SCHEMA, Tool, _list_output_schema
+from ._client_schema import client_output_schema, client_query_properties
+from ._tool_model import _EMPTY, _SUPPORTED_ITEMS_SCHEMA, Tool, _list_output_schema
 from .audit_snapshot import (
     _DIFF_CONFIG_SCHEMA,
     _NETWORK_AUDIT_SCHEMA,
@@ -140,24 +141,24 @@ READ_TOOLS: list[Tool] = [
         title="List clients",
         description=("List connected clients (WiFi and wired) with MAC, IP, SSID, AP, VLAN, "
                     "traffic counters, session duration and last-seen time."),
-        input_schema={"type": "object", "properties": {"limit": _LIMIT_PROP}},
-        output_schema=_list_output_schema(_CLIENT_SCHEMA),
+        input_schema={"type": "object", "properties": client_query_properties(_CLIENT_SCHEMA)},
+        output_schema=client_output_schema(_CLIENT_SCHEMA),
         handler=_list_clients,
     ),
     Tool(
         name="list_wifi_clients",
         title="List WiFi clients",
         description="List only wireless clients, same fields as list_clients.",
-        input_schema={"type": "object", "properties": {"limit": _LIMIT_PROP}},
-        output_schema=_list_output_schema(_CLIENT_SCHEMA),
+        input_schema={"type": "object", "properties": client_query_properties(_CLIENT_SCHEMA)},
+        output_schema=client_output_schema(_CLIENT_SCHEMA),
         handler=_list_wifi_clients,
     ),
     Tool(
         name="list_wired_clients",
         title="List wired clients",
         description="List only wired clients, same fields as list_clients.",
-        input_schema={"type": "object", "properties": {"limit": _LIMIT_PROP}},
-        output_schema=_list_output_schema(_CLIENT_SCHEMA),
+        input_schema={"type": "object", "properties": client_query_properties(_CLIENT_SCHEMA)},
+        output_schema=client_output_schema(_CLIENT_SCHEMA),
         handler=_list_wired_clients,
     ),
     Tool(
@@ -346,10 +347,10 @@ READ_TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Filter by SSID name (case-insensitive; exact match preferred)",
                 },
-                "limit": _LIMIT_PROP,
+                **client_query_properties(_SEARCH_CLIENT_SCHEMA),
             },
         },
-        output_schema=_list_output_schema(_SEARCH_CLIENT_SCHEMA),
+        output_schema=client_output_schema(_SEARCH_CLIENT_SCHEMA),
         handler=_search_clients,
     ),
     Tool(

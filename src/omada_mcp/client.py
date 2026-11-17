@@ -44,6 +44,7 @@ from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
+from .client_cursors import CursorStore
 from .config import Config, default_snapshot_dir
 from .errors import (
     ERROR_CATALOG,
@@ -72,6 +73,8 @@ __all__ = [
     "OmadaClient",
     "OmadaError",
     "OmadaSessionExpiredError",
+    "RequestBudget",
+    "RequestBudgetExceeded",
     "SESSION_COOKIE_NAMES",
     "SiteInfo",
     "UrllibTransport",
@@ -104,6 +107,26 @@ _MAX_BURST_RETRIES = 1
 #: TTL for session-scoped negative caching when an uncached GET hits ``-1600``
 #: even after the burst-backoff retry (e.g., unsupported firmware endpoints).
 _NEGATIVE_CACHE_TTL_SECONDS = 300.0
+
+
+class RequestBudget:
+    """Mutable usage counter yielded by :meth:`OmadaClient.request_budget`."""
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        self.used = 0
+
+
+class RequestBudgetExceeded(OmadaError):
+    """Raised before dispatch when a scoped actual-request budget is exhausted."""
+
+    def __init__(self, *, used: int, limit: int):
+        self.used = used
+        self.limit = limit
+        super().__init__(
+            f"HTTP request budget exhausted after {used} of {limit} requests",
+            hint="resume from a safe continuation point or use a larger bounded query",
+        )
 
 
 def log(message: str, stream=None) -> None:
@@ -145,6 +168,8 @@ class OmadaClient:
         self._cache_bypass_depth: int = 0
         self._negative_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._site_override = threading.local()
+        self._request_budget_state = threading.local()
+        self.client_cursors = CursorStore(clock=clock)
         self._site_list_cache: list[dict[str, Any]] | None = None
         self.token: str | None = None
         self.controller_id: str | None = None
@@ -171,6 +196,53 @@ class OmadaClient:
                 self._cache_depth = max(0, self._cache_depth - 1)
                 if self._cache_depth == 0:
                     self._cache = None
+
+    @contextlib.contextmanager
+    def request_budget(self, max_requests: int = 24) -> Iterator[RequestBudget]:
+        """Limit actual transport attempts made in this thread and scope.
+
+        Authentication is ensured before the new scope is installed, so the
+        initial login and site resolution do not consume a query's allowance.
+        Any later retry or session refresh is charged because each dispatch
+        passes through :meth:`_raw`.
+        """
+        if (
+            isinstance(max_requests, bool)
+            or not isinstance(max_requests, int)
+            or max_requests < 1
+        ):
+            raise ValueError("max_requests must be a positive integer")
+        budgets = getattr(self._request_budget_state, "budgets", None)
+        if budgets is None:
+            budgets = []
+            self._request_budget_state.budgets = budgets
+        nested = bool(budgets)
+        if not nested:
+            # Keep the initial login and site resolution outside a query scope.
+            self.authenticate()
+        budget = RequestBudget(max_requests)
+        budgets.append(budget)
+        try:
+            if nested:
+                # A nested scope's authentication is work performed within both
+                # scopes, so install it before ensuring auth.
+                self.authenticate()
+            yield budget
+        finally:
+            # Restore the prior stack even if a caller exits scopes unusually.
+            if budgets and budgets[-1] is budget:
+                budgets.pop()
+            else:  # pragma: no cover - defensive against manual stack corruption
+                with contextlib.suppress(ValueError):
+                    budgets.remove(budget)
+
+    def _charge_request_budgets(self) -> None:
+        budgets = getattr(self._request_budget_state, "budgets", ())
+        for budget in budgets:
+            if budget.used >= budget.limit:
+                raise RequestBudgetExceeded(used=budget.used, limit=budget.limit)
+        for budget in budgets:
+            budget.used += 1
 
     # -- infrastructure -------------------------------------------------------
 
@@ -201,6 +273,7 @@ class OmadaClient:
         data: bytes | None = None,
     ) -> tuple[int, bytes]:
         self._pace()
+        self._charge_request_budgets()
         self.request_count += 1
         try:
             status, body = self.transport.request(
@@ -1167,6 +1240,7 @@ class OmadaClient:
     def close(self) -> None:
         self.token = None
         self._site_list_cache = None
+        self.client_cursors.clear()
         closer = getattr(self._transport, "close", None)
         if callable(closer):
             closer()

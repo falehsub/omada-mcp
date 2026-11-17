@@ -2,76 +2,65 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
-from ..client import OmadaClient, OmadaError
-from ._common import PaginatedList, as_mapping
+from ..client import OmadaClient, OmadaError, RequestBudgetExceeded
+from ._client_projection import _CLIENT_SCHEMA as _CLIENT_SCHEMA
+from ._client_projection import _SEARCH_CLIENT_SCHEMA as _SEARCH_CLIENT_SCHEMA
+from ._client_projection import project_client
+from ._common import PaginatedList
 from ._tool_model import (
-    _as_int,
-    _as_num_or_none,
     _coerce_vlan,
-    _iso,
-    _pick,
     _site,
-    as_int_or_none,
     normalize_mac,
 )
-from ._write_fetchers import _fetch_clients_filtered, _fetch_insight_clients
 
 _MAX_CLIENT_PAGES = 20
 
-
-def project_client(client: dict[str, Any]) -> dict[str, Any]:
-    """Client projection, including the fields an admin actually asks for."""
-    wireless = bool(client.get("wireless"))
-    return {
-        "mac": str(client.get("mac") or ""),
-        "name": str(_pick(client, "name", "hostName", default="") or ""),
-        "hostName": str(client.get("hostName") or ""),
-        "ip": str(client.get("ip") or as_mapping(client.get("ipSetting")).get("ip") or ""),
-        "wireless": wireless,
-        "guest": bool(client.get("guest")),
-        "active": bool(client.get("active", True)),
-        "ssid": str(client.get("ssid") or ""),
-        "apName": str(_pick(client, "apName", "switchName", default="") or ""),
-        "networkName": str(_pick(client, "networkName", "network", default="") or ""),
-        "vlan": _as_int(_pick(client, "vid", "vlan", default=0), 0),
-        "download": _as_int(_pick(client, "download", "trafficDown", default=0), 0),
-        "upload": _as_int(_pick(client, "upload", "trafficUp", default=0), 0),
-        "duration": _as_int(_pick(client, "duration", "uptime", default=0), 0),
-        "lastSeen": _iso(client.get("lastSeen")),
-        "signal": _pick(client, "signalLevel", "rssi", default=None),
-        "rssi": _as_num_or_none(client.get("rssi")),
-        "signalLevel": _as_num_or_none(client.get("signalLevel")),
-        "snr": _as_num_or_none(client.get("snr")),
-        "txRate": as_int_or_none(client.get("txRate")),
-        "rxRate": as_int_or_none(client.get("rxRate")),
-        "uptime": as_int_or_none(client.get("uptime")),
-        "connectType": str(client.get("connectType") or ""),
-        "radioId": as_int_or_none(client.get("radioId")),
-        "channel": as_int_or_none(client.get("channel")),
-    }
 
 
 def _paginate_client_rows_with_meta(
     client: OmadaClient,
     site: Any,
     endpoint: str,
+    *,
+    limit: int = 0,
+    match: Callable[[dict[str, Any]], bool] | None = None,
+    max_pages: int = _MAX_CLIENT_PAGES,
+    page_budget: list[int] | None = None,
+    deduplicate: bool = True,
+    scan_counter: list[int] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Page a single client endpoint, deduping by normalised MAC with pagination metadata."""
     collected: list[dict[str, Any]] = []
     seen = set()
-    previous_rows = None
     separator = "&" if "?" in endpoint else "?"
     pages_fetched = 0
     total_int: int | None = None
-    exhausted_loop = False
+    exhausted_loop = max_pages == 0
     stopped_duplicate = False
-    for page in range(1, _MAX_CLIENT_PAGES + 1):
-        payload = client.api(
-            f"sites/{site.site_id}/{endpoint}"
-            f"{separator}currentPage={page}&currentPageSize=100"
-        )
+    limited = False
+    fingerprints: set[str] = set()
+    rows_scanned = 0
+    budget_exhausted = False
+    malformed = False
+    source_changed = False
+    macless_count = 0
+    for page in range(1, max_pages + 1):
+        if page_budget is not None:
+            if page_budget[0] <= 0:
+                budget_exhausted = True
+                break
+            page_budget[0] -= 1
+        try:
+            payload = client.api(
+                f"sites/{site.site_id}/{endpoint}"
+                f"{separator}currentPage={page}&currentPageSize=100"
+            )
+        except RequestBudgetExceeded:
+            budget_exhausted = True
+            break
         pages_fetched += 1
         if payload.get("errorCode") != 0:
             raise OmadaError(
@@ -80,45 +69,83 @@ def _paginate_client_rows_with_meta(
                 hint="clients needs Admin; insight/clients accepts any role",
                 endpoint=f"sites/{{id}}/{endpoint}",
             )
-        result = payload.get("result") or {}
-        rows = result.get("data") or []
+        result = payload.get("result")
+        if not isinstance(result, dict) or not isinstance(result.get("data"), list):
+            malformed = True
+            break
+        rows = result["data"]
+        if any(not isinstance(row, dict) for row in rows):
+            malformed = True
+            break
         total_raw = result.get("totalRows")
-        if total_raw is not None:
-            total_int = int(total_raw)
-        if not rows or rows == previous_rows:
+        if isinstance(total_raw, int) and not isinstance(total_raw, bool) and total_raw >= 0:
+            if total_int is not None and total_int != total_raw:
+                source_changed = True
+                break
+            total_int = total_raw
+        from ._client_query import _fingerprint
+        fingerprint = _fingerprint(rows) if rows else ""
+        if not rows or fingerprint in fingerprints:
             stopped_duplicate = bool(rows)
             break
-        previous_rows = rows
+        fingerprints.add(fingerprint)
+        rows_scanned += len(rows)
+        if scan_counter is not None:
+            scan_counter[0] += len(rows)
         for row in rows:
             mac = normalize_mac(row.get("mac", ""))
-            if mac and mac in seen:
+            if deduplicate and mac and mac in seen:
                 continue
             if mac:
                 seen.add(mac)
+            else:
+                macless_count += 1
             collected.append(row)
+            if match is not None and match(project_client(row)):
+                return [row], {"complete": False, "found": True, "pagesFetched": pages_fetched}
+        if limit and total_int is not None and len(collected) >= limit and len(collected) < total_int:
+            limited = True
+            break
         if total_int is not None:
             if len(collected) >= total_int:
                 break
         elif len(rows) < 100:
             break
-        if page == _MAX_CLIENT_PAGES:
+        if page == max_pages:
             exhausted_loop = True
 
     truncated = False
     reason: str | None = None
-    if exhausted_loop and (total_int is None or len(collected) < total_int):
+    if malformed or source_changed:
+        truncated = True
+        reason = "controller client page malformed or totalRows changed"
+    elif budget_exhausted:
+        truncated = True
+        reason = "client query scan budget exhausted"
+    elif limited:
+        truncated = True
+        reason = f"results capped at limit={limit}"
+    elif stopped_duplicate:
+        truncated = True
+        reason = "controller repeated a client page"
+    elif exhausted_loop and (total_int is None or len(collected) < total_int):
         truncated = True
         reason = f"client pagination reached maxPages={_MAX_CLIENT_PAGES}"
-    elif total_int is not None and len(collected) < total_int and not stopped_duplicate:
+    elif total_int is not None and len(seen) + macless_count != total_int:
         truncated = True
         reason = f"controller returned {len(collected)} of {total_int} totalRows"
 
     return collected, {
         "pagesFetched": pages_fetched,
-        "maxPages": _MAX_CLIENT_PAGES,
+        "maxPages": max_pages,
         "totalRows": total_int if total_int is not None else len(collected),
         "truncated": truncated,
         "truncationReason": reason,
+        "complete": not truncated,
+        "totalRowsExact": not truncated and (total_int is None or len(seen) + macless_count == total_int),
+        "totalRowsSource": "controller" if total_int is not None else "observed",
+        "rowsScanned": rows_scanned,
+        **({"sourceTotalRows": total_int} if total_int is not None else {}),
     }
 
 
@@ -128,11 +155,21 @@ def _paginate_client_rows(client: OmadaClient, site: Any, endpoint: str) -> list
     return rows
 
 
-def _fetch_client_rows_with_meta(client: OmadaClient, site: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _fetch_client_rows_with_meta(client: OmadaClient, site: Any, *, limit: int = 0,
+                                 match: Callable[[dict[str, Any]], bool] | None = None
+                                 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     first_error: OmadaError | None = None
+    page_budget = [_MAX_CLIENT_PAGES]
+    scan_counter = [0]
     for endpoint in ("clients?filters.active=true", "insight/clients"):
         try:
-            return _paginate_client_rows_with_meta(client, site, endpoint)
+            rows, meta = _paginate_client_rows_with_meta(client, site, endpoint, limit=limit,
+                                                         match=match, page_budget=page_budget,
+                                                         scan_counter=scan_counter)
+            meta["pagesFetched"] = _MAX_CLIENT_PAGES - page_budget[0]
+            meta["rowsScanned"] = scan_counter[0]
+            meta["source"] = "insight/clients" if endpoint.startswith("insight") else "clients"
+            return rows, meta
         except OmadaError as exc:
             if first_error is None:
                 first_error = exc
@@ -158,7 +195,9 @@ def _fetch_clients(client: OmadaClient, limit: int = 500) -> PaginatedList:
     site = _site(client)
     collected: list[dict[str, Any]] = []
     seen = set()
-    raw_rows, page_meta = _fetch_client_rows_with_meta(client, site)
+    with client.request_budget(24) as budget:
+        raw_rows, page_meta = _fetch_client_rows_with_meta(client, site, limit=limit)
+        page_meta["controllerRequests"] = budget.used
     all_projected: list[dict[str, Any]] = []
     for row in raw_rows:
         mac = normalize_mac(row.get("mac", ""))
@@ -178,7 +217,7 @@ def _fetch_clients(client: OmadaClient, limit: int = 500) -> PaginatedList:
         reason = page_meta.get("truncationReason")
 
     total_rows = max(len(all_projected), int(page_meta.get("totalRows") or len(all_projected)))
-    return PaginatedList(
+    result = PaginatedList(
         collected,
         truncated=truncated,
         total_rows=total_rows,
@@ -187,213 +226,160 @@ def _fetch_clients(client: OmadaClient, limit: int = 500) -> PaginatedList:
         limit=limit or None,
         truncation_reason=reason,
     )
+    for key in ("complete", "totalRowsExact", "totalRowsSource", "sourceTotalRows",
+                "rowsScanned", "controllerRequests", "source"):
+        if key in page_meta:
+            result.pagination[key] = page_meta[key]
+    return result
 
 
-def _list_clients(client: OmadaClient, limit: int = 500) -> PaginatedList:
+def _list_clients(client: OmadaClient, limit: int | None = None, **options: Any) -> Any:
+    return _client_list(client, "list_clients", limit, options)
+
+
+def _client_list(client: OmadaClient, tool: str, limit: int | None, options: dict[str, Any]) -> Any:
+    from ._client_query import format_legacy, query_clients, selected_fields
+    selected_fields(options.get("fields"), False)
+    if options.get("pageSize") is not None or options.get("cursor") is not None:
+        filters = {"wireless": True} if tool == "list_wifi_clients" else (
+            {"wireless": False} if tool == "list_wired_clients" else {})
+        return query_clients(client, tool, limit=limit, filters=filters, **options)
+    actual_limit = 500 if limit is None else limit
     client.authenticate()
-    return _fetch_clients(client, limit=limit)
+    if tool == "list_clients":
+        data = _fetch_clients(client, limit=actual_limit)
+    elif tool == "list_wifi_clients":
+        data = _list_wifi_clients_legacy(client, actual_limit)
+    else:
+        data = _list_wired_clients_legacy(client, actual_limit)
+    return format_legacy(data, fields=options.get("fields"), result_format=options.get("resultFormat"))
 
 
-def _list_wifi_clients(client: OmadaClient, limit: int = 500) -> PaginatedList:
-    all_clients = _list_clients(client, limit=0)
-    matched = [c for c in all_clients if c.get("wireless")]
+def _list_wifi_clients_legacy(client: OmadaClient, limit: int = 500) -> PaginatedList:
+    return _list_by_wireless_legacy(client, True, limit)
+
+
+def _list_wired_clients_legacy(client: OmadaClient, limit: int = 500) -> PaginatedList:
+    return _list_by_wireless_legacy(client, False, limit)
+
+
+def _list_by_wireless_legacy(client: OmadaClient, wireless: bool, limit: int) -> PaginatedList:
+    with client.request_budget(24) as budget:
+        rows, meta = _fetch_client_rows_with_meta(client, _site(client))
+    missing = any("wireless" not in row for row in rows)
+    matched = [project_client(row) for row in rows
+               if "wireless" in row and bool(row["wireless"]) == wireless]
     capped = matched[:limit] if limit else matched
     hit_limit = bool(limit and len(matched) > limit)
-    upstream_truncated = all_clients.truncated
+    upstream_truncated = bool(meta.get("truncated")) or missing
     truncated = hit_limit or upstream_truncated
     reason = (
         f"results capped at limit={limit}"
         if hit_limit
-        else all_clients.pagination.get("truncationReason")
+        else "field_unavailable" if missing else meta.get("truncationReason")
     )
-    return PaginatedList(
+    data = PaginatedList(
         capped,
         truncated=truncated,
         total_rows=len(matched) if not upstream_truncated else None,
-        pages_fetched=all_clients.pagination.get("pagesFetched"),
-        max_pages=all_clients.pagination.get("maxPages"),
+        pages_fetched=meta.get("pagesFetched"),
+        max_pages=meta.get("maxPages"),
         limit=limit or None,
         truncation_reason=reason,
     )
-
-
-def _list_wired_clients(client: OmadaClient, limit: int = 500) -> PaginatedList:
-    all_clients = _list_clients(client, limit=0)
-    matched = [c for c in all_clients if not c.get("wireless")]
-    capped = matched[:limit] if limit else matched
-    hit_limit = bool(limit and len(matched) > limit)
-    upstream_truncated = all_clients.truncated
-    truncated = hit_limit or upstream_truncated
-    reason = (
-        f"results capped at limit={limit}"
-        if hit_limit
-        else all_clients.pagination.get("truncationReason")
-    )
-    return PaginatedList(
-        capped,
-        truncated=truncated,
-        total_rows=len(matched) if not upstream_truncated else None,
-        pages_fetched=all_clients.pagination.get("pagesFetched"),
-        max_pages=all_clients.pagination.get("maxPages"),
-        limit=limit or None,
-        truncation_reason=reason,
-    )
+    data.pagination.update(complete=not upstream_truncated, totalRowsExact=not upstream_truncated,
+                           totalRowsSource="matched", controllerRequests=budget.used,
+                           rowsScanned=meta.get("rowsScanned", 0), source=meta.get("source"),
+                           warnings=["Some rows omit wireless; filtered totals are incomplete."] if missing else [])
+    return data
 
 
 def _get_client(client: OmadaClient, mac: str) -> dict[str, Any]:
     wanted = normalize_mac(mac)
     needle = str(mac).strip().lower()
-    for entry in _fetch_clients(client, limit=0):
-        if normalize_mac(entry.get("mac", "")) == wanted:
-            return entry
-        if needle and needle in (
+    def match(entry: dict[str, Any]) -> bool:
+        if wanted and normalize_mac(entry.get("mac", "")) == wanted:
+            return True
+        return bool(needle and needle in (
             str(entry.get("name", "")).lower(),
             str(entry.get("hostName", "")).lower(),
             str(entry.get("ip", "")).lower(),
-        ):
-            return entry
+        ))
+    with client.request_budget(24):
+        rows, meta = _fetch_client_rows_with_meta(client, _site(client), match=match)
+    if meta.get("found"):
+        return project_client(rows[0])
+    compact_mac = "".join(ch for ch in str(mac) if ch.isalnum())
+    is_mac = len(compact_mac) == 12 and all(ch.lower() in "0123456789abcdef" for ch in compact_mac)
+    if not is_mac and any(
+        "name" not in row or "hostName" not in row or not ("ip" in row or "ipSetting" in row)
+        for row in rows
+    ):
+        meta["complete"] = False
+    if not meta.get("complete"):
+        raise OmadaError("client lookup incomplete; cannot determine whether the client exists",
+                         hint="use paged list_clients and continue with nextCursor")
     raise OmadaError(
         f"no client matches {mac!r}",
         hint="list clients first; the argument accepts a MAC, hostname or IP address",
     )
 
 
-def _search_clients(
-    client: OmadaClient,
-    query: str | None = None,
-    active: bool | None = None,
-    wireless: bool | None = None,
-    guest: bool | None = None,
-    vlan: Any | None = None,
-    ssid: str | None = None,
-    limit: int = 500,
-) -> list[dict[str, Any]]:
-    site = _site(client)
-    vlan = _coerce_vlan(vlan)
-    ssid_needle = str(ssid).strip().lower() if ssid is not None else None
-    if ssid_needle == "":
-        ssid_needle = None
-    try:
-        raw_rows = _fetch_clients_filtered(client, site, active=active)
-    except OmadaError as exc:
-        if exc.code in (-1007, -41011, -1600):
-            raw_rows = _fetch_insight_clients(client, site)
-        else:
-            raise
+def _search_clients_legacy(
+    client: OmadaClient, query: str | None = None, active: bool | None = None,
+    wireless: bool | None = None, guest: bool | None = None, vlan: Any | None = None,
+    ssid: str | None = None, limit: int = 500,
+) -> PaginatedList:
+    from ._client_query import _available, matches, project_search_client
+    from ._client_search import collect_search_rows
 
-    deduped: dict[str, dict[str, Any]] = {}
-    ordered_without_mac: list[dict[str, Any]] = []
+    raw_rows, meta = collect_search_rows(client, _site(client), active)
+    filters = dict(query=query, active=active, wireless=wireless, guest=guest,
+                   vlan=_coerce_vlan(vlan), ssid=ssid)
+    results = []
+    missing = False
     for row in raw_rows:
-        norm = normalize_mac(row.get("mac", ""))
-        if not norm:
-            ordered_without_mac.append(row)
-            continue
-        prev = deduped.get(norm)
-        if prev is None or (bool(row.get("active", True)) and not bool(prev.get("active", True))):
-            deduped[norm] = row
-
-    q_norm = str(query or "").strip().lower()
-    q_mac = normalize_mac(q_norm) if q_norm else ""
-    results: list[dict[str, Any]] = []
-    for row in list(deduped.values()) + ordered_without_mac:
-        proj = project_client(row)
-        if "blocked" in row:
-            proj["blocked"] = bool(row.get("blocked"))
-        ip_setting = row.get("ipSetting")
-        if isinstance(ip_setting, dict) and ip_setting.get("useFixedAddr"):
-            proj["fixedIp"] = str(ip_setting.get("ip") or "")
-            if ip_setting.get("netId"):
-                proj["fixedNetId"] = str(ip_setting.get("netId") or "")
-        if active is not None and proj["active"] != bool(active):
-            continue
-        if wireless is not None and proj["wireless"] != bool(wireless):
-            continue
-        if guest is not None and proj["guest"] != bool(guest):
-            continue
-        if vlan is not None and _as_int(proj.get("vlan"), -1) != vlan:
-            continue
-        if ssid_needle is not None:
-            have = str(proj.get("ssid") or "").strip().lower()
-            if not have or (have != ssid_needle and ssid_needle not in have):
-                continue
-        if q_norm:
-            mac_val = proj["mac"].lower()
-            mac_norm = normalize_mac(mac_val)
-            haystack = (
-                mac_val,
-                mac_norm,
-                proj["name"].lower(),
-                proj["hostName"].lower(),
-                proj["ip"].lower(),
-                proj["ssid"].lower(),
-                proj["networkName"].lower(),
-            )
-            if not any(q_norm in field or (q_mac and q_mac in field) for field in haystack):
-                continue
-        results.append(proj)
-    total_matching = len(results)
-    if limit and len(results) > limit:
-        capped = results[:limit]
-        truncated = True
-        reason: str | None = f"results capped at limit={limit}"
-    else:
-        capped = results
-        truncated = False
-        reason = None
-    return PaginatedList(
-        capped,
-        truncated=truncated,
-        total_rows=total_matching,
-        limit=limit or None,
-        truncation_reason=reason,
-    )
+        projected = project_search_client(row)
+        hit, unavailable = matches(projected, _available(row), filters)
+        missing = missing or unavailable
+        if hit:
+            results.append(projected)
+    complete = bool(meta["complete"]) and not missing
+    hit_limit = bool(limit and len(results) > limit)
+    reason = (f"results capped at limit={limit}" if hit_limit else
+              "field_unavailable" if missing else meta.get("truncationReason"))
+    data = PaginatedList(results[:limit] if limit else results,
+                         truncated=not complete or hit_limit,
+                         total_rows=len(results) if complete else None,
+                         pages_fetched=meta["pagesFetched"], max_pages=meta["maxPages"],
+                         limit=limit or None, truncation_reason=reason)
+    data.pagination.update({key: value for key, value in meta.items()
+                            if key not in {"totalRows", "truncated", "truncationReason"}})
+    data.pagination.update(complete=complete, totalRowsExact=complete,
+                           totalRowsSource="matched" if complete else "observed")
+    if missing:
+        data.pagination["warnings"].append("Some rows omit required filter fields; totals are incomplete.")
+    return data
 
 
-_CLIENT_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "mac": {"type": "string"},
-        "name": {"type": "string"},
-        "hostName": {"type": "string"},
-        "ip": {"type": "string"},
-        "wireless": {"type": "boolean"},
-        "guest": {"type": "boolean"},
-        "active": {"type": "boolean"},
-        "ssid": {"type": "string"},
-        "apName": {"type": "string"},
-        "networkName": {"type": "string"},
-        "vlan": {"type": "integer"},
-        "download": {"type": "integer"},
-        "upload": {"type": "integer"},
-        "duration": {"type": "integer"},
-        "lastSeen": {"type": "string"},
-        "signal": {"type": ["integer", "number", "null"]},
-        "rssi": {"type": ["integer", "number", "null"]},
-        "signalLevel": {"type": ["integer", "number", "null"]},
-        "snr": {"type": ["integer", "number", "null"]},
-        "txRate": {"type": ["integer", "null"]},
-        "rxRate": {"type": ["integer", "null"]},
-        "uptime": {"type": ["integer", "null"]},
-        "connectType": {"type": "string"},
-        "radioId": {"type": ["integer", "null"]},
-        "channel": {"type": ["integer", "null"]},
-    },
-    "required": [
-        "mac", "name", "hostName", "ip", "wireless", "guest", "active",
-        "ssid", "apName", "networkName", "vlan", "download", "upload",
-        "duration", "lastSeen", "signal",
-    ],
-}
+def _list_wifi_clients(client: OmadaClient, limit: int | None = None, **options: Any) -> Any:
+    return _client_list(client, "list_wifi_clients", limit, options)
 
 
-_SEARCH_CLIENT_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        **_CLIENT_SCHEMA["properties"],
-        "blocked": {"type": "boolean"},
-        "fixedIp": {"type": "string"},
-        "fixedNetId": {"type": "string"},
-    },
-    "required": list(_CLIENT_SCHEMA["required"]),
-}
+def _list_wired_clients(client: OmadaClient, limit: int | None = None, **options: Any) -> Any:
+    return _client_list(client, "list_wired_clients", limit, options)
 
+
+def _search_clients(client: OmadaClient, query: str | None = None, active: bool | None = None,
+                    wireless: bool | None = None, guest: bool | None = None,
+                    vlan: Any | None = None, ssid: str | None = None,
+                    limit: int | None = None, **options: Any) -> Any:
+    from ._client_query import format_legacy, query_clients, selected_fields
+    selected_fields(options.get("fields"), True)
+    filters: dict[str, Any] = dict(query=query, active=active, wireless=wireless, guest=guest,
+                   vlan=_coerce_vlan(vlan), ssid=ssid)
+    if options.get("pageSize") is not None or options.get("cursor") is not None:
+        return query_clients(client, "search_clients", limit=limit, filters=filters, **options)
+    data = _search_clients_legacy(client, limit=500 if limit is None else limit, **filters)
+    return format_legacy(data, fields=options.get("fields"),
+                         result_format=options.get("resultFormat"), search=True)

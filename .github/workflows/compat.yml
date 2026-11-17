@@ -88,6 +88,11 @@ jobs:
               assert r['passed'] >= 27, f'{p}: expected >=27 passed, got {r}'
           "
 
+      - name: Qualify client query formats (Viewer and Admin)
+        run: |
+          python scripts/qualify_client_queries.py --env-file "${{ runner.temp }}/lab/viewer.env" --output "reports/client-queries-viewer-${{ matrix.label }}.json"
+          python scripts/qualify_client_queries.py --env-file "${{ runner.temp }}/lab/admin.env" --output "reports/client-queries-admin-${{ matrix.label }}.json"
+
       - name: Tear down disposable controller
         if: always()
         run: docker rm -f omada-lab || true

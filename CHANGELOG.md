@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Resumable `pageSize`/`cursor` queries, optional allowlisted `fields`, and opt-in
+  `resultFormat="envelope"` on the four client collection tools. Defaults remain
+  compatible; see [client queries](docs/client-queries.md).
+- Expiring, replay-safe, scope-bound cursor storage and per-query native-page,
+  HTTP-attempt, traversal, and retained-state bounds.
+- Synthetic large-fleet benchmarks, token/request gates, MCP SDK interoperability
+  checks, and transport-enforced read-only loopback lab qualification.
+
+### Changed
+
+- Small unfiltered client lists and early `get_client` matches stop scanning once
+  the answer is available. Legacy filtered queries retain bounded full scans for
+  exact match counts when possible.
+
+### Fixed
+
+- Incomplete client searches and anomalous/missing source data no longer appear
+  complete or provide unverified exact totals or definitive lookup absence.
+- Disposable lab setup writes the supported CA bundle variable and selects the
+  certificate SAN ahead of an unrelated common name.
+
 ## [2.3.0] - 2026-11-16
 
 Major API & Network Coverage expansion across Phases A, B, and C (**250 passing tests**,
