@@ -102,13 +102,18 @@ def fetch_server_certificate(host: str, port: int) -> tuple[str, str]:
         if callable(decode):
             info = decode(tmp_path)
             sans = [val for kind, val in info.get("subjectAltName", ()) if kind in ("DNS", "IP Address")]
-            if host not in sans and "127.0.0.1" not in sans and "localhost" not in sans:
-                for pair in info.get("subject", ()):
-                    for key, val in pair:
-                        if key == "commonName" and val:
-                            server_name = str(val)
-                            break
-        if not server_name:
+            if host not in sans:
+                # TLS hostname verification uses SAN in preference to CN. Some
+                # Omada images have CN=localhost but SAN=DNS:Omada.
+                if sans:
+                    server_name = str(sans[0])
+                else:
+                    for pair in info.get("subject", ()):
+                        for key, val in pair:
+                            if key == "commonName" and val:
+                                server_name = str(val)
+                                break
+        else:
             # Check CN via openssl CLI fallback if _test_decode_cert is absent
             res = subprocess.run(
                 ["openssl", "x509", "-in", tmp_path, "-noout", "-subject", "-ext", "subjectAltName"],
@@ -326,7 +331,8 @@ def init_lab(
             f"OMADA_PASSWORD={pw}",
             f"OMADA_SITE_NAME={resolved_site}",
             "OMADA_VERIFY_SSL=true",
-            f"OMADA_CA_FILE={ca_out}",
+            f"OMADA_CA_BUNDLE={ca_out.resolve()}",
+            "OMADA_STRICT_X509=false",
             "OMADA_READ_ONLY=true",
         ]
         if server_name:

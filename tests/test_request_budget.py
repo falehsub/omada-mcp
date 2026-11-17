@@ -22,9 +22,11 @@ class RequestBudgetTests(unittest.TestCase):
         client.authenticate()
         fake.burst_once_for.add(f"sites/{SITE_ID}/devices")
 
-        with client.request_budget(max_requests=1) as budget:
-            with self.assertRaises(RequestBudgetExceeded):
-                client.api(f"sites/{SITE_ID}/devices")
+        with (
+            client.request_budget(max_requests=1) as budget,
+            self.assertRaises(RequestBudgetExceeded),
+        ):
+            client.api(f"sites/{SITE_ID}/devices")
 
         device_requests = [request for request in fake.requests if "/devices?" in request["url"]]
         self.assertEqual(len(device_requests), 1)
@@ -47,9 +49,11 @@ class RequestBudgetTests(unittest.TestCase):
 
         with client.request_budget(max_requests=1) as outer:
             client.api(f"sites/{SITE_ID}/devices")
-            with client.request_budget(max_requests=1) as inner:
-                with self.assertRaises(RequestBudgetExceeded):
-                    client.api(f"sites/{SITE_ID}/clients")
+            with (
+                client.request_budget(max_requests=1) as inner,
+                self.assertRaises(RequestBudgetExceeded),
+            ):
+                client.api(f"sites/{SITE_ID}/clients")
             self.assertEqual(inner.used, 0)
             self.assertEqual(outer.used, 1)
 

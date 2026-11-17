@@ -23,11 +23,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install ruff==0.17.5 mypy==2.4.1
+      - run: python -m pip install ruff==0.17.5 mypy==2.4.1 tiktoken==0.14.0
       - run: python -m ruff check src tests scripts
       - run: python -m mypy src
       - run: python -m mypy scripts
       - run: python scripts/generate_docs.py --check
+      - name: Deterministic client efficiency budgets
+        run: python scripts/benchmark_clients.py --check --require-tokens --output reports/client-efficiency.json
+      - name: Upload client efficiency report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-efficiency-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/client-efficiency.json
+          if-no-files-found: warn
 
   test:
     name: test (${{ matrix.os }} / py${{ matrix.python-version }})
