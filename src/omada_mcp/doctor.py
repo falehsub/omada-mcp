@@ -15,6 +15,7 @@ session token is never echoed. Exit code 0 means "a client can use this".
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -24,12 +25,25 @@ from . import __version__
 from .client import OmadaClient, OmadaError, classify_controller_family
 from .config import _IS_WINDOWS, Config, ConfigError, load_config
 from .tools import TOOL_MAP
+from .transport import SESSION_COOKIE_NAMES
 
 __all__ = ["run_doctor", "Report", "PhaseResult"]
 
 PASS = "PASS"
 WARN = "WARN"
 FAIL = "FAIL"
+
+_SHARE_SAFE_PHASES = {
+    "env": ("Configuration", "Check the configuration source and required OMADA_* settings locally."),
+    "tls": ("Controller connection", "Check the controller URL, network access, and CA settings locally."),
+    "login": ("Controller login", "Check the dedicated controller account and its credentials locally."),
+    "site": ("Site discovery", "Check site visibility and pin the intended site if needed."),
+    "tools": ("Read tool checks", "Run --doctor locally for the affected endpoint and controller error."),
+    "write": ("Write safeguards", "Check the write allowlist and dedicated controller account role locally."),
+}
+_SHARE_SAFE_STATUS = {PASS: "passed", WARN: "reported a warning", FAIL: "failed"}
+_FIRMWARE_VERSION = re.compile(r"[1-9](?:\.[0-9]{1,5}){2,4}")
+_CONTROLLER_FAMILY = re.compile(r"unknown|hardware-unknown|(?:software|hardware)-[0-9]{1,3}\.x")
 
 
 def platform_label() -> str:
@@ -53,9 +67,10 @@ class PhaseResult:
 
 
 class Report:
-    def __init__(self, stream=None, json_output: bool = False):
+    def __init__(self, stream=None, json_output: bool = False, *, share_safe: bool = False):
         self.stream = stream or sys.stdout
-        self.json_output = json_output
+        self.json_output = json_output or share_safe
+        self.share_safe = share_safe
         self.results: list[PhaseResult] = []
         self.controller_meta: dict[str, str | None] = {
             "omadacId": None,
@@ -101,7 +116,7 @@ class Report:
         else:
             status = "pass"
             exit_code = 0
-        return {
+        payload: dict[str, Any] = {
             "version": __version__,
             "platform": platform_label(),
             "status": status,
@@ -124,6 +139,35 @@ class Report:
                 }
                 for r in self.results
             ],
+        }
+        if self.share_safe:
+            payload.update({
+                "shareSafe": True,
+                "controller": self._share_safe_controller(),
+                "site": None,
+                "phases": [self._share_safe_phase(result) for result in self.results],
+            })
+        return payload
+
+    def _share_safe_controller(self) -> dict[str, str | None]:
+        version = self.controller_meta["controllerVer"]
+        family = self.controller_meta["family"]
+        cookie = self.controller_meta["sessionCookie"]
+        return {
+            "omadacId": None,
+            "controllerVer": version if isinstance(version, str) and _FIRMWARE_VERSION.fullmatch(version) else None,
+            "family": family if isinstance(family, str) and _CONTROLLER_FAMILY.fullmatch(family) else None,
+            "sessionCookie": cookie if cookie in SESSION_COOKIE_NAMES else None,
+        }
+
+    @staticmethod
+    def _share_safe_phase(phase: PhaseResult) -> dict[str, str | None]:
+        label, hint = _SHARE_SAFE_PHASES[phase.name]
+        return {
+            "name": phase.name,
+            "status": phase.status,
+            "detail": f"{label}: {_SHARE_SAFE_STATUS[phase.status]}.",
+            "hint": hint if phase.status != PASS else None,
         }
 
     def finish(self) -> int:
@@ -192,6 +236,9 @@ def _phase_tls(client: OmadaClient, config: Config, report: Report) -> bool:
         info = client.controller_info()
     except OmadaError as exc:
         report.add(PhaseResult("tls", FAIL, exc.message, exc.hint))
+        return False
+    except (OSError, ValueError) as exc:
+        report.add(PhaseResult("tls", FAIL, str(exc), "check the controller URL and CA settings"))
         return False
     family = classify_controller_family(info)
     report.controller_meta["omadacId"] = info.get("omadacId")
@@ -359,10 +406,12 @@ def run_doctor(
     client_factory: Callable[[Config], OmadaClient] | None = None,
     stream=None,
     json_output: bool = False,
+    *,
+    share_safe: bool = False,
 ) -> int:
     """Run every phase and return a process exit code (0 = ready)."""
-    report = Report(stream, json_output=json_output)
-    if not json_output:
+    report = Report(stream, json_output=json_output, share_safe=share_safe)
+    if not report.json_output:
         print(f"omada-mcp doctor v{__version__} on {platform_label()}", file=report.stream,
               flush=True)
         print("-" * 66, file=report.stream, flush=True)
@@ -380,7 +429,10 @@ def run_doctor(
     if config is None:
         return report.finish()
 
-    client = (client_factory or (lambda cfg: OmadaClient(cfg)))(config)
+    client = (
+        client_factory(config) if client_factory is not None else
+        OmadaClient(config, log_fn=(lambda _: None) if share_safe else None)
+    )
     if not _phase_tls(client, config, report):
         return report.finish()
     if not _phase_login(client, report):

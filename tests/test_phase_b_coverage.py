@@ -180,11 +180,12 @@ class PhaseBWifiWriteTests(unittest.TestCase):
                 write_tools=("set_ap_ssid_overrides", "rollback_from_snapshot"),
             )
             secret = "TopSecret-AP-Override-Key-99"
+            for override in ctrl.eap_details["AA-BB-CC-00-00-03"]["ssidOverrides"]:
+                override.pop("psk", None)
             committed = _commit(server, "set_ap_ssid_overrides", {
                 "mac": "AA-BB-CC-00-00-03",
                 "overrides": [
                     {"globalSsid": "CorpWiFi", "enable": True, "newSsid": "Living-Corp", "vlanEnable": True, "vlanId": 20},
-                    {"globalSsid": "IoTWiFi", "enable": True, "psk": secret},
                 ],
             })
             self.assertTrue(committed["applied"])
@@ -201,6 +202,19 @@ class PhaseBWifiWriteTests(unittest.TestCase):
             corp_after = next(o for o in ctrl.eap_details["AA-BB-CC-00-00-03"]["ssidOverrides"] if o["globalSsid"] == "CorpWiFi")
             self.assertEqual(corp_after["ssid"], "CorpWiFi")
             self.assertFalse(corp_after["enable"])
+
+            secret_change = _commit(server, "set_ap_ssid_overrides", {
+                "mac": "AA-BB-CC-00-00-03",
+                "overrides": [{"globalSsid": "IoTWiFi", "enable": True, "psk": secret}],
+            })
+            self.assertTrue(secret_change["manualRecoveryRequired"])
+            self.assertEqual(secret_change["outcome"], "accepted")
+            self.assertNotIn(secret, json.dumps(secret_change))
+            secret_snapshot = Path(tmp) / secret_change["snapshot"]
+            self.assertNotIn(secret, secret_snapshot.read_text(encoding="utf-8"))
+            refused = call_tool(server, "rollback_from_snapshot", {"snapshotId": secret_snapshot.name})
+            self.assertTrue(refused["result"]["isError"])
+            self.assertIn("manual restoration", refused["result"]["content"][0]["text"])
 
     def test_run_wlan_optimization_configure_trigger_cancel_and_rollback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

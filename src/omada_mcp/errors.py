@@ -421,6 +421,7 @@ class OmadaError(RuntimeError):
         self.code = code
         self.hint = hint
         self.endpoint = endpoint
+        self.write_status: dict[str, Any] | None = None
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         text = self.message

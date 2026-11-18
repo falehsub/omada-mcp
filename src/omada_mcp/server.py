@@ -26,6 +26,7 @@ from .client import OmadaClient, OmadaError, log
 from .config import Config
 from .schema_validation import SchemaValidationError, validate_tool_arguments
 from .tools import TOOL_MAP, Tool, get_tool, tool_descriptors
+from .write_previews import WritePreviews
 
 __all__ = ["PROTOCOL_VERSIONS", "DEFAULT_PROTOCOL_VERSION", "Server",
            "configure_streams"]
@@ -117,6 +118,7 @@ class Server:
         self.out = out
         self.protocol_version = DEFAULT_PROTOCOL_VERSION
         self.initialized = False
+        self._write_previews = WritePreviews()
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -295,7 +297,7 @@ class Server:
             instructions = (
                 f"{INSTRUCTIONS} Active write allowlist: {', '.join(active_writes)}. "
                 "Every write tool defaults to dryRun=true; applying requires dryRun=false "
-                "with confirm='<tool>:<target-id>' from the dry-run preview."
+                "with the fresh, single-use confirmToken from the same session's dry-run preview."
             )
         return {
             "protocolVersion": self.protocol_version,
@@ -375,20 +377,26 @@ class Server:
 
         try:
             with self.client.use_site(site_override):
-                data = spec.handler(self.client, **arguments)
+                if spec.read_only:
+                    data = spec.handler(self.client, **arguments)
+                else:
+                    data = self._write_previews.call(self.client, name, spec.handler, arguments)
         except OmadaError as exc:
             # Tool execution failures are reported in-band per MCP.
             text = str(exc)
-            return {
+            result: dict[str, Any] = {
                 "content": [{"type": "text", "text": f"{spec.name} failed: {text}"}],
                 "isError": True,
             }
+            if exc.write_status is not None:
+                result["structuredContent"] = exc.write_status
+            return result
 
         if getattr(self.config, "compact_output", True):
             rendered = json.dumps(data, separators=(",", ":"), ensure_ascii=False, default=str)
         else:
             rendered = json.dumps(data, indent=2, ensure_ascii=False, default=str)
-        result: dict[str, Any] = {
+        result = {
             "content": [{"type": "text", "text": rendered}],
             "isError": False,
         }

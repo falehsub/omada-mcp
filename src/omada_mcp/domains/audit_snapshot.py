@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from .._projections import project_controller_row
 from ..client import OmadaClient, OmadaError
-from ._common import deep_redact
+from ._common import (
+    IncompleteCollectionError,
+    PaginatedList,
+    deep_redact,
+    require_complete_collection,
+)
 from ._network_helpers import dhcp_pool_capacity, extra_network_audit_findings
 from ._tool_model import _site, normalize_mac
 from ._write_common import _ACL_DISPATCH_NOTES
@@ -307,27 +313,44 @@ def _get_config_snapshot(
         return _get_config_snapshot_impl(client, objects=objects)
 
 
+_PROJECTED_SNAPSHOT_COLLECTIONS = {
+    "vpns": ("setting/vpns", "vpns"),
+    "wireguard": ("setting/wireguard", "wireguard"),
+    "wireguardPeers": ("setting/wireguard/peer", "wireguardPeers"),
+    "ddns": ("setting/service/ddns", "ddnsEntry"),
+}
+
+
 def _get_config_snapshot_impl(
     client: OmadaClient,
     objects: list[str] | None = None,
 ) -> dict[str, Any]:
-    selected = _resolve_snapshot_objects(objects)
+    from .fleet_vpn_read import _list_qos_rules, _list_traffic_rules
+    from .security_read import _list_rate_limit_profiles
+    from .switch_wifi_read import (
+        _get_wifi_radio_features,
+        _get_wlan_optimization_status,
+        _list_poe_schedules,
+    )
 
+    selected = _resolve_snapshot_objects(objects)
     site = _site(client)
     warnings: list[str] = []
+    status: dict[str, dict[str, str]] = {
+        section: {"status": "skipped", "reason": "section was not requested"}
+        for section in _SNAPSHOT_ALL_OBJECTS if section not in selected
+    }
     snapshot: dict[str, Any] = {
         "site": {"name": site.name, "id": site.site_id},
         "objects": selected,
         "warnings": warnings,
+        "sectionStatus": status,
     }
 
-    if "networks" in selected:
-        snapshot["networks"] = [project_controller_row("networks", row) for row in _merge_lan_networks(client, site)]
-
-    if "acls" in selected:
+    def _acls() -> dict[str, Any]:
         acl_disable, rules = _fetch_acls(client, site)
         warnings.append(_ACL_DISPATCH_NOTES)
-        snapshot["acls"] = {
+        return {
             "aclDisable": acl_disable,
             "aclDisableReliable": False,
             "warning": _ACL_DISPATCH_NOTES,
@@ -335,107 +358,64 @@ def _get_config_snapshot_impl(
             "rules": [project_controller_row("acls", rule) for rule in rules],
         }
 
-    if "groups" in selected:
-        groups = [project_controller_row("groups", group) for group in _fetch_groups(client, site)]
-        ip_groups = [g for g in groups if _parse_group_type(g) == 0]
-        port_groups = [g for g in groups if _parse_group_type(g) == 1]
-        mac_groups = [g for g in groups if _parse_group_type(g) == 2]
-        other_groups = [g for g in groups if _parse_group_type(g) != 0]
-        snapshot["groups"] = {
-            "count": len(groups),
-            "ipGroups": ip_groups,
-            "portGroups": port_groups,
-            "macGroups": mac_groups,
-            "otherGroups": other_groups,
-            "all": groups,
+    def _groups() -> dict[str, Any]:
+        rows = [project_controller_row("groups", row) for row in _fetch_groups(client, site)]
+        return {
+            "count": len(rows),
+            "ipGroups": [row for row in rows if _parse_group_type(row) == 0],
+            "portGroups": [row for row in rows if _parse_group_type(row) == 1],
+            "macGroups": [row for row in rows if _parse_group_type(row) == 2],
+            "otherGroups": [row for row in rows if _parse_group_type(row) != 0],
+            "all": rows,
         }
 
-    if "schedules" in selected:
-        snapshot["schedules"] = [project_controller_row("schedules", s) for s in _fetch_schedules(client, site)]
-
-    if "wlans" in selected:
-        snapshot["wlans"] = _list_wlans(client)
-
-    if "devices" in selected:
-        snapshot["devices"] = _list_devices(client)
-
-    if "clients" in selected:
-        snapshot["clients"] = _fetch_clients(client, limit=0)
-
-    if "dhcpReservations" in selected:
-        snapshot["dhcpReservations"] = _list_dhcp_reservations(client)
-
-    if "portForwards" in selected:
-        snapshot["portForwards"] = _list_port_forwards(client)
-
-    if "staticRoutes" in selected:
-        snapshot["staticRoutes"] = _list_static_routes(client)
-
-    if "mdnsRules" in selected:
-        snapshot["mdnsRules"] = [project_controller_row("mdnsRules", r) for r in _fetch_mdns_rules(client, site)]
-
-    if "services" in selected:
-        snapshot["services"] = _get_network_services(client)
-
-    if "rateLimitProfiles" in selected:
-        from .security_read import _list_rate_limit_profiles
-        snapshot["rateLimitProfiles"] = _list_rate_limit_profiles(client)
-
-    if "poeSchedules" in selected:
-        from .switch_wifi_read import _list_poe_schedules
+    collectors: dict[str, Callable[[], Any]] = {
+        "networks": lambda: [
+            project_controller_row("networks", row)
+            for row in _merge_lan_networks(client, site, strict=True)
+        ],
+        "acls": _acls,
+        "groups": _groups,
+        "schedules": lambda: [project_controller_row("schedules", row) for row in _fetch_schedules(client, site)],
+        "wlans": lambda: _list_wlans(client, strict=True),
+        "devices": lambda: _list_devices(client),
+        "clients": lambda: _fetch_clients(client, limit=0),
+        "dhcpReservations": lambda: _list_dhcp_reservations(client, strict=True),
+        "portForwards": lambda: _list_port_forwards(client),
+        "staticRoutes": lambda: _list_static_routes(client),
+        "mdnsRules": lambda: [project_controller_row("mdnsRules", row) for row in _fetch_mdns_rules(client, site)],
+        "services": lambda: _get_network_services(client),
+        "rateLimitProfiles": lambda: _list_rate_limit_profiles(client),
+        "poeSchedules": lambda: _list_poe_schedules(client, strict=True),
+        "wirelessFeature": lambda: _get_wifi_radio_features(client),
+        "rfPlanning": lambda: _get_wlan_optimization_status(client),
+        "trafficRules": lambda: _list_traffic_rules(client),
+        "qos": lambda: _list_qos_rules(client),
+    }
+    for section in selected:
         try:
-            snapshot["poeSchedules"] = _list_poe_schedules(client)
+            if section in _PROJECTED_SNAPSHOT_COLLECTIONS:
+                endpoint, shape = _PROJECTED_SNAPSHOT_COLLECTIONS[section]
+                rows, _ = require_complete_collection(client, f"sites/{site.site_id}/{endpoint}")
+                value: Any = [project_controller_row(shape, row) for row in rows]
+            else:
+                value = collectors[section]()
+        except IncompleteCollectionError as exc:
+            status[section] = {"status": "partial", "reason": exc.message}
         except OmadaError as exc:
-            warnings.append(f"poeSchedules skipped: {exc.message}")
-            snapshot["poeSchedules"] = []
-
-    if "wirelessFeature" in selected:
-        from .switch_wifi_read import _get_wifi_radio_features
-        snapshot["wirelessFeature"] = _get_wifi_radio_features(client)
-
-    if "rfPlanning" in selected:
-        from .switch_wifi_read import _get_wlan_optimization_status
-        snapshot["rfPlanning"] = _get_wlan_optimization_status(client)
-
-    if "vpns" in selected:
-        try:
-            vpn_rows, _ = client.paginate(f"sites/{site.site_id}/setting/vpns")
-            snapshot["vpns"] = [deep_redact(r) for r in vpn_rows]
-        except OmadaError as exc:
-            warnings.append(f"vpns skipped: {exc.message}")
-            snapshot["vpns"] = []
-
-    if "wireguard" in selected:
-        try:
-            wg_rows, _ = client.paginate(f"sites/{site.site_id}/setting/wireguard")
-            snapshot["wireguard"] = [deep_redact(r) for r in wg_rows]
-        except OmadaError as exc:
-            warnings.append(f"wireguard skipped: {exc.message}")
-            snapshot["wireguard"] = []
-
-    if "wireguardPeers" in selected:
-        try:
-            peer_rows, _ = client.paginate(f"sites/{site.site_id}/setting/wireguard/peer")
-            snapshot["wireguardPeers"] = [deep_redact(r) for r in peer_rows]
-        except OmadaError as exc:
-            warnings.append(f"wireguardPeers skipped: {exc.message}")
-            snapshot["wireguardPeers"] = []
-
-    if "ddns" in selected:
-        try:
-            ddns_rows, _ = client.paginate(f"sites/{site.site_id}/setting/service/ddns")
-            snapshot["ddns"] = [deep_redact(r) for r in ddns_rows]
-        except OmadaError as exc:
-            warnings.append(f"ddns skipped: {exc.message}")
-            snapshot["ddns"] = []
-
-    if "trafficRules" in selected:
-        from .fleet_vpn_read import _list_traffic_rules
-        snapshot["trafficRules"] = _list_traffic_rules(client)
-
-    if "qos" in selected:
-        from .fleet_vpn_read import _list_qos_rules
-        snapshot["qos"] = _list_qos_rules(client)
+            reason = f"controller collection unavailable (code {exc.code})" if exc.code else "controller collection unavailable"
+            status[section] = {"status": "unavailable", "reason": reason}
+        else:
+            snapshot[section] = value
+            if isinstance(value, PaginatedList) and value.truncated:
+                reason = str(value.pagination.get("truncationReason") or "controller collection incomplete")
+                status[section] = {"status": "partial", "reason": reason}
+            elif isinstance(value, Mapping) and value.get("warnings"):
+                status[section] = {"status": "partial", "reason": "one or more source reads were unavailable"}
+            else:
+                status[section] = {"status": "ok"}
+        if status[section]["status"] != "ok":
+            warnings.append(f"{section} skipped: {status[section]['reason']}")
 
     return snapshot
 
@@ -519,6 +499,16 @@ _NETWORK_AUDIT_SCHEMA: dict[str, Any] = {
 }
 
 
+_SECTION_STATUS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string", "enum": ["ok", "partial", "skipped", "unavailable"]},
+        "reason": {"type": "string"},
+    },
+    "required": ["status"],
+}
+
+
 _SNAPSHOT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -531,6 +521,7 @@ _SNAPSHOT_SCHEMA: dict[str, Any] = {
             "required": ["name", "id"],
         },
         "objects": {"type": "array", "items": {"type": "string"}},
+        "sectionStatus": {"type": "object", "additionalProperties": _SECTION_STATUS_SCHEMA},
         "networks": {"type": "array", "items": {"type": "object"}},
         "acls": {
             "type": "object",
@@ -576,7 +567,7 @@ _SNAPSHOT_SCHEMA: dict[str, Any] = {
         "qos": {"type": "object"},
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["site", "objects", "warnings"],
+    "required": ["site", "objects", "warnings", "sectionStatus"],
 }
 
 
@@ -698,9 +689,10 @@ def _diff_object_list(
 
 
 def _extract_section_items(section: str, snapshot: dict[str, Any]) -> tuple[list[Any], dict[str, Any]]:
-    raw = snapshot.get(section)
-    if raw is None:
-        return [], {}
+    raw = snapshot[section]
+    if section in _PROJECTED_SNAPSHOT_COLLECTIONS:
+        shape = _PROJECTED_SNAPSHOT_COLLECTIONS[section][1]
+        raw = [project_controller_row(shape, row) for row in raw]
     cleaned = _strip_volatile_and_redact(raw)
     if section == "acls" and isinstance(cleaned, dict):
         meta = {k: v for k, v in cleaned.items() if k not in ("rules", "count")}
@@ -713,6 +705,49 @@ def _extract_section_items(section: str, snapshot: dict[str, Any]) -> tuple[list
     if isinstance(cleaned, list):
         return cleaned, {}
     return [], {"value": cleaned}
+
+
+_DIFF_OBJECT_SECTIONS = ("services", "wirelessFeature", "rfPlanning", "trafficRules", "qos")
+
+
+def _section_evidence(snapshot: Mapping[str, Any], section: str) -> dict[str, str]:
+    """Validate a section's evidence, including legacy snapshots without statuses."""
+    if isinstance(snapshot.get("objects"), list) and not any(
+        str(name).strip().lower() == section.lower() for name in snapshot["objects"]
+    ):
+        return {"status": "skipped", "reason": "section was not requested"}
+    statuses = snapshot.get("sectionStatus")
+    if isinstance(statuses, Mapping):
+        evidence = statuses.get(section)
+        status = evidence.get("status") if isinstance(evidence, Mapping) else None
+        if status in ("partial", "skipped", "unavailable"):
+            return {"status": status, "reason": f"section marked {status} by snapshot"}
+        if status != "ok":
+            return {"status": "unavailable", "reason": "section lacks collection evidence"}
+    else:
+        warnings = snapshot.get("warnings")
+        if isinstance(warnings, list) and any(
+            isinstance(msg, str) and msg.startswith(f"{section} skipped:") for msg in warnings
+        ):
+            return {"status": "unavailable", "reason": "legacy snapshot reports this section was skipped"}
+
+    value = snapshot.get(section)
+    if value is None:
+        return {"status": "skipped", "reason": "section data was omitted"}
+    if section in _DIFF_OBJECT_SECTIONS:
+        if isinstance(value, Mapping) and value and not value.get("warnings"):
+            return {"status": "ok"}
+    else:
+        rows = value
+        if section == "acls" and isinstance(value, Mapping):
+            rows = value.get("rules")
+        if section == "groups" and isinstance(value, Mapping):
+            rows = value.get("all")
+            if rows is None and isinstance(value.get("ipGroups"), list) and isinstance(value.get("otherGroups"), list):
+                rows = value["ipGroups"] + value["otherGroups"]
+        if isinstance(rows, list) and all(isinstance(item, Mapping) for item in rows):
+            return {"status": "ok"}
+    return {"status": "partial", "reason": "section data is incomplete or has an unexpected shape"}
 
 
 def _diff_config_snapshots(
@@ -734,12 +769,16 @@ def _diff_config_snapshots(
     if objects is not None:
         sections_list = _resolve_snapshot_objects(objects)
     else:
-        raw_objs = baseline.get("objects")
-        if isinstance(raw_objs, list) and raw_objs:
-            sections_list = _resolve_snapshot_objects([str(o) for o in raw_objs])
-        else:
-            present = [s for s in _SNAPSHOT_ALL_OBJECTS if s in baseline or (current and s in current)]
-            sections_list = present or list(_SNAPSHOT_DEFAULT_OBJECTS)
+        sections_list = []
+        for candidate in (baseline, current):
+            if candidate is None:
+                continue
+            names = candidate.get("objects")
+            if isinstance(names, list) and names:
+                sections_list.extend(_resolve_snapshot_objects([str(name) for name in names]))
+            else:
+                sections_list.extend(section for section in _SNAPSHOT_ALL_OBJECTS if section in candidate)
+        sections_list = list(dict.fromkeys(sections_list)) or list(_SNAPSHOT_DEFAULT_OBJECTS)
 
     live_used = current is None
     if current is None:
@@ -756,13 +795,19 @@ def _diff_config_snapshots(
     )
 
     sections_out: dict[str, dict[str, Any]] = {}
+    sections_skipped: dict[str, dict[str, dict[str, str]]] = {}
     total_added = 0
     total_removed = 0
     total_changed = 0
     sections_changed = 0
 
     for section in sections_list:
-        if section in ("services", "wirelessFeature", "rfPlanning", "trafficRules", "qos"):
+        baseline_evidence = _section_evidence(baseline, section)
+        current_evidence = _section_evidence(target_snapshot, section)
+        if baseline_evidence["status"] != "ok" or current_evidence["status"] != "ok":
+            sections_skipped[section] = {"baseline": baseline_evidence, "current": current_evidence}
+            continue
+        if section in _DIFF_OBJECT_SECTIONS:
             b_clean = _strip_volatile_and_redact(baseline.get(section) or {})
             c_clean = _strip_volatile_and_redact(target_snapshot.get(section) or {})
             delta = _diff_field_changes(b_clean, c_clean)
@@ -794,7 +839,8 @@ def _diff_config_snapshots(
         "baselineSite": deep_redact(base_site),
         "currentSite": deep_redact(curr_site),
         "crossSite": cross_site,
-        "sectionsCompared": sections_list,
+        "sectionsCompared": list(sections_out),
+        "sectionsSkipped": sections_skipped,
         "hasChanges": bool(total_added or total_removed or total_changed),
         "summary": {
             "sectionsChanged": sections_changed,
@@ -814,6 +860,14 @@ _DIFF_CONFIG_SCHEMA: dict[str, Any] = {
         "currentSite": {"type": ["object", "null"]},
         "crossSite": {"type": "boolean"},
         "sectionsCompared": {"type": "array", "items": {"type": "string"}},
+        "sectionsSkipped": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "properties": {"baseline": _SECTION_STATUS_SCHEMA, "current": _SECTION_STATUS_SCHEMA},
+                "required": ["baseline", "current"],
+            },
+        },
         "hasChanges": {"type": "boolean"},
         "summary": {
             "type": "object",
@@ -827,6 +881,6 @@ _DIFF_CONFIG_SCHEMA: dict[str, Any] = {
         },
         "sections": {"type": "object"},
     },
-    "required": ["comparedSource", "crossSite", "sectionsCompared", "hasChanges", "summary", "sections"],
+    "required": ["comparedSource", "crossSite", "sectionsCompared", "sectionsSkipped", "hasChanges", "summary", "sections"],
 }
 

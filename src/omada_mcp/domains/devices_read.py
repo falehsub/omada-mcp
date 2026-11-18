@@ -8,7 +8,7 @@ from ..client import OmadaClient, OmadaError
 from ._common import PROFILE_TYPE_LABELS, resolve_raw_device, try_paginate
 from ._device_helpers import collect_ap_radios_data, collect_rf_scan_data, collect_switch_ports_data
 from ._tool_model import _pick, _site, as_int_or_none, normalize_mac
-from ._write_fetchers import _fetch_devices, _fetch_ssids
+from ._write_fetchers import _fetch_devices, _fetch_ssids, _fetch_wlan_groups
 from .clients_read import _fetch_client_rows
 
 _DEVICE_FIELDS: tuple[tuple[str, tuple[str, ...], Any], ...] = (
@@ -84,9 +84,9 @@ def _get_device(client: OmadaClient, mac: str) -> dict[str, Any]:
     )
 
 
-def _list_wlans(client: OmadaClient) -> list[dict[str, Any]]:
+def _list_wlans(client: OmadaClient, *, strict: bool = False) -> list[dict[str, Any]]:
     site = _site(client)
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/wlans")
+    rows = _fetch_wlan_groups(client, site)
     projected: list[dict[str, Any]] = []
     for row in rows:
         if any(k in row for k in ("ssid", "band", "security", "securityKey", "pskSetting")):
@@ -99,12 +99,15 @@ def _list_wlans(client: OmadaClient) -> list[dict[str, Any]]:
         try:
             s_rows = _fetch_ssids(client, site, str(group_id))
         except OmadaError:
+            if strict:
+                raise
             s_rows = []
         if s_rows:
             for ssid_row in s_rows:
                 projected.append(project_wlan(ssid_row, group_name=row.get("name")))
             continue
-        projected.append(project_wlan(row))
+        if not strict:
+            projected.append(project_wlan(row))
     return projected
 
 
@@ -294,6 +297,10 @@ _SWITCH_PORTS_SCHEMA: dict[str, Any] = {
         "poe": {"type": "object"},
         "uplinkPorts": {"type": "array", "items": {"type": "integer"}},
         "lagGroups": {"type": "array", "items": {"type": "object"}},
+        "collectionStatus": {
+            "type": "object",
+            "additionalProperties": {"type": "string", "enum": ["complete", "partial", "unavailable"]},
+        },
         "cableTestSupported": {"type": ["boolean", "null"]},
         "cableTestStatus": {"type": ["integer", "null"]},
         "ports": {
@@ -315,7 +322,8 @@ _SWITCH_PORTS_SCHEMA: dict[str, Any] = {
                     "maxSpeedMbps": {"type": "integer"},
                     "duplex": {"type": "string"},
                     "isUplink": {"type": "boolean"},
-                    "isLagMember": {"type": "boolean"},
+                    "isLagMember": {"type": ["boolean", "null"]},
+                    "safetyEvidenceComplete": {"type": "boolean"},
                     "carriesController": {"type": "boolean"},
                     "poeSupported": {"type": "boolean"},
                     "poeDelivering": {"type": "boolean"},

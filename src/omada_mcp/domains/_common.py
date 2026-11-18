@@ -292,6 +292,8 @@ def try_paginate(
     tag = label or endpoint
     try:
         rows, meta = client.paginate(endpoint, page_size=page_size, max_pages=max_pages)
+        if pagination_status(meta) == "partial":
+            warnings.append(f"{tag}: partial controller collection")
         return rows, meta, True
     except OmadaSessionExpiredError:
         raise
@@ -300,6 +302,34 @@ def try_paginate(
             warnings.append(f"{tag}: unavailable ({exc.code}: {exc})")
             return [], None, False
         raise
+
+
+class IncompleteCollectionError(OmadaError):
+    """A paginated controller collection cannot support a complete result."""
+
+
+def pagination_status(meta: Mapping[str, Any] | None, *, available: bool = True) -> str:
+    if not available:
+        return "unavailable"
+    page = as_mapping((meta or {}).get("_pagination"))
+    if page.get("truncated") or page.get("complete") is False or page.get("status") == "partial":
+        return "partial"
+    return "complete" if page else "partial"
+
+
+def require_complete_collection(
+    client: OmadaClient, endpoint: str, *, max_pages: int = 50,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Reject partial inventory when a caller depends on absence or exact identity."""
+    rows, meta = client.paginate(endpoint, max_pages=max_pages)
+    if pagination_status(meta) != "complete":
+        reason = as_mapping((meta or {}).get("_pagination")).get("truncationReason")
+        raise IncompleteCollectionError(
+            f"controller collection is incomplete: {reason or 'missing pagination evidence'}",
+            endpoint=endpoint,
+            hint="retry after verifying controller connectivity and collection availability",
+        )
+    return rows, meta
 
 
 def is_device_online(dev: Mapping[str, Any]) -> bool:
@@ -326,8 +356,7 @@ def resolve_raw_device(
     expected_type: str | None = None,
 ) -> dict[str, Any]:
     """Resolve a raw device dict from ``sites/{site}/devices`` by MAC or exact name."""
-    raw = client.api_result(f"sites/{site.site_id}/devices")
-    devices = unwrap_rows(raw)
+    devices, _ = require_complete_collection(client, f"sites/{site.site_id}/devices")
     wanted_mac = normalize_mac(mac_or_query)
     wanted_name = str(mac_or_query or "").strip().lower()
     matched: dict[str, Any] | None = None

@@ -15,7 +15,7 @@ for p in (str(SRC), str(TESTS)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from write_harness import call_tool, make_write_env, unwrap_ok  # noqa: E402
+from write_harness import call_confirmed, call_tool, make_write_env, unwrap_ok  # noqa: E402
 
 from omada_mcp.write_tools import (  # noqa: E402
     CLIENT_VOLATILE_KEYS,
@@ -33,7 +33,7 @@ class FlowAClientFixedIpTests(unittest.TestCase):
             }))
             self.assertTrue(preview["dryRun"])
             self.assertFalse(preview["applied"])
-            self.assertEqual(preview["confirmToken"], "set_client_fixed_ip:aa:bb:cc:11:11:01")
+            self.assertGreaterEqual(len(preview["confirmToken"]), 32)
             self.assertEqual(ctrl.write_request_count, 0)
             self.assertTrue(any("lease" in w.lower() for w in preview["warnings"]))
 
@@ -78,10 +78,8 @@ class FlowAClientFixedIpTests(unittest.TestCase):
             # Live IP intentionally remains at old lease until renewal
             self.assertEqual(ctrl.clients["AA-BB-CC-11-11-01"]["ip"], "192.168.20.50")
 
-            rel = unwrap_ok(call_tool(server, "release_client_fixed_ip", {
+            rel = unwrap_ok(call_confirmed(server, "release_client_fixed_ip", {
                 "mac": "AA-BB-CC-11-11-01",
-                "dryRun": False,
-                "confirm": "release_client_fixed_ip:aa:bb:cc:11:11:01",
             }))
             self.assertFalse(rel["after"]["useFixedAddr"])
 
@@ -99,10 +97,8 @@ class FlowAClientFixedIpTests(unittest.TestCase):
             }))
             self.assertTrue(any("reservation row" in w.lower() for w in preview["warnings"]))
 
-            released = unwrap_ok(call_tool(server, "release_client_fixed_ip", {
+            released = unwrap_ok(call_confirmed(server, "release_client_fixed_ip", {
                 "mac": "AA-BB-CC-11-11-01",
-                "dryRun": False,
-                "confirm": "release_client_fixed_ip:aa:bb:cc:11:11:01",
             }))
             self.assertTrue(released["applied"])
             self.assertFalse(released["after"]["useFixedAddr"])
@@ -117,10 +113,8 @@ class FlowAClientFixedIpTests(unittest.TestCase):
             server, _client, ctrl, _ = make_write_env(tmp)
             ctrl.dhcp_reservations = []
 
-            released = unwrap_ok(call_tool(server, "release_client_fixed_ip", {
+            released = unwrap_ok(call_confirmed(server, "release_client_fixed_ip", {
                 "mac": "AA-BB-CC-11-11-01",
-                "dryRun": False,
-                "confirm": "release_client_fixed_ip:aa:bb:cc:11:11:01",
             }))
             self.assertTrue(released["applied"])
             self.assertFalse(any("row removed" in w for w in released["warnings"]),
@@ -164,11 +158,9 @@ class FlowBVlanTests(unittest.TestCase):
             server, _client, ctrl, _ = make_write_env(tmp)
 
             # Lab VLAN 40 starts without lanNetworkIpv6Config; tool must inject proto=none so controller accepts it.
-            lab_res = unwrap_ok(call_tool(server, "set_vlan_isolation", {
+            lab_res = unwrap_ok(call_confirmed(server, "set_vlan_isolation", {
                 "vlan": 40,
                 "isolation": True,
-                "dryRun": False,
-                "confirm": "set_vlan_isolation:net-lab-40",
             }))
             self.assertTrue(lab_res["verified"])
             self.assertTrue(lab_res["after"]["isolation"])
@@ -192,11 +184,9 @@ class FlowBVlanTests(unittest.TestCase):
                 {"ipaddrStart": "192.168.40.1", "ipaddrEnd": "192.168.40.254"}
             ]
             new_pools = [{"ipaddrStart": "192.168.40.50", "ipaddrEnd": "192.168.40.200"}]
-            res = unwrap_ok(call_tool(server, "set_vlan_dhcp_pools", {
+            res = unwrap_ok(call_confirmed(server, "set_vlan_dhcp_pools", {
                 "vlan": 40,
                 "pools": new_pools,
-                "dryRun": False,
-                "confirm": "set_vlan_dhcp_pools:net-lab-40",
             }))
             self.assertTrue(res["applied"])
             self.assertTrue(res["verified"])
@@ -208,11 +198,9 @@ class FlowBVlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, ctrl, _ = make_write_env(tmp)
             ctrl.silent_noop_for.add(("PATCH", "setting/lan/networks/net-guest-30"))
-            resp = call_tool(server, "set_vlan_isolation", {
+            resp = call_confirmed(server, "set_vlan_isolation", {
                 "vlan": 30,
                 "isolation": True,
-                "dryRun": False,
-                "confirm": "set_vlan_isolation:net-guest-30",
             })
             self.assertTrue(resp["result"]["isError"])
             self.assertIn("silently ignored or altered", resp["result"]["content"][0]["text"].lower())
@@ -223,11 +211,9 @@ class FlowBVlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, ctrl, _ = make_write_env(tmp)
             ctrl.drop_collection_isolation_sync = True
-            resp = call_tool(server, "set_vlan_isolation", {
+            resp = call_confirmed(server, "set_vlan_isolation", {
                 "vlan": 30,
                 "isolation": True,
-                "dryRun": False,
-                "confirm": "set_vlan_isolation:net-guest-30",
             })
             self.assertTrue(resp["result"]["isError"])
             self.assertIn("collection isolation", resp["result"]["content"][0]["text"].lower())
@@ -236,11 +222,9 @@ class FlowBVlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, ctrl, _ = make_write_env(tmp)
             new_pools = [{"ipaddrStart": "192.168.30.100", "ipaddrEnd": "192.168.30.180"}]
-            res = unwrap_ok(call_tool(server, "set_vlan_dhcp_pools", {
+            res = unwrap_ok(call_confirmed(server, "set_vlan_dhcp_pools", {
                 "vlan": 30,
                 "pools": new_pools,
-                "dryRun": False,
-                "confirm": "set_vlan_dhcp_pools:net-guest-30",
             }))
             self.assertTrue(res["verified"])
             self.assertEqual(res["after"]["ipRangePool"], new_pools)
@@ -248,11 +232,9 @@ class FlowBVlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, ctrl, _ = make_write_env(tmp)
             ctrl.corrupt_dhcp_on_patch = True
-            resp = call_tool(server, "set_vlan_dhcp_pools", {
+            resp = call_confirmed(server, "set_vlan_dhcp_pools", {
                 "vlan": 30,
                 "pools": [{"ipaddrStart": "192.168.30.100", "ipaddrEnd": "192.168.30.180"}],
-                "dryRun": False,
-                "confirm": "set_vlan_dhcp_pools:net-guest-30",
             })
             self.assertTrue(resp["result"]["isError"])
             self.assertIn("drift", resp["result"]["content"][0]["text"].lower())
@@ -295,11 +277,9 @@ class FlowCIpGroupsAndAclTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, ctrl, _ = make_write_env(tmp)
 
-            created = unwrap_ok(call_tool(server, "create_ip_group", {
+            created = unwrap_ok(call_confirmed(server, "create_ip_group", {
                 "name": "block-targets",
                 "ipRange": "192.168.20.200-203",
-                "dryRun": False,
-                "confirm": "create_ip_group:block-targets",
             }))
             self.assertTrue(created["applied"])
             self.assertEqual(created["after"]["ipList"], [
@@ -307,11 +287,9 @@ class FlowCIpGroupsAndAclTests(unittest.TestCase):
             ])
 
             # Replace unreferenced group (shared-printers): DELETE + POST
-            replaced = unwrap_ok(call_tool(server, "replace_ip_group", {
+            replaced = unwrap_ok(call_confirmed(server, "replace_ip_group", {
                 "group": "shared-printers",
                 "cidrs": ["192.168.20.50/32", "192.168.20.51/32"],
-                "dryRun": False,
-                "confirm": "replace_ip_group:grp-printers-02",
             }))
             self.assertTrue(replaced["applied"])
             self.assertEqual(len(replaced["steps"]), 2)
@@ -326,7 +304,7 @@ class FlowCIpGroupsAndAclTests(unittest.TestCase):
                 "cidrs": ["192.168.20.180/30"],
             }))
             self.assertEqual(len(preview["steps"]), 6)
-            self.assertEqual(preview["confirmToken"], "replace_ip_group:grp-devices-01")
+            self.assertGreaterEqual(len(preview["confirmToken"]), 32)
 
             applied = unwrap_ok(call_tool(server, "replace_ip_group", {
                 "group": "lab-devices",
@@ -356,11 +334,9 @@ class FlowCIpGroupsAndAclTests(unittest.TestCase):
                 return None
 
             ctrl.next_fault_hook = fail_repoint_final
-            resp = call_tool(server, "replace_ip_group", {
+            resp = call_confirmed(server, "replace_ip_group", {
                 "group": "lab-devices",
                 "cidrs": ["192.168.20.180/30"],
-                "dryRun": False,
-                "confirm": "replace_ip_group:grp-devices-01",
             })
             self.assertTrue(resp["result"]["isError"])
             text = resp["result"]["content"][0]["text"]
@@ -383,14 +359,12 @@ class FlowCIpGroupsAndAclTests(unittest.TestCase):
             self.assertIn("controller", bad_acl["result"]["content"][0]["text"].lower())
 
             # Create Guest -> Default deny rule safely
-            created = unwrap_ok(call_tool(server, "create_gateway_acl", {
+            created = unwrap_ok(call_confirmed(server, "create_gateway_acl", {
                 "name": "block-guest-to-iot",
                 "policy": "deny",
                 "source": {"type": "network", "ids": ["Guest"]},
                 "destination": {"type": "network", "ids": ["IoT"]},
                 "direction": {"lanToWan": False, "lanToLan": True},
-                "dryRun": False,
-                "confirm": "create_gateway_acl:block-guest-to-iot",
             }))
             self.assertTrue(created["applied"])
             self.assertTrue(any("aclDisable" in w for w in created["warnings"]))
@@ -398,11 +372,9 @@ class FlowCIpGroupsAndAclTests(unittest.TestCase):
             self.assertTrue(ctrl.acl_disable)
 
             # Toggle existing rule status without touching aclDisable
-            toggled = unwrap_ok(call_tool(server, "set_acl_rule_status", {
+            toggled = unwrap_ok(call_confirmed(server, "set_acl_rule_status", {
                 "rule": "deny-guest-to-mgmt",
                 "status": False,
-                "dryRun": False,
-                "confirm": "set_acl_rule_status:acl-001",
             }))
             self.assertFalse(toggled["after"]["status"])
             self.assertTrue(ctrl.acl_disable)
@@ -424,10 +396,8 @@ class PaginationAndReauthTests(unittest.TestCase):
 
             # Non-GET session expiry via JSON -30109 reauths and checks live state before deciding
             ctrl.expired_once_for.add(("PUT", "setting/upnp"))
-            applied = unwrap_ok(call_tool(server, "set_upnp", {
+            applied = unwrap_ok(call_confirmed(server, "set_upnp", {
                 "enable": True,
-                "dryRun": False,
-                "confirm": f"set_upnp:{client.site.site_id}",
             }))
             self.assertTrue(applied["applied"])
             self.assertIs(applied["after"]["enable"], True)
@@ -445,10 +415,8 @@ class PaginationAndReauthTests(unittest.TestCase):
 
             ctrl.next_fault_hook = _expire_after_apply
             puts_before = sum(1 for r in ctrl.requests if r["method"] == "PUT" and "setting/upnp" in r["path"])
-            recovered = unwrap_ok(call_tool(server, "set_upnp", {
+            recovered = unwrap_ok(call_confirmed(server, "set_upnp", {
                 "enable": False,
-                "dryRun": False,
-                "confirm": f"set_upnp:{client.site.site_id}",
             }))
             puts_after = sum(1 for r in ctrl.requests if r["method"] == "PUT" and "setting/upnp" in r["path"])
             self.assertIs(recovered["after"]["enable"], False)

@@ -15,7 +15,7 @@ for p in (str(SRC), str(TESTS)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from write_harness import call_tool, make_write_env, unwrap_ok  # noqa: E402
+from write_harness import call_confirmed, call_tool, make_write_env, unwrap_ok  # noqa: E402
 
 from omada_mcp.tools import tool_descriptors  # noqa: E402
 
@@ -210,11 +210,9 @@ class DhcpLanAclGroupWriteTests(unittest.TestCase):
     def test_update_and_delete_gateway_acl_and_delete_ip_group(self):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, _ctrl, _ = make_write_env(tmp)
-            grp = unwrap_ok(call_tool(server, "create_ip_group", {
+            grp = unwrap_ok(call_confirmed(server, "create_ip_group", {
                 "name": "grp-del-test",
                 "cidrs": ["192.168.20.150/32"],
-                "dryRun": False,
-                "confirm": "create_ip_group:grp-del-test",
             }))
             gid = grp["after"]["groupId"]
             acl_dry = unwrap_ok(call_tool(server, "create_gateway_acl", {
@@ -255,7 +253,7 @@ class DhcpLanAclGroupWriteTests(unittest.TestCase):
             self.assertIs(u_res["after"]["syslog"], True)
 
             # Omada v6.2 omits 'biDirectional' on ACL rule read-back (uses stateMode instead):
-            # update_gateway_acl must warn and still verify when target_rule lacks biDirectional.
+            # An omitted biDirectional read-back is accepted without verification.
             live_rule = next(r for r in _ctrl.acls if r["name"] == "acl-del-renamed")
             live_rule.pop("biDirectional", None)
             orig_req = _ctrl.request
@@ -279,7 +277,8 @@ class DhcpLanAclGroupWriteTests(unittest.TestCase):
                     "dryRun": False,
                     "confirm": b_dry["confirmToken"],
                 }))
-                self.assertTrue(b_res["verified"])
+                self.assertFalse(b_res["verified"])
+                self.assertEqual(b_res["outcome"], "accepted")
             finally:
                 _ctrl.request = orig_req
 
@@ -426,20 +425,16 @@ class SsidAndGatewayServiceWriteTests(unittest.TestCase):
                 "confirm": mdns_del_dry["confirmToken"],
             }))
 
-            upnp_res = unwrap_ok(call_tool(server, "set_upnp", {
+            upnp_res = unwrap_ok(call_confirmed(server, "set_upnp", {
                 "enable": True,
-                "dryRun": False,
-                "confirm": f"set_upnp:{client.site.site_id}",
             }))
             self.assertIs(upnp_res["after"]["enable"], True)
             self.assertEqual(upnp_res["after"]["wanPortIds"], ["wan-port-1"])
             self.assertTrue(upnp_res["after"]["networkIds"])
 
             # Disabling UPnP sends only {"enable": False}; rollback restores wanPortIds + networkIds
-            upnp_off = unwrap_ok(call_tool(server, "set_upnp", {
+            upnp_off = unwrap_ok(call_confirmed(server, "set_upnp", {
                 "enable": False,
-                "dryRun": False,
-                "confirm": f"set_upnp:{client.site.site_id}",
             }))
             self.assertIs(upnp_off["after"]["enable"], False)
             rb_sid = Path(upnp_off["snapshot"]).name

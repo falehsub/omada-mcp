@@ -25,16 +25,21 @@ extend the same shape rather than punch a hole in it.
    comma-separated, exact names, no wildcards, no "all". A tool not in the list is refused
    with `-32003` *before* argument validation, so a prompt-injected model cannot even probe
    which writes exist.
-3. **Two-phase apply.** Every write tool takes `dryRun` (default **true**). `dryRun=true`
-   resolves the target, fetches current state, computes the diff, returns it, writes nothing.
-   `dryRun=false` requires `confirm` equal to `"<tool>:<target-id>"`, so a model cannot
-   "confirm" a target it did not read in the same session.
-4. **Snapshot before, verify after.** Persist the pre-write object (JSON, one file per
-   operation under `OMADA_SNAPSHOT_DIR`, default `~/.local/state/omada-mcp/snapshots`) and
-   return `before` in the result. After the write, **re-GET the object and diff the fields
-   you intended to change**. If the controller reports success and the object is unchanged,
-   the tool must return an error. This is not paranoia: `PATCH /controller/setting` accepts
-   `{"timeZone": ...}`, answers `errorCode: 0`, and silently discards it.
+3. **Two-phase apply.** Every write defaults to `dryRun=true`. A preview resolves the
+   target, fetches state, and returns a diff and an opaque `confirmToken`. Apply in the
+   same server session with the same intended arguments, `dryRun=false`, and `confirm`
+   set to that token. The server rechecks the preview against current state before applying.
+   Tokens expire after five minutes and a matching apply attempt consumes the token,
+   including an attempt that fails. Restarting the server invalidates outstanding tokens.
+   This binds the apply to the inspected change. Human approval remains a host control.
+4. **Snapshot before, verify after.** Write a scoped snapshot under `OMADA_SNAPSHOT_DIR`
+   before dispatch. Version 2 records the controller, site, and resource. Restores require
+   the original scope and current safety checks. `force` cannot change scope. Version 1
+   snapshots can be previewed only. Report `verified` when fresh read-back proves the
+   intended change, `accepted` for acknowledged actions or fields requiring independent
+   verification, and `uncertain` when an attempted write cannot be reconciled. Recovery
+   metadata includes the snapshot ID when available. If appending the audit fails after
+   apply, the result retains the known outcome and carries an audit warning.
 5. **No blind retries on writes.** The existing `-1600` retry is GET-only and must stay
    that way. A replayed POST creates a second object.
 6. **Annotations tell the truth.** `readOnlyHint: false` on all writes; `destructiveHint:
@@ -383,7 +388,7 @@ untested for writes; treat every row above as "unverified" there and re-probe wi
 Following isolated testing against Docker Omada Software Controller `v6.2.14.11`
 (`DockerLab`, zero home-controller mutations), the surface expanded to **20 read-only**
 and **31 opt-in write** tools (all remaining behind `OMADA_READ_ONLY=false`,
-`OMADA_WRITE_TOOLS`, `dryRun=true`, `confirm="<tool>:<target>"`, pre-write redaction,
+`OMADA_WRITE_TOOLS`, `dryRun=true`, a session-bound `confirmToken`, pre-write redaction,
 and read-back verification). Firmware upgrade stays unshipped pending a maintenance-window
 policy.
 
@@ -462,7 +467,7 @@ Section 1's invariants:
 
 The `v2.3.0` release expands the write control surface by 31 additional opt-in tools
 (**78 write tools total**; all fail closed behind `OMADA_READ_ONLY=false`,
-`OMADA_WRITE_TOOLS`, `dryRun=true` default, and `confirm="<tool>:<target>"`):
+`OMADA_WRITE_TOOLS`, `dryRun=true` default, and a session-bound `confirmToken`):
 
 - **Phase A — Diagnostics, Port/MAC groups & Schedules:**
   - Active network checks (`run_ping`, `run_traceroute`, `start_wan_speedtest`,

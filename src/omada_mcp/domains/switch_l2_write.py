@@ -18,10 +18,10 @@ from ._write_common import (
     _require_confirm,
     _resolve_by_id_or_name,
     _site,
-    _unwrap_rows,
 )
 from ._write_fetchers import _fetch_lan_profiles, _fetch_switch_lags, _omada_mac
-from .switch_write import _build_switch_port_patch
+from ._write_fetchers import _fetch_raw_switch_port as _fetch_raw_port
+from .switch_write import _build_switch_port_patch, _check_port_safety_guard
 
 _STP_MODE_MAP: dict[str, int] = {
     "0": 0,
@@ -57,18 +57,28 @@ def _parse_lag_type(raw: Any, dev_cap: Mapping[str, Any]) -> int:
     )
 
 
-def _fetch_raw_port(client: OmadaClient, site_id: str, dev_mac: str, port: int) -> dict[str, Any]:
-    try:
-        detail = client.api_result(f"sites/{site_id}/switches/{dev_mac}/ports/{port}")
-        if isinstance(detail, Mapping) and detail.get("port") is not None:
-            return dict(detail)
-    except OmadaError:
-        pass
-    rows = _unwrap_rows(client.api_result(f"sites/{site_id}/switches/{dev_mac}/ports"))
-    found = next((dict(r) for r in rows if as_int(r.get("port"), 0) == port), None)
-    if found is None:
-        raise OmadaError(f"port {port} was not found on switch {dev_mac}")
-    return found
+def _observed_ids(value: Any, member_key: str) -> list[int] | None:
+    """Normalize scalar IDs and controller objects without treating malformed lists as empty."""
+    if not isinstance(value, list):
+        return None
+    ids: list[int] = []
+    for item in value:
+        raw = item.get(member_key) if isinstance(item, Mapping) else item
+        if isinstance(raw, bool) or not isinstance(raw, (int, str)) or as_int(raw, 0) <= 0:
+            return None
+        ids.append(int(raw))
+    return sorted(ids)
+
+
+def _lag_configuration(row: Mapping[str, Any]) -> dict[str, Any]:
+    members = next((row[key] for key in ("ports", "portList", "memberPorts") if key in row), None)
+    return {
+        "lagId": as_int(row.get("lagId"), -1),
+        "name": row.get("name") if isinstance(row.get("name"), str) else None,
+        "lagType": as_int(row.get("lagType"), -1),
+        "ports": _observed_ids(members, "port"),
+        "profileId": row.get("profileId") if isinstance(row.get("profileId"), str) else None,
+    }
 
 
 def _assert_ports_safe_for_l2(
@@ -90,6 +100,8 @@ def _assert_ports_safe_for_l2(
         pinfo = by_port.get(pno)
         if pinfo is None:
             raise OmadaError(f"port {pno} does not exist on switch {norm_mac}")
+        if pinfo.get("safetyEvidenceComplete") is not True:
+            raise OmadaError(f"Refusing {action_label} on {norm_mac}: port, LAG, or topology inventory is incomplete")
         if pinfo.get("isUplink"):
             reasons.append(f"port {pno} is an uplink port")
         if pinfo.get("carriesController"):
@@ -146,18 +158,21 @@ def upsert_switch_lag(
         raise OmadaError(f"member count {len(clean_ports)} exceeds switch maxLagMember ({max_lag_mem})")
 
     ports_data = collect_switch_ports_data(client, site, sw, include_cable_test=False)
+    lags = _fetch_switch_lags(client, site, dev_mac, sw_detail=sw)
+    existing_lag = next((dict(r) for r in lags if as_int(r.get("lagId"), -1) == lagId), None)
+    before_lag = _lag_configuration(existing_lag) if existing_lag is not None else None
+    if before_lag is not None and before_lag["ports"] is None:
+        raise OmadaError(f"existing LAG {lagId} has incomplete member inventory")
+    affected_ports = sorted(set(clean_ports) | set(before_lag["ports"] if before_lag is not None else []))
     warnings: list[str] = []
     _assert_ports_safe_for_l2(
         norm_mac,
-        clean_ports,
+        affected_ports,
         ports_data,
         action_label="LAG configuration",
         allow_uplink=allowUplinkMutation,
         warnings=warnings,
     )
-
-    lags = _fetch_switch_lags(client, site, dev_mac, sw_detail=sw)
-    existing_lag = next((dict(r) for r in lags if as_int(r.get("lagId"), -1) == lagId), None)
 
     resolved_profile_id: str | None = None
     if profileId is not None or profileName is not None:
@@ -177,7 +192,9 @@ def upsert_switch_lag(
     for lg in lags:
         other_lag_id = as_int(lg.get("lagId"), -1)
         if other_lag_id != lagId:
-            other_ports = {as_int(x, 0) for x in (lg.get("ports") or []) if isinstance(x, (int, str))}
+            other_ports = _lag_configuration(lg)["ports"]
+            if other_ports is None:
+                raise OmadaError("cannot establish port ownership from incomplete LAG membership")
             for pno in clean_ports:
                 if pno in other_ports:
                     raise OmadaError(
@@ -205,9 +222,9 @@ def upsert_switch_lag(
         "ports": clean_ports,
         "profileId": profile_id_val,
     }
-    diff = _field_diff(deep_redact(existing_lag) if existing_lag else {}, after_summary, ["name", "lagType", "ports", "profileId"])
+    diff = _field_diff(before_lag or {}, after_summary, ["name", "lagType", "ports", "profileId"])
 
-    if existing_lag is not None and sorted(existing_lag.get("ports") or []) == sorted(clean_ports):
+    if before_lag is not None and before_lag["ports"] == clean_ports:
         endpoint = f"sites/{site.site_id}/switches/{dev_mac}/lags/{lagId}"
         method = "PATCH"
         payload = _build_switch_port_patch(raw_primary, name=lag_name, profile_id=profile_id_val)
@@ -227,7 +244,7 @@ def upsert_switch_lag(
             "arguments": {
                 "mac": norm_mac,
                 "lagId": lagId,
-                "ports": list(existing_lag.get("ports") or []),
+                "ports": before_lag["ports"] if before_lag is not None else [],
                 "lagType": existing_lag.get("lagType", 1),
                 "name": existing_lag.get("name"),
                 "allowUplinkMutation": allowUplinkMutation,
@@ -245,7 +262,7 @@ def upsert_switch_lag(
         return _dry_run_result(
             tool_name="upsert_switch_lag",
             target_id=target_id,
-            before=deep_redact(existing_lag) if existing_lag else None,
+            before=before_lag,
             after=after_summary,
             diff=diff,
             warnings=warnings,
@@ -256,22 +273,24 @@ def upsert_switch_lag(
         now_lags = _fetch_switch_lags(client, site, dev_mac)
         row = next((dict(r) for r in now_lags if as_int(r.get("lagId"), -1) == lagId), None)
         if row is not None:
-            return deep_redact(row)
+            return _lag_configuration(row)
         p_now = _fetch_raw_port(client, site.site_id, dev_mac, primary_port)
         if str(p_now.get("operation") or "").lower() == "aggregating":
             ls = as_mapping(p_now.get("lagSetting"))
             if as_int(ls.get("lagId"), -1) == lagId:
-                return deep_redact({
-                    "lagId": lagId,
-                    "name": lag_name,
-                    "lagType": ls.get("lagType", type_code),
-                    "ports": ls.get("ports") or clean_ports,
+                return _lag_configuration({
+                    **ls,
+                    "name": p_now.get("name"),
+                    "profileId": p_now.get("profileId"),
                 })
         return None
 
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
         if not isinstance(after_now, Mapping):
             return False, f"LAG {lagId} not found on switch {norm_mac} after write"
+        for key in ("lagId", "name", "lagType", "ports", "profileId"):
+            if after_now.get(key) != after_summary[key]:
+                return False, f"LAG {key} did not match requested configuration"
         return True, None
 
     write_res = client.write(
@@ -280,7 +299,7 @@ def upsert_switch_lag(
         data=payload,
         tool_name="upsert_switch_lag",
         target=target_id,
-        before=deep_redact(existing_lag) if existing_lag else None,
+        before=before_lag,
         snapshot_payload={"action": "update" if existing_lag else "create", "mac": dev_mac, "lagId": lagId, "lag": copy.deepcopy(existing_lag)},
         read_back=_read_back,
         verify_fn=_verify,
@@ -398,19 +417,18 @@ def update_switch_global_features(
     _require_confirm("update_switch_global_features", norm_mac, dryRun, confirm)
 
     is_es = bool(sw.get("es", False))
-    before_summary = {
-        "mac": norm_mac,
-        "stp": sw.get("stp"),
-        "priority": sw.get("priority"),
-        "helloTime": sw.get("helloTime"),
-        "maxAge": sw.get("maxAge"),
-        "forwardDelay": sw.get("forwardDelay"),
-        "txHoldCount": sw.get("txHoldCount"),
-        "maxHops": sw.get("maxHops"),
-        "loopbackDetectEnable": bool(sw.get("loopbackDetectEnable", False)),
-        "jumbo": sw.get("jumbo"),
-        "jumboEnable": sw.get("jumboEnable", bool(as_int(sw.get("jumbo"), 1518) > 1518)),
-    }
+
+    def _global_configuration(device: Mapping[str, Any]) -> dict[str, Any]:
+        keys = (
+            "stp", "priority", "helloTime", "maxAge", "forwardDelay", "txHoldCount",
+            "maxHops", "loopbackDetectEnable", "jumbo", "jumboEnable",
+        )
+        settings = {key: device[key] for key in keys if key in device}
+        if "jumboEnable" not in settings and settings.get("jumbo") is not None:
+            settings["jumboEnable"] = as_int(settings["jumbo"], 1518) > 1518
+        return {"mac": norm_mac, **settings}
+
+    before_summary = _global_configuration(sw)
 
     updates_general = any(v is not None for v in (jumboEnable, jumbo))
     updates_services = any(
@@ -463,6 +481,11 @@ def update_switch_global_features(
     jumbo_en = bool(before_summary.get("jumboEnable", False)) if jumboEnable is None else bool(jumboEnable)
     if jumbo is not None and jumboEnable is None:
         jumbo_en = jumbo_val > 1518
+    if updates_services and is_es and lb_val and stp_val != 0:
+        warnings.append(
+            "Easy Smart switch forces stp=0 (off) while loopbackDetectEnable=True; pass loopbackDetectEnable=False to enable STP."
+        )
+        stp_val = 0
 
     after_summary = {
         "mac": norm_mac,
@@ -509,6 +532,11 @@ def update_switch_global_features(
 
     snap_payload = {"mac": dev_mac, "es": is_es, "before": copy.deepcopy(before_summary), "raw": deep_redact(sw)}
     final_snap: str | None = None
+    after_live = before_summary
+
+    def _read_back() -> dict[str, Any]:
+        current = resolve_device_detail(client, site, dev_mac, expected_type="switch")
+        return _global_configuration(current)
 
     if updates_general:
         gen_ep = f"sites/{site.site_id}/switches/{'es/' if is_es else ''}{dev_mac}/config/general"
@@ -527,18 +555,17 @@ def update_switch_global_features(
             target=f"{norm_mac}:general",
             before=before_summary,
             snapshot_payload=snap_payload,
+            read_back=_read_back,
+            expect_keys={"jumbo": jumbo_val, "jumboEnable": jumbo_en},
             fields_changed=["jumbo", "jumboEnable"],
         )
         final_snap = wr_gen["snapshot"]
+        after_live = wr_gen["after"]
 
     if updates_services:
         svc_ep = f"sites/{site.site_id}/switches/{dev_mac}/config/services"
-        if is_es and lb_val and stp_val != 0:
-            warnings.append(
-                "Easy Smart switch forces stp=0 (off) while loopbackDetectEnable=True; pass loopbackDetectEnable=False to enable STP."
-            )
         svc_body: dict[str, Any] = {
-            "stp": 0 if (is_es and lb_val) else stp_val,
+            "stp": stp_val,
             "priority": prio_val,
             "helloTime": ht_val,
             "maxAge": ma_val,
@@ -549,32 +576,22 @@ def update_switch_global_features(
         }
         if not is_es and isinstance(sw.get("snmp"), Mapping):
             svc_body["snmp"] = copy.deepcopy(dict(sw["snmp"]))
+        expected_services = {key: value for key, value in svc_body.items() if key != "snmp"}
         wr_svc = client.write(
             svc_ep,
             method="PUT",
             data=svc_body,
             tool_name="update_switch_global_features",
             target=f"{norm_mac}:services",
-            before=before_summary,
+            before=after_live,
             snapshot_payload=snap_payload,
-            fields_changed=["stp", "loopbackDetectEnable"],
+            read_back=_read_back,
+            expect_keys=expected_services,
+            fields_changed=sorted(expected_services),
         )
         final_snap = wr_svc["snapshot"]
+        after_live = wr_svc["after"]
 
-    sw_after = resolve_device_detail(client, site, dev_mac, expected_type="switch")
-    after_live = {
-        "mac": norm_mac,
-        "stp": sw_after.get("stp"),
-        "priority": sw_after.get("priority"),
-        "helloTime": sw_after.get("helloTime"),
-        "maxAge": sw_after.get("maxAge"),
-        "forwardDelay": sw_after.get("forwardDelay"),
-        "txHoldCount": sw_after.get("txHoldCount"),
-        "maxHops": sw_after.get("maxHops"),
-        "loopbackDetectEnable": bool(sw_after.get("loopbackDetectEnable", False)),
-        "jumbo": sw_after.get("jumbo"),
-        "jumboEnable": sw_after.get("jumboEnable", bool(as_int(sw_after.get("jumbo"), 1518) > 1518)),
-    }
     return _committed_result(
         tool_name="update_switch_global_features",
         target_id=norm_mac,
@@ -611,7 +628,8 @@ def set_switch_port_mirror(
             raise OmadaError(f"mirroringPort {mirroringPort} cannot mirror itself")
         if p not in clean_sources:
             clean_sources.append(p)
-    clean_lags = [int(lid) for lid in (mirroredLags or []) if isinstance(lid, int) and not isinstance(lid, bool) and lid > 0]
+    clean_lags = sorted({int(lid) for lid in (mirroredLags or [])
+                         if isinstance(lid, int) and not isinstance(lid, bool) and lid > 0})
 
     site = _site(client)
     sw = resolve_device_detail(client, site, mac, expected_type="switch")
@@ -628,28 +646,35 @@ def set_switch_port_mirror(
     ports_data = collect_switch_ports_data(client, site, sw, include_cable_test=False)
     warnings: list[str] = []
     # Only configuring mirroring on the destination port isolates normal forwarding there.
-    check_ports = [mirroringPort] if (clean_sources or clean_lags) else []
-    if check_ports:
-        _assert_ports_safe_for_l2(
-            norm_mac,
-            check_ports,
-            ports_data,
-            action_label="enabling port mirroring analyzer mode",
-            allow_uplink=allowUplinkMutation,
+    if clean_sources or clean_lags:
+        info = next((p for p in ports_data.get("ports") or [] if p.get("port") == mirroringPort), None)
+        if info is None:
+            raise OmadaError(f"port {mirroringPort} does not exist on switch {norm_mac}")
+        _check_port_safety_guard(
+            info,
+            action="enable port mirroring on",
+            norm_mac=norm_mac,
+            port=mirroringPort,
+            allow_uplink_mutation=allowUplinkMutation,
             warnings=warnings,
         )
 
     raw_port = _fetch_raw_port(client, site.site_id, dev_mac, mirroringPort)
-    before_mirrored_lags = [
-        as_int(m.get("lagId"), 0) for m in (raw_port.get("mirroredLags") or []) if isinstance(m, Mapping)
-    ]
-    before_summary = {
-        "mac": norm_mac,
-        "mirroringPort": mirroringPort,
-        "operation": str(raw_port.get("operation") or "switching"),
-        "mirroredPorts": list(raw_port.get("mirroredPorts") or []),
-        "mirroredLags": before_mirrored_lags,
-    }
+
+    def _mirror_configuration(raw: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "mac": norm_mac,
+            "mirroringPort": mirroringPort,
+            "operation": raw.get("operation"),
+            "mirroredPorts": _observed_ids(raw.get("mirroredPorts", []), "port"),
+            "mirroredLags": _observed_ids(raw.get("mirroredLags", []), "lagId"),
+        }
+
+    before_summary = _mirror_configuration(raw_port)
+    if before_summary["operation"] == "mirroring" and any(
+        before_summary[key] is None for key in ("mirroredPorts", "mirroredLags")
+    ):
+        raise OmadaError("current switch mirror source configuration could not be established")
     target_op = "mirroring" if (clean_sources or clean_lags) else "switching"
     after_summary = {
         "mac": norm_mac,
@@ -691,24 +716,18 @@ def set_switch_port_mirror(
     endpoint = f"sites/{site.site_id}/switches/{dev_mac}/ports/{mirroringPort}"
 
     def _read_back() -> dict[str, Any]:
-        p_now = _fetch_raw_port(client, site.site_id, dev_mac, mirroringPort)
-        return {
-            "mac": norm_mac,
-            "mirroringPort": mirroringPort,
-            "operation": str(p_now.get("operation") or "switching"),
-            "mirroredPorts": list(p_now.get("mirroredPorts") or []),
-            "mirroredLags": [
-                as_int(m.get("lagId"), 0) for m in (p_now.get("mirroredLags") or []) if isinstance(m, Mapping)
-            ],
-        }
+        return _mirror_configuration(_fetch_raw_port(client, site.site_id, dev_mac, mirroringPort))
 
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
         if not isinstance(after_now, Mapping):
             return False, "mirror port read-back failed"
         if after_now.get("operation") != target_op:
             return False, f"expected operation={target_op!r}, got {after_now.get('operation')!r}"
-        if target_op == "mirroring" and sorted(after_now.get("mirroredPorts") or []) != sorted(clean_sources):
-            return False, "mirroredPorts did not persist cleanly"
+        if target_op == "mirroring":
+            if after_now.get("mirroredPorts") != sorted(clean_sources):
+                return False, "mirroredPorts did not persist cleanly"
+            if after_now.get("mirroredLags") != clean_lags:
+                return False, "mirroredLags did not persist cleanly"
         return True, None
 
     write_res = client.write(

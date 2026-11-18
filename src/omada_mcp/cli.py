@@ -54,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --doctor: emit machine-readable JSON output",
     )
     parser.add_argument(
+        "--share-safe", action="store_true",
+        help="with --doctor: emit JSON suitable for public compatibility reports",
+    )
+    parser.add_argument(
         "--show-config", action="store_true",
         help="print the resolved configuration with the password masked, then exit",
     )
@@ -136,10 +140,13 @@ def _sigterm_as_interrupt():
 
 def main(argv: list[str] | None = None) -> int:
     _configure_console()
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.share_safe and not args.doctor:
+        parser.error("--share-safe requires --doctor")
 
     if args.doctor:
-        return run_doctor(json_output=args.json)
+        return run_doctor(json_output=args.json, share_safe=args.share_safe)
 
     if args.list_tools:
         env_values = dict(parse_env_file(os.environ["OMADA_ENV_FILE"])) if os.environ.get("OMADA_ENV_FILE") else {}

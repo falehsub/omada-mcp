@@ -15,7 +15,7 @@ for p in (str(SRC), str(TESTS)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from write_harness import call_tool, make_write_env, unwrap_ok  # noqa: E402
+from write_harness import call_confirmed, call_tool, make_write_env, unwrap_ok  # noqa: E402
 
 
 class ClientAndDeviceOpsTests(unittest.TestCase):
@@ -35,11 +35,9 @@ class ClientAndDeviceOpsTests(unittest.TestCase):
                 "confirm": blk_dry["confirmToken"],
             }))
             self.assertIs(blk["after"]["blocked"], True)
-            unblk = unwrap_ok(call_tool(server, "set_client_blocked", {
+            unblk = unwrap_ok(call_confirmed(server, "set_client_blocked", {
                 "mac": "AA-BB-CC-11-11-01",
                 "blocked": False,
-                "dryRun": False,
-                "confirm": blk_dry["confirmToken"],
             }))
             self.assertIs(unblk["after"]["blocked"], False)
 
@@ -109,7 +107,7 @@ class Milestone2SwitchAndApTests(unittest.TestCase):
                 "linkSpeed": "1000m",
             }))
             self.assertTrue(dry["dryRun"])
-            self.assertEqual(dry["confirmToken"], "update_switch_port:aa:bb:cc:00:00:02:4")
+            self.assertGreaterEqual(len(dry["confirmToken"]), 32)
             applied = unwrap_ok(call_tool(server, "update_switch_port", {
                 "deviceMac": "sw-access",
                 "port": 4,

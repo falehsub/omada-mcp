@@ -13,9 +13,9 @@
 
 | Controller Family | Target `controllerVer` / Models | Expected Cookie | Known Shape Differences | What to Report |
 |---|---|---|---|---|
-| `software-5.x` | `5.13.30.8` / `5.15.24.19` | `TPOMADA_SESSIONID` | Core Web API v2 auth, `sites`, `devices`, `insight/clients`, and `setting/wlans` shapes implemented; legacy integer `privilege` and v5 `sourceFilter`/`destinationFilter`/`protocol` shapes covered in offline tests; `5.15.24.19` is configured in [the compat CI workflow](../.github/workflows/compat.yml) (scheduled/manual, awaiting first CI artifact run). | Run `omada-mcp --doctor --json` and attach CI/local summary if testing another 5.x build. |
-| `hardware-5.x` | OC200 / OC300 (v5.x) | `TPOMADA_SESSIONID` or `TPEAP_SESSIONID` | Older v5.x builds may issue `TPEAP_SESSIONID`, return `result.omadacId` in `/api/v2/login`, or wrap `devices` in `result.data`. All three are handled and covered against synthetic/fixture shapes in unit tests; awaiting direct live hardware capture. | Run `omada-mcp --doctor --json` and submit via the [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml) template. |
-| `hardware-6.x` | OC200 / OC300 / OC400 (v6.x) | `TPOMADA_SESSIONID` | Same Web API v2 family as `software-6.x`; `setting/wlans/{groupId}/ssids` expansion and `roleName` privilege shape supported; anonymized `ER7206 v2.20`, `ES220GMP v1.0`, and `EAP725-Wall(EU) v1.0` payloads verified in `tests/fixtures/` and `MockController`. | Run `omada-mcp --doctor --json` and submit via the [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml) template. |
+| `software-5.x` | `5.13.30.8` / `5.15.24.19` | `TPOMADA_SESSIONID` | Core Web API v2 auth, `sites`, `devices`, `insight/clients`, and `setting/wlans` shapes implemented; legacy integer `privilege` and v5 `sourceFilter`/`destinationFilter`/`protocol` shapes covered in offline tests; `5.15.24.19` is configured in [the compat CI workflow](../.github/workflows/compat.yml) (scheduled/manual, awaiting first CI artifact run). | Share `omada-mcp --doctor --json --share-safe` output for other 5.x builds. |
+| `hardware-5.x` | OC200 / OC300 (v5.x) | `TPOMADA_SESSIONID` or `TPEAP_SESSIONID` | Older v5.x builds may issue `TPEAP_SESSIONID`, return `result.omadacId` in `/api/v2/login`, or wrap `devices` in `result.data`. All three are handled and covered against synthetic/fixture shapes in unit tests; awaiting direct live hardware capture. | Submit a share-safe report through the [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml) template. |
+| `hardware-6.x` | OC200 / OC300 / OC400 (v6.x) | `TPOMADA_SESSIONID` | Same Web API v2 family as `software-6.x`; `setting/wlans/{groupId}/ssids` expansion and `roleName` privilege shape supported; anonymized `ER7206 v2.20`, `ES220GMP v1.0`, and `EAP725-Wall(EU) v1.0` payloads verified in `tests/fixtures/` and `MockController`. | Submit a share-safe report through the [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml) template. |
 
 ## Automated Compatibility CI & Fixture Captures
 
@@ -72,7 +72,7 @@ python scripts/read_selftest.py --env-file /path/to/isolated/viewer.env
 Run:
 
 ```bash
-omada-mcp --doctor --json
+omada-mcp --doctor --json --share-safe
 ```
 
-The JSON output strips your password, session token, and local `.env` filesystem paths (replacing them with origin labels like `OMADA_ENV_FILE`, `cwd`, `appdata`, `xdg`, or `environment`) while keeping `controller.controllerVer`, `controller.family`, and `controller.sessionCookie`. Open an issue with the [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml) form to add your build to the verified table.
+The share-safe JSON includes `"shareSafe": true`, controller firmware and family when recognized, the session cookie name, and phase statuses with generic troubleshooting hints. It omits account and site identities, controller URL and ID, local paths, and raw controller errors. Run `omada-mcp --doctor` locally for detailed troubleshooting. Open an issue with the [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml) form to add your build to the verified table.

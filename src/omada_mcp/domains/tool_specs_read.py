@@ -258,9 +258,8 @@ READ_TOOLS: list[Tool] = [
         name="get_config_snapshot",
         title="Get site configuration snapshot",
         description=(
-            "Read-only snapshot of LAN networks (both collection and /interface endpoints), "
-            "gateway ACLs, IP/port groups, PSK-redacted WLANs, devices, and optional "
-            "clients, dhcpReservations, portForwards, staticRoutes, mdnsRules, and services."
+            "Capture selected configuration sections for local drift comparisons. "
+            "sectionStatus reports ok, partial, unavailable, or skipped for each section."
         ),
         input_schema={
             "type": "object",
@@ -284,9 +283,8 @@ READ_TOOLS: list[Tool] = [
         name="diff_config_snapshots",
         title="Diff site configuration snapshots",
         description=(
-            "Deterministically compare two get_config_snapshot payloads (or baseline vs live site "
-            "when current is omitted), stripping volatile telemetry and reporting added, removed, "
-            "and changed objects across sections."
+            "Compare observed configuration in two snapshots or against the live site. "
+            "Report additions, removals, and changes on comparable sections, plus sectionsSkipped."
         ),
         input_schema={
             "type": "object",
@@ -491,8 +489,8 @@ READ_TOOLS: list[Tool] = [
         name="get_switch_ports",
         title="Get switch ports, PoE & diagnostics",
         description=(
-            "Inspect per-port link status, speed/duplex, PoE delivery & switch budget, active "
-            "port profile/VLANs, error/drop counters, cable test results, LAGs, uplinks, and controller port."
+            "Inspect switch port links, PoE, VLANs, counters, cable tests, LAGs, and uplinks. "
+            "collectionStatus reports partial or unavailable inventory, and unknown LAG membership is null."
         ),
         input_schema={
             "type": "object",
@@ -902,9 +900,9 @@ READ_TOOLS: list[Tool] = [
     ),
     Tool(
         name="list_hotspot_vouchers",
-        title="List hotspot voucher groups & codes",
+        title="List hotspot voucher metadata",
         description=(
-            "Read hotspot voucher groups and individual voucher statuses (category 'hotspot')."
+            "Read hotspot voucher groups and individual voucher statuses without redeemable codes (category 'hotspot')."
         ),
         input_schema={
             "type": "object",

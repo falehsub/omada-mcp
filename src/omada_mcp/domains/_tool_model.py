@@ -427,7 +427,7 @@ _WRITE_CONTROL_PROPS: dict[str, Any] = {
     },
     "confirm": {
         "type": "string",
-        "description": "Required '<tool>:<target>' when dryRun=false",
+        "description": "Fresh single-use confirmToken from the same session's preview, required when dryRun=false",
     },
 }
 

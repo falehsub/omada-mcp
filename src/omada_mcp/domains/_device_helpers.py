@@ -6,7 +6,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import urlparse
 
-from ..client import OmadaClient, OmadaError, SiteInfo, redact_secrets
+from .._projections import project_controller_row
+from ..client import OmadaClient, OmadaError, SiteInfo
 from ._common import (
     CHANNEL_WIDTH_LABELS,
     CHANNEL_WIDTH_TO_CODE,
@@ -22,6 +23,7 @@ from ._common import (
     is_device_online,
     normalize_mac,
     omada_mac,
+    pagination_status,
     try_api_result,
     try_paginate,
     unwrap_rows,
@@ -53,23 +55,25 @@ def _controller_host_from_config(client: OmadaClient) -> str | None:
 def _topology_downlinks_for_switch(
     topo_raw: Mapping[str, Any] | None,
     switch_mac_norm: str,
-) -> tuple[int | None, set[int]]:
-    """Extract (uplink_port, controller_hosting_ports) for a switch from topology-v2."""
+) -> tuple[int | None, set[int], bool]:
+    """Extract port roles and whether the topology actually contained the switch."""
     uplink_port: int | None = None
     controller_ports: set[int] = set()
+    switch_found = False
     if not isinstance(topo_raw, Mapping):
-        return uplink_port, controller_ports
+        return uplink_port, controller_ports, switch_found
 
     roots = topo_raw.get("topologyArray")
     if not isinstance(roots, list):
-        return uplink_port, controller_ports
+        return uplink_port, controller_ports, switch_found
 
     def walk(node: Any) -> None:
-        nonlocal uplink_port
+        nonlocal uplink_port, switch_found
         if not isinstance(node, Mapping):
             return
         node_mac = normalize_mac(str(node.get("mac") or ""))
         if node_mac == switch_mac_norm:
+            switch_found = True
             for key in ("wireUpLink", "wiredUpInfo", "switchUpLink", "upperPort"):
                 blk = node.get(key)
                 if isinstance(blk, Mapping):
@@ -99,7 +103,7 @@ def _topology_downlinks_for_switch(
 
     for root in roots:
         walk(root)
-    return uplink_port, controller_ports
+    return uplink_port, controller_ports, switch_found
 
 
 def _compact_switch_port(entry: Mapping[str, Any]) -> dict[str, Any]:
@@ -178,11 +182,13 @@ def collect_switch_ports_data(
     )
     sw = dict(detail_raw) if ok_detail and isinstance(detail_raw, Mapping) else dict(switch_dev)
 
-    ports_raw, _, ok_ports = try_paginate(
+    ports_raw, ports_meta, ok_ports = try_paginate(
         client, f"sites/{site.site_id}/switches/{mac_wire}/ports", warnings, label="switch ports",
     )
+    ports_status = pagination_status(ports_meta, available=ok_ports)
     if not ok_ports and isinstance(sw.get("ports"), list):
         ports_raw = [dict(p) for p in sw["ports"] if isinstance(p, Mapping)]
+        ports_status = "partial"
 
     counters_by_port: dict[int, dict[str, Any]] = {}
     if include_counters:
@@ -211,12 +217,13 @@ def collect_switch_ports_data(
                     poe_supported = True
 
     cable_ports_by_port: dict[int, dict[str, Any]] = {}
-    ct_ports_raw, ok_ct_ports = try_api_result(
+    ct_ports, ct_ports_meta, ok_ct_ports = try_paginate(
         client, f"sites/{site.site_id}/cable-test/switches/{mac_wire}/ports",
         warnings, label="switch port downlinks",
     )
+    downlinks_status = pagination_status(ct_ports_meta, available=ok_ct_ports)
     if ok_ct_ports:
-        for row in unwrap_rows(ct_ports_raw):
+        for row in ct_ports:
             pno = as_int(row.get("port"), -1)
             if pno >= 0:
                 cable_ports_by_port[pno] = dict(row)
@@ -234,41 +241,69 @@ def collect_switch_ports_data(
             for row in unwrap_rows(ct_full.get("data") or []):
                 pno = as_int(row.get("port"), -1)
                 if pno >= 0:
-                    cable_results_by_port[pno] = redact_secrets(dict(row))
+                    cable_results_by_port[pno] = project_controller_row("switchCableTest", row)
 
-    lags_raw, ok_lags = try_api_result(
+    lag_groups, lag_meta, ok_lags = try_paginate(
         client, f"sites/{site.site_id}/switches/{mac_wire}/lags", warnings, label="switch LAGs",
     )
-    lag_groups = unwrap_rows(lags_raw) if ok_lags else []
-    lag_port_map: dict[int, Any] = {}
-    for lg in lag_groups:
-        lid = lg.get("lagId") or lg.get("id") or lg.get("name")
-        for member in lg.get("ports") or lg.get("portList") or lg.get("memberPorts") or []:
-            mp = member.get("port") if isinstance(member, Mapping) else member
-            if mp is not None and str(mp).isdigit():
-                lag_port_map[int(mp)] = lid
-
-    insight_detail_raw, ok_id = try_api_result(
+    lag_status = pagination_status(lag_meta, available=ok_lags)
+    insight_rows, insight_meta, ok_id = try_paginate(
         client, f"sites/{site.site_id}/insight/switch/detail", warnings, label="switch insight detail",
     )
     insight_uplink_port: int | None = None
     if ok_id:
-        for item in unwrap_rows(insight_detail_raw):
+        for item in insight_rows:
             if normalize_mac(str(item.get("mac") or "")) == mac_norm:
                 up_blk = item.get("uplink")
                 if isinstance(up_blk, Mapping) and up_blk.get("port") is not None:
                     insight_uplink_port = as_int(up_blk.get("port"), -1)
-                if not lag_groups and isinstance(item.get("lags"), list):
-                    lag_groups = [dict(x) for x in item["lags"] if isinstance(x, Mapping)]
+                fallback_lags = item.get("lags")
+                if lag_status != "complete" and isinstance(fallback_lags, list):
+                    lag_groups = [dict(row) for row in fallback_lags if isinstance(row, Mapping)]
+                    lag_status = pagination_status(insight_meta) if len(lag_groups) == len(fallback_lags) else "partial"
+                break
+
+    lag_port_map: dict[int, Any] = {}
+    projected_lags: list[dict[str, Any]] = []
+    for group in lag_groups:
+        lid = next((group[key] for key in ("lagId", "id", "name")
+                    if isinstance(group.get(key), (int, str)) and group[key] != ""), None)
+        members = next((group[key] for key in ("ports", "portList", "memberPorts") if key in group), None)
+        if lid is None or not isinstance(members, list):
+            lag_status = "partial"
+            continue
+        ports = []
+        for member in members:
+            value = member.get("port") if isinstance(member, Mapping) else member
+            port = as_int(value, -1)
+            if port <= 0:
+                lag_status = "partial"
+                continue
+            ports.append(port)
+            lag_port_map[port] = lid
+        projected_lags.append({
+            **{key: group[key] for key in ("lagId", "id", "name", "lagType", "type")
+               if isinstance(group.get(key), (int, str))},
+            "ports": ports,
+        })
 
     topo_uplink_port: int | None = None
     topo_controller_ports: set[int] = set()
+    switch_in_topology = False
+    topology_status = "unavailable"
     if include_topology:
         topo_raw, ok_topo = try_api_result(
             client, f"sites/{site.site_id}/topology-v2", warnings, label="topology-v2",
         )
-        if ok_topo and isinstance(topo_raw, Mapping):
-            topo_uplink_port, topo_controller_ports = _topology_downlinks_for_switch(topo_raw, mac_norm)
+        if not ok_topo:
+            topo_raw, ok_topo = try_api_result(
+                client, f"sites/{site.site_id}/topology", warnings, label="legacy topology",
+            )
+        if ok_topo:
+            topo_uplink_port, topo_controller_ports, switch_in_topology = _topology_downlinks_for_switch(
+                as_mapping(topo_raw), mac_norm,
+            )
+            topology_status = "complete" if switch_in_topology else "partial"
 
     controller_host = _controller_host_from_config(client)
     stat_downlinks_by_port: dict[int, dict[str, Any]] = {}
@@ -283,9 +318,10 @@ def collect_switch_ports_data(
                     stat_downlinks_by_port[pno] = dict(sp)
 
     profiles_by_id: dict[str, str] = {}
-    prof_rows, _, ok_prof = try_paginate(
+    prof_rows, prof_meta, ok_prof = try_paginate(
         client, f"sites/{site.site_id}/setting/lan/profiles", warnings, label="port profiles",
     )
+    profiles_status = pagination_status(prof_meta, available=ok_prof)
     if ok_prof:
         for pr in prof_rows:
             pid = str(pr.get("id") or "")
@@ -318,8 +354,16 @@ def collect_switch_ports_data(
 
         agg_list = raw_p.get("allAggregatingPorts") or []
         op_str = str(raw_p.get("operation") or stat_row.get("operation") or "switching")
-        lag_id = lag_port_map.get(pno) or raw_p.get("lagId")
-        is_lag = (op_str.lower() == "aggregating") or bool(agg_list) or (lag_id is not None)
+        lag_id = lag_port_map.get(pno, raw_p.get("lagId"))
+        known_lag_member = (
+            op_str.lower() == "aggregating" or bool(agg_list) or lag_id is not None
+        )
+        is_lag = True if known_lag_member else (False if lag_status == "complete" else None)
+        topology_for_port = switch_in_topology or (
+            downlinks_status == "complete"
+            and isinstance(ct_row.get("downlinkDevices"), list)
+            and "isUpperPort" in ct_row
+        )
 
         downlinks: list[dict[str, Any]] = []
         raw_dl = ct_row.get("downlinkDevices")
@@ -416,6 +460,7 @@ def collect_switch_ports_data(
             "stpDiscarding": bool(ps.get("stpDiscarding", False)),
             "isUplink": is_uplink,
             "isLagMember": is_lag,
+            "safetyEvidenceComplete": ports_status == "complete" and lag_status == "complete" and topology_for_port,
             "lagId": lag_id,
             "carriesController": carries_controller,
             "poeSupported": port_poe_supported,
@@ -468,7 +513,11 @@ def collect_switch_ports_data(
             "usedPercent": used_pct,
         },
         "uplinkPorts": sorted(uplink_ports),
-        "lagGroups": lag_groups,
+        "lagGroups": projected_lags,
+        "collectionStatus": {
+            "ports": ports_status, "lags": lag_status, "portProfiles": profiles_status,
+            "topology": topology_status, "portDownlinks": downlinks_status,
+        },
         "cableTestSupported": None if cable_test_supported is None else bool(cable_test_supported),
         "cableTestStatus": cable_test_status,
         "ports": out_ports,

@@ -9,10 +9,11 @@ import os
 import re
 import time
 import urllib.parse
+from collections.abc import Iterator
 from typing import Any
 
 from ..client import OmadaClient, OmadaError
-from ._common import as_int, deep_redact
+from ._common import as_int, deep_redact, require_complete_collection
 from ._write_common import (
     _committed_result,
     _dry_run_result,
@@ -20,6 +21,7 @@ from ._write_common import (
     _require_confirm,
     _site,
 )
+from .fleet_vpn_read import _project_hotspot_row
 
 _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _VALID_RETENTION_DAYS = frozenset({-1, 0, 7, 30, 60, 90, 180, 365})
@@ -82,7 +84,10 @@ def export_controller_backup(
     _require_confirm("export_controller_backup", target_id, dryRun, confirm)
 
     backup_dir = client._snapshot_dir() / "backups"
-    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = (
+        "<utc-timestamp>" if dryRun else
+        datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    )
     out_name = target_id if fileName else f"omada-backup-{stamp}.cfg"
     out_path = backup_dir / out_name
 
@@ -141,14 +146,18 @@ def export_controller_backup(
         target_id,
         {"path": str(final_path), "bytes": len(raw_bytes), "sha256": digest, "mode": mode},
     )
-    client._append_audit(
-        tool_name="export_controller_backup",
-        target=target_id,
-        snapshot_id=snap_id,
-        fields_changed=["exported"],
-        result="verified",
-        verified=True,
-    )
+    warnings: list[str] = []
+    try:
+        client._append_audit(
+            tool_name="export_controller_backup",
+            target=target_id,
+            snapshot_id=snap_id,
+            fields_changed=["exported"],
+            result="verified",
+            verified=True,
+        )
+    except OSError:
+        warnings.append("Backup file exported and verified, but the write audit could not be saved.")
     after_committed = {
         "mode": mode,
         "outputPath": str(final_path),
@@ -162,7 +171,7 @@ def export_controller_backup(
         after=after_committed,
         diff=_field_diff(before_state, after_committed),
         snapshot=snap_id,
-        warnings=[],
+        warnings=warnings,
         rollback=None,
     )
 
@@ -170,8 +179,22 @@ def export_controller_backup(
 # -- Hotspot voucher CRUD ----------------------------------------------------
 
 
-def _fetch_voucher_groups(client: OmadaClient, site_id: str) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"hotspot/sites/{site_id}/voucherGroups")
+@contextlib.contextmanager
+def _hotspot_request(action: str) -> Iterator[None]:
+    """Keep controller-provided error text out of voucher tool responses."""
+    try:
+        yield
+    except OmadaError as exc:
+        code = exc.code if type(exc.code) is int else None
+        suffix = f" (controller code {code})" if code is not None else ""
+        safe_error = OmadaError(f"could not {action}{suffix}", code=code)
+        safe_error.write_status = exc.write_status
+        raise safe_error from None
+
+
+def _fetch_hotspot_rows(client: OmadaClient, endpoint: str) -> list[dict[str, Any]]:
+    with _hotspot_request("read hotspot voucher metadata"):
+        rows, _ = require_complete_collection(client, endpoint)
     return rows
 
 
@@ -261,34 +284,34 @@ def create_hotspot_vouchers(
             rollback=rollback,
         )
 
-    res = client.write(
-        f"hotspot/sites/{site.site_id}/voucherGroups",
-        "POST",
-        data=payload,
-        expect_keys={"name": clean_name},
-        tool_name="create_hotspot_vouchers",
-        target=clean_name,
-        before={},
-        snapshot_payload={"siteId": site.site_id, "created": True, "groupName": clean_name},
-        read_back=lambda: next(
-            (
-                dict(r)
-                for r in _fetch_voucher_groups(client, site.site_id)
-                if str(r.get("name") or "").strip().lower() == clean_name.lower()
+    endpoint = f"hotspot/sites/{site.site_id}/voucherGroups"
+    with _hotspot_request("create a hotspot voucher group"):
+        res = client.write(
+            endpoint,
+            "POST",
+            data=payload,
+            expect_keys={"name": clean_name},
+            tool_name="create_hotspot_vouchers",
+            target=clean_name,
+            before={},
+            snapshot_payload={"siteId": site.site_id, "created": True, "groupName": clean_name},
+            read_back=lambda: next(
+                (r for r in _fetch_hotspot_rows(client, endpoint)
+                 if str(r.get("name") or "").strip().lower() == clean_name.lower()),
+                {},
             ),
-            {},
-        ),
-        fields_changed=["name", "amount", "duration"],
-    )
-    after_safe = deep_redact(res["after"])
-    if isinstance(after_safe, dict) and after_safe.get("id"):
+            fields_changed=["name", "amount", "duration"],
+        )
+    after_safe = _project_hotspot_row(res["after"], group=True)
+    group_id = str(after_safe.get("id") or clean_name)
+    if after_safe.get("id"):
         rollback = {
             "tool": "revoke_hotspot_voucher",
-            "arguments": {"target": str(after_safe["id"]), "targetType": "group"},
+            "arguments": {"target": group_id, "targetType": "group"},
         }
     return _committed_result(
         tool_name="create_hotspot_vouchers",
-        target_id=str(after_safe.get("id") if isinstance(after_safe, dict) and after_safe.get("id") else clean_name),
+        target_id=group_id,
         before={},
         after=after_safe,
         diff=diff,
@@ -314,54 +337,30 @@ def revoke_hotspot_voucher(
     if not needle:
         raise OmadaError("target ID, name, or voucher code is required")
 
-    if kind == "group":
-        rows = _fetch_voucher_groups(client, site.site_id)
-        found = next(
-            (
-                dict(r)
-                for r in rows
-                if str(r.get("id") or "") == needle
-                or str(r.get("name") or "").strip().lower() == needle.lower()
-            ),
-            None,
-        )
-        if not found:
-            raise OmadaError(f"voucher group {needle!r} not found")
-        tid = str(found["id"])
-        endpoint = f"hotspot/sites/{site.site_id}/voucherGroups/{urllib.parse.quote(tid)}"
+    group = kind == "group"
+    collection = f"hotspot/sites/{site.site_id}/{'voucherGroups' if group else 'vouchers'}"
+    rows = _fetch_hotspot_rows(client, collection)
+    matches = [row for row in rows if str(row.get("id", "")) == needle]
+    if not matches:
+        if group:
+            matches = [row for row in rows if str(row.get("name") or "").strip().casefold() == needle.casefold()]
+        else:
+            matches = [row for row in rows if str(row.get("code") or "") == needle]
+    if not matches:
+        raise OmadaError(f"hotspot {kind} not found")
+    if len(matches) != 1:
+        raise OmadaError(f"more than one hotspot {kind} matches", hint="use a unique ID")
+    before_safe = _project_hotspot_row(matches[0], group=group)
+    tid = str(before_safe.get("id", ""))
+    if not tid:
+        raise OmadaError(f"hotspot {kind} has no usable non-credential ID")
+    endpoint = f"{collection}/{urllib.parse.quote(tid, safe='')}"
 
-        def _read_back() -> dict[str, Any]:
-            return next(
-                (dict(r) for r in _fetch_voucher_groups(client, site.site_id) if str(r.get("id")) == tid),
-                {},
-            )
-    else:
-        rows, _ = client.paginate(f"hotspot/sites/{site.site_id}/vouchers")
-        found = next(
-            (
-                dict(r)
-                for r in rows
-                if str(r.get("id") or "") == needle or str(r.get("code") or "") == needle
-            ),
-            None,
-        )
-        if not found:
-            raise OmadaError(f"voucher {needle!r} not found")
-        tid = str(found["id"])
-        endpoint = f"hotspot/sites/{site.site_id}/vouchers/{urllib.parse.quote(tid)}"
-
-        def _read_back() -> dict[str, Any]:
-            return next(
-                (
-                    dict(r)
-                    for r in client.paginate(f"hotspot/sites/{site.site_id}/vouchers")[0]
-                    if str(r.get("id")) == tid
-                ),
-                {},
-            )
+    def _read_back() -> dict[str, Any]:
+        rows_after = _fetch_hotspot_rows(client, collection)
+        return {"id": tid} if any(str(row.get("id")) == tid for row in rows_after) else {}
 
     _require_confirm("revoke_hotspot_voucher", tid, dryRun, confirm)
-    before_safe = deep_redact(found)
     diff = _field_diff(before_safe, {})
     if dryRun:
         return _dry_run_result(
@@ -374,19 +373,20 @@ def revoke_hotspot_voucher(
             rollback=None,
         )
 
-    res = client.write(
-        endpoint,
-        "DELETE",
-        tool_name="revoke_hotspot_voucher",
-        target=tid,
-        before=before_safe,
-        snapshot_payload={"siteId": site.site_id, "targetType": kind, "deleted": before_safe},
-        read_back=_read_back,
-        verify_fn=lambda _req, after: (
-            (False, f"{kind} {tid} still present after DELETE") if after else (True, None)
-        ),
-        fields_changed=["revoked"],
-    )
+    with _hotspot_request(f"revoke a hotspot {kind}"):
+        res = client.write(
+            endpoint,
+            "DELETE",
+            tool_name="revoke_hotspot_voucher",
+            target=tid,
+            before=before_safe,
+            snapshot_payload={"siteId": site.site_id, "targetType": kind, "deleted": before_safe},
+            read_back=_read_back,
+            verify_fn=lambda _req, after: (
+                (False, f"{kind} {tid} still present after DELETE") if after else (True, None)
+            ),
+            fields_changed=["revoked"],
+        )
     return _committed_result(
         tool_name="revoke_hotspot_voucher",
         target_id=tid,

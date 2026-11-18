@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..client import OmadaClient, OmadaError
+from ._common import as_int
 from ._write_common import (
     _committed_result,
     _delete_entity,
@@ -174,6 +175,20 @@ def _swap_rule_group_id(rule: Mapping[str, Any], old_id: str, new_id: str) -> di
     return updated
 
 
+def _verify_rule_references(expected: Mapping[str, Any], actual: Any) -> tuple[bool, str | None]:
+    if not isinstance(actual, Mapping):
+        return False, "ACL rule missing on read-back"
+    for endpoint in ("source", "destination"):
+        type_key = f"{endpoint}Type"
+        ids_key = f"{endpoint}Ids"
+        expected_type = as_int(expected.get(type_key), -1)
+        if as_int(actual.get(type_key), -1) != expected_type:
+            return False, f"ACL {type_key} changed during IP group replacement"
+        if sorted(map(str, actual.get(ids_key) or [])) != sorted(map(str, expected.get(ids_key) or [])):
+            return False, f"ACL {ids_key} did not preserve all intended references"
+    return True, None
+
+
 def replace_ip_group(
     client: OmadaClient,
     group: str,
@@ -317,7 +332,7 @@ def replace_ip_group(
 
         def _verify_created(_b: Any, groups_now: Any) -> tuple[bool, str | None]:
             found = next((g for g in groups_now if str(g.get("name")) == gname), None)
-            if found is None:
+            if found is None or not _group_id(found):
                 return False, f"group {gname!r} missing after POST"
             if _ip_list_canonical(found.get("ipList") or []) != pairs:
                 return False, f"group {gname!r} ipList mismatch after POST"
@@ -325,7 +340,9 @@ def replace_ip_group(
 
         def _reauth_create() -> tuple[bool, dict[str, Any] | None, Any]:
             groups_now = _read_ip_groups()
-            ok, _ = _verify_created(None, groups_now)
+            ok, reason = _verify_created(None, groups_now)
+            if not ok and any(str(group.get("name")) == gname for group in groups_now):
+                raise OmadaError(reason or f"group {gname!r} changed during session recovery")
             return ok, None, None
 
         res = client.write(
@@ -356,25 +373,17 @@ def replace_ip_group(
             return next((r for r in rules_now if str(r.get("id")) == rid), None)
 
         def _verify_rule(_b: Any, after_rule: Any) -> tuple[bool, str | None]:
-            if not isinstance(after_rule, Mapping):
-                return False, f"ACL rule {rid} missing on read-back"
-            if int(rule.get("sourceType", -1)) == 1 and from_id in [str(x) for x in (rule.get("sourceIds") or [])]:
-                sids = [str(x) for x in (after_rule.get("sourceIds") or [])]
-                if to_id not in sids or from_id in sids:
-                    return False, f"ACL rule {rid} sourceIds={sids!r} did not swap {from_id} -> {to_id}"
-            if int(rule.get("destinationType", -1)) == 1 and from_id in [str(x) for x in (rule.get("destinationIds") or [])]:
-                dids = [str(x) for x in (after_rule.get("destinationIds") or [])]
-                if to_id not in dids or from_id in dids:
-                    return False, f"ACL rule {rid} destinationIds={dids!r} did not swap {from_id} -> {to_id}"
-            return True, None
+            return _verify_rule_references(patched_rule, after_rule)
 
         def _reauth_rule() -> tuple[bool, dict[str, Any] | None, Any]:
             fresh = _read_rule()
             if fresh is None:
-                return False, None, None
+                raise OmadaError(f"ACL rule {rid} disappeared during IP group replacement")
             ok, _ = _verify_rule(rule, fresh)
             if ok:
                 return True, None, None
+            if not _verify_rule_references(rule, fresh)[0]:
+                raise OmadaError(f"ACL rule {rid} references changed during session recovery")
             return False, _swap_rule_group_id(fresh, from_id, to_id), fresh
 
         res = client.write(
@@ -415,11 +424,28 @@ def replace_ip_group(
             for rule in ref_rules:
                 # Re-fetch rule with tmp_id so full object reflects live rule state.
                 _, live_acls = _fetch_acls(client, site)
-                live_rule = next((r for r in live_acls if str(r.get("id")) == str(rule["id"])), rule)
+                live_rule = next((r for r in live_acls if str(r.get("id")) == str(rule["id"])), None)
+                if live_rule is None:
+                    raise OmadaError(f"referencing ACL rule {rule['id']} disappeared during replacement")
+                expected_temp = _swap_rule_group_id(rule, old_id, tmp_id)
+                ok, reason = _verify_rule_references(expected_temp, live_rule)
+                if not ok:
+                    raise OmadaError(f"ACL rule {rule['id']} changed during replacement: {reason}")
                 _repoint_rule(live_rule, tmp_id, new_id, "repoint_acls_to_new")
             _delete_group(tmp_id, "delete_temp_group", {"tmpGroup": tmp_group, "newId": new_id})
+
+        final_group = next((g for g in _read_ip_groups() if _group_id(g) == new_id), None)
+        if not new_id or final_group is None or _ip_list_canonical(final_group.get("ipList") or []) != expected_new_pairs:
+            raise OmadaError("final IP group verification failed after replace_ip_group")
+        if ref_rules:
+            _, final_acls = _fetch_acls(client, site)
+            for rule in ref_rules:
+                live = next((r for r in final_acls if str(r.get("id")) == str(rule["id"])), None)
+                ok, reason = _verify_rule_references(_swap_rule_group_id(rule, old_id, new_id), live)
+                if not ok:
+                    raise OmadaError(f"ACL rule {rule['id']} did not retain intended references after the swap: {reason}")
     except OmadaError as exc:
-        raise OmadaError(
+        failure = OmadaError(
             f"replace_ip_group failed mid-operation after {len(completed)} step(s): {exc.message}",
             code=exc.code,
             hint=(
@@ -428,22 +454,11 @@ def replace_ip_group(
                 f"snapshots={snapshots}; inspect live groups and ACL rules before recovering"
             ),
             endpoint=exc.endpoint,
-        ) from None
-
-    # Final verification of the recreated group and any referencing ACLs.
-    final_groups = _read_ip_groups()
-    final_group = next((g for g in final_groups if _group_id(g) == new_id), None)
-    if final_group is None or _ip_list_canonical(final_group.get("ipList") or []) != expected_new_pairs:
-        raise OmadaError("final IP group verification failed after replace_ip_group")
-    if ref_rules:
-        _, final_acls = _fetch_acls(client, site)
-        for rule in ref_rules:
-            live = next((r for r in final_acls if str(r.get("id")) == str(rule["id"])), None)
-            if live is None:
-                raise OmadaError(f"referencing ACL rule {rule.get('id')} missing after swap")
-            if new_id not in [str(x) for x in (live.get("sourceIds") or [])] and \
-                    new_id not in [str(x) for x in (live.get("destinationIds") or [])]:
-                raise OmadaError(f"ACL rule {rule.get('id')} was not re-pointed to new group {new_id}")
+        )
+        failure.write_status = exc.write_status
+        if failure.write_status is None and snapshots:
+            failure.write_status = {"outcome": "uncertain", "verified": False, "snapshot": snapshots[-1]}
+        raise failure from None
 
     committed_rollback = (
         {

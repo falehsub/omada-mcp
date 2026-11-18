@@ -545,12 +545,13 @@ def set_upnp(
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
         if not isinstance(after_now, Mapping):
             return False, "UPnP read-back failed"
-        if bool(after_now.get("enable")) != desired:
-            return False, f"UPnP enable expected {desired!r}, got {after_now.get('enable')!r}"
+        matched, reason = _match_fields(after_now, {"enable": desired})
+        if not matched:
+            return False, reason
         if desired:
-            if isinstance(after_now.get("wanPortIds"), list) and set(map(str, after_now["wanPortIds"])) != set(put_payload["wanPortIds"]):
+            if not isinstance(after_now.get("wanPortIds"), list) or set(map(str, after_now["wanPortIds"])) != set(put_payload["wanPortIds"]):
                 return False, f"UPnP wanPortIds mismatch on read-back: {after_now.get('wanPortIds')!r}"
-            if isinstance(after_now.get("networkIds"), list) and set(map(str, after_now["networkIds"])) != set(put_payload["networkIds"]):
+            if not isinstance(after_now.get("networkIds"), list) or set(map(str, after_now["networkIds"])) != set(put_payload["networkIds"]):
                 return False, f"UPnP networkIds mismatch on read-back: {after_now.get('networkIds')!r}"
         return True, None
 

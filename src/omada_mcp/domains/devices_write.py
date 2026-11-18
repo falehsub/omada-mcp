@@ -138,9 +138,7 @@ def update_device(
         def _verify_loc(_b: Any, a: Any) -> tuple[bool, str | None]:
             if not isinstance(a, Mapping):
                 return False, f"device {norm_mac} missing on read-back"
-            if "locateEnable" in a and bool(a["locateEnable"]) != loc_val:
-                return False, f"locateEnable expected {loc_val!r}, got {a.get('locateEnable')!r}"
-            return True, None
+            return _match_fields(a, {"locateEnable": loc_val})
 
         last_res = client.write(
             f"sites/{site.site_id}/cmd/devices/{dev_mac}/locate",
@@ -382,6 +380,10 @@ def update_ap_radio(
             return False, f"{rs_key}.channel expected {target_wire_channel!r}, got {tgt.get('channel')!r}"
         if channelWidth is not None and str(tgt.get("channelWidthCode")) != str(validated["channelWidthCode"]):
             return False, f"{rs_key}.channelWidth expected {validated['channelWidthCode']!r}, got {tgt.get('channelWidthCode')!r}"
+        if txPowerLevel is not None and tgt.get("txPowerLevel") != after_view["txPowerLevel"]:
+            return False, f"{rs_key}.txPowerLevel did not match the intended setting"
+        if txPower is not None and as_int(tgt.get("txPower"), -1) != txPower:
+            return False, f"{rs_key}.txPower did not match the intended setting"
         # Verify sibling bands were not altered or wiped.
         sib_now = after_now.get("siblings") or {}
         for sk, sb_raw in sibling_before.items():

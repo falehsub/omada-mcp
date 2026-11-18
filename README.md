@@ -37,7 +37,7 @@ PASS write    disabled (OMADA_WRITE_TOOLS is empty; read-only tools only)
 Ready: `omada-mcp` will serve 54 read-only tools on stdio.
 ```
 
-Add `--json` (`omada-mcp --doctor --json`) for machine-readable output validated against [`schemas/doctor.schema.json`](schemas/doctor.schema.json). JSON output redacts local `.env` and `OMADA_CA_BUNDLE` filesystem paths to origin labels (`OMADA_ENV_FILE`, `cwd`, `appdata`, `xdg`, `environment`) so reports are safe to paste into issues.
+Use `omada-mcp --doctor --json` for local automation. For public compatibility reports, run `omada-mcp --doctor --json --share-safe`. The share-safe report uses fixed diagnostic codes and omits controller addresses, account names, site identifiers, and local file paths. Both formats follow [`schemas/doctor.schema.json`](schemas/doctor.schema.json).
 
 ---
 
@@ -344,7 +344,7 @@ Full generated parameter & safety reference across all 132 tools: [`docs/tools-r
 
 ### Opt-in write tools (`OMADA_READ_ONLY=false` + `OMADA_WRITE_TOOLS`)
 
-Every write tool defaults `dryRun=true`, captures a pre-mutation JSON snapshot under `OMADA_SNAPSHOT_DIR`, requires `confirm="<tool>:<target>"` when `dryRun=false`, verifies state on read-back, and never auto-retries on `-1600`.
+Every write tool defaults to `dryRun=true`. Pass its fresh `confirmToken` as `confirm` when applying with `dryRun=false`. A preview token expires after five minutes, is valid only in the same server session, and binds the intended change to the resolved target and observed state. Apply results distinguish controller acceptance from verified read-back. Pre-mutation snapshots are scoped to the controller and site.
 
 | Category | Tools | Behaviour & Safety |
 |---|---|---|
@@ -450,7 +450,7 @@ docker run --rm -p 9108:9108 --env-file ~/.config/omada-mcp/.env omada-mcp --exp
 |---|---|
 | `OMADA_READ_ONLY=true` | Refuses any tool not declared read-only (`-32003`), before argument validation or transport. |
 | `OMADA_WRITE_TOOLS` allowlist | Defaults empty. Wildcards and `all` are rejected; write tools remain hidden and return `-32003` unless explicitly named. |
-| Two-phase apply (`dryRun` / `confirm`) | Every write defaults `dryRun=true` (zero writes; returns diff + `confirmToken`). Applying requires boolean `dryRun=false` and exact `confirm="<tool>:<target-id>"`. |
+| Two-phase apply (`dryRun` / `confirm`) | Preview returns a diff and a single-use `confirmToken`. Apply with `dryRun=false` and the token from that preview. |
 | Snapshot before & verify after | Saves pre-write JSON snapshot + `audit.jsonl` record (`0700`/`0600` on POSIX), re-reads state afterwards, and fails on silent controller no-ops or collateral field drift. |
 | Anti-stranding guards | Refuses VLAN isolation, DHCP pool overlaps, or deny ACL rules that isolate/conflict with controller IP, gateway, device IPs, or `OMADA_MANAGEMENT_CIDRS`. |
 | Credential handling | Password only ever rendered as `set (N chars)`; tokens never logged; stdout is reserved for JSON-RPC, diagnostics go to stderr. |
@@ -504,11 +504,11 @@ See [`docs/compatibility.md`](docs/compatibility.md) for the full compatibility 
   Viewer `-1007 -> insight/clients` fallback). Switch/AP/client actions are covered across
   250 offline tests against anonymized hardware fixtures and the stateful `MockController`.
 * **Software controller v5.x** — expected (v5.13.30.8 core auth/list shapes
-  supported; awaiting a `--doctor --json` capture via the issue template).
+  supported; awaiting a share-safe doctor capture via the issue template).
 * **OC200 / OC300 hardware & `TPEAP_SESSIONID` builds** — expected (`--doctor`
   detects both `TPOMADA_SESSIONID` and `TPEAP_SESSIONID`, handles legacy
   `result.omadacId` login shapes, and reports `hardware-5.x` / `hardware-6.x`).
-  Run `omada-mcp --doctor --json` and submit a
+  Run `omada-mcp --doctor --json --share-safe` and submit a
   [Controller Compatibility Report](https://github.com/falehsub/omada-mcp/issues/new?template=controller-report.yml).
 
 ## Development
@@ -592,8 +592,8 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md) for lo
 Read-only mode remains the default (`OMADA_WRITE_TOOLS` defaults empty and write
 tools are hidden). Opt-in writes follow the contract in
 [`docs/write-support.md`](docs/write-support.md) — explicit `OMADA_WRITE_TOOLS`
-allowlist, `dryRun=true` default, `confirm="<tool>:<target-id>"`, pre-write snapshots +
-`audit.jsonl`, whole-object verification, and anti-stranding checks. Use a **dedicated
+allowlist, `dryRun=true` default, a session-bound `confirmToken`, pre-write snapshots +
+`audit.jsonl`, read-back verification where available, and anti-stranding checks. Use a **dedicated
 Admin local account** separate from your read bridge and web UI to avoid session
 eviction. Firmware upgrades remain unshipped pending a maintenance-window policy.
 

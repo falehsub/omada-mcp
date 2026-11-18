@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..client import OmadaClient, OmadaError
+from ._common import as_int
 from ._write_common import MAX_IP_GROUP_ENTRIES
 
 
@@ -152,6 +153,24 @@ def _network_subnet_and_gw(network: Mapping[str, Any]) -> tuple[ipaddress.IPv4Ne
         return iface.network, iface.ip
     except ValueError:
         return None, None
+
+
+def _check_lan_delete_safety(client: OmadaClient, network: Mapping[str, Any]) -> None:
+    if bool(network.get("primary")) or as_int(network.get("vlan"), -1) == 1:
+        raise OmadaError(
+            f"refusing to delete primary/default LAN network {network.get('name') or network.get('id')!r}",
+            hint="the primary Default network (VLAN 1) cannot be deleted",
+        )
+    subnet, _ = _network_subnet_and_gw(network)
+    if subnet is None:
+        return
+    controller_ip, management_networks = _management_endpoints(client)
+    label = network.get("name") or network.get("id")
+    if controller_ip is not None and controller_ip in subnet:
+        raise OmadaError(f"refusing to delete network {label!r}: controller IP {controller_ip} is inside {subnet}")
+    for management_network in management_networks:
+        if management_network.overlaps(subnet):
+            raise OmadaError(f"refusing to delete network {label!r}: overlaps management range {management_network}")
 
 
 def _network_dhcp_ranges(network: Mapping[str, Any]) -> list[tuple[ipaddress.IPv4Address, ipaddress.IPv4Address]]:

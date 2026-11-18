@@ -97,7 +97,7 @@ def render_tools_reference(root: Path) -> str:
         "",
         "- Required parameters are shown in **`bold`**; optional parameters carry `?`.",
         "- Site-scoped tools accept optional `site?` (pinned when `OMADA_SITE_NAME`/`OMADA_SITE_ID` is set unless `OMADA_ALLOW_CROSS_SITE=true`).",
-        "- Write tools require `OMADA_READ_ONLY=false` and explicit `OMADA_WRITE_TOOLS` allowlisting; they default `dryRun=true` and require `confirm=\"<tool>:<target>\"` when `dryRun=false`.",
+        "- Write tools require `OMADA_READ_ONLY=false` and explicit `OMADA_WRITE_TOOLS` allowlisting. Preview with `dryRun=true`, then pass the single-use `confirmToken` as `confirm` with `dryRun=false` in the same server session.",
         "",
         "## Category Breakdown",
         "",
