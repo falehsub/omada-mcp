@@ -1,5 +1,5 @@
 # Minimal non-root container for omada-mcp (zero runtime dependencies, Web API v2)
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 LABEL org.opencontainers.image.title="omada-mcp" \
       org.opencontainers.image.description="Read-only-first Model Context Protocol server for TP-Link Omada SDN controllers (Web API v2, zero dependencies)" \
