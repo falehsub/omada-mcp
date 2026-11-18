@@ -400,8 +400,13 @@ class ClientSourceTests(unittest.TestCase):
                 return super().request(method, url, headers=headers, data=data, timeout=timeout)
 
         server, fake = self._server(DeniedRich())
-        items = self._items(server, "list_clients")
-        self.assertEqual(len(items), 2)
+        response = self._call(server, "list_clients")["result"]
+        self.assertFalse(response.get("isError"), response)
+        data = response["structuredContent"]
+        self.assertEqual(data["items"], [])  # Both fixture rows omit an explicit active flag.
+        self.assertEqual(data["sourceTotalRows"], 2)
+        self.assertFalse(data["complete"])
+        self.assertFalse(data["totalRowsExact"])
         self.assertTrue(any("insight/clients" in r["url"] for r in fake.requests))
 
     def test_search_clients_filters_by_vlan(self):

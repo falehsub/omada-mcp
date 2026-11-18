@@ -283,6 +283,7 @@ def update_ssid(
     ssid_id = str(target_raw["id"])
     _require_confirm("update_ssid", ssid_id, dryRun, confirm)
 
+    before_safe = _redact_ssid(target_raw) or {}
     patch_body = {k: copy.deepcopy(v) for k, v in target_raw.items() if k not in _SSID_SERVER_ONLY_KEYS}
     diff: dict[str, Any] = {}
     expected: dict[str, Any] = {}
@@ -291,39 +292,39 @@ def update_ssid(
         clean_name = str(name).strip()
         if not clean_name:
             raise OmadaError("SSID name must be non-empty")
-        diff["name"] = {"before": target_raw.get("name"), "after": clean_name}
+        diff["name"] = {"before": before_safe.get("name"), "after": clean_name}
         patch_body["name"] = clean_name
         expected["name"] = clean_name
     if bands is not None:
         band_mask = _parse_ssid_bands(bands)
-        diff["band"] = {"before": target_raw.get("band"), "after": band_mask}
+        diff["band"] = {"before": before_safe.get("band"), "after": band_mask}
         patch_body["band"] = band_mask
         expected["band"] = band_mask
     if guest is not None:
-        diff["guestNetEnable"] = {"before": target_raw.get("guestNetEnable"), "after": bool(guest)}
+        diff["guestNetEnable"] = {"before": before_safe.get("guestNetEnable"), "after": bool(guest)}
         patch_body["guestNetEnable"] = bool(guest)
         expected["guestNetEnable"] = bool(guest)
     if broadcast is not None:
-        diff["broadcast"] = {"before": target_raw.get("broadcast"), "after": bool(broadcast)}
+        diff["broadcast"] = {"before": before_safe.get("broadcast"), "after": bool(broadcast)}
         patch_body["broadcast"] = bool(broadcast)
         expected["broadcast"] = bool(broadcast)
     if pmfMode is not None:
         pmf_int = _parse_pmf_mode(pmfMode)
-        diff["pmfMode"] = {"before": target_raw.get("pmfMode"), "after": pmf_int}
+        diff["pmfMode"] = {"before": before_safe.get("pmfMode"), "after": pmf_int}
         patch_body["pmfMode"] = pmf_int
         expected["pmfMode"] = pmf_int
     if enable11r is not None:
-        diff["enable11r"] = {"before": target_raw.get("enable11r"), "after": bool(enable11r)}
+        diff["enable11r"] = {"before": before_safe.get("enable11r"), "after": bool(enable11r)}
         patch_body["enable11r"] = bool(enable11r)
         expected["enable11r"] = bool(enable11r)
     if clearVlan:
         new_vs = {"mode": 0, "customConfig": {"bridgeVlan": 1}, "currentVlanId": None}
-        diff["vlanSetting"] = {"before": target_raw.get("vlanSetting"), "after": new_vs}
+        diff["vlanSetting"] = {"before": before_safe.get("vlanSetting"), "after": new_vs}
         patch_body["vlanSetting"] = new_vs
     elif vlanId is not None:
         vid = _validate_vlan_id(vlanId)
         new_vs = {"mode": 1, "customConfig": {"bridgeVlan": vid}, "currentVlanId": vid}
-        diff["vlanSetting"] = {"before": target_raw.get("vlanSetting"), "after": new_vs}
+        diff["vlanSetting"] = {"before": before_safe.get("vlanSetting"), "after": new_vs}
         patch_body["vlanSetting"] = new_vs
     if psk is not None:
         if int(patch_body.get("security", 0)) == 0:
@@ -335,7 +336,6 @@ def update_ssid(
         patch_body["pskSetting"] = cur_psk
         diff["pskUpdated"] = {"before": False, "after": True}
 
-    before_safe = _redact_ssid(target_raw)
     after_safe = _redact_ssid(patch_body)
     warnings = ["The passphrase needs independent verification and manual restoration if recovery is needed."] if psk is not None else []
     if dryRun:
@@ -393,7 +393,7 @@ def update_ssid(
         tool_name="update_ssid",
         target=ssid_id,
         before=before_safe,
-        snapshot_payload={**(before_safe or {}), "secretRestoreRequired": psk is not None},
+        snapshot_payload={**before_safe, "secretRestoreRequired": psk is not None},
         read_back=_read_back,
         verify_fn=_verify,
         reauth_prepare=None if psk is not None else _reauth_prepare,

@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 import datetime
+import math
+import re
 from typing import Any
+from urllib.parse import quote
 
 from ..client import OmadaClient, OmadaError, explain_error_code, redact_secrets
-from ._common import PaginatedList, as_mapping, deep_redact, omada_mac, try_api_result, try_paginate
+from ._common import (
+    PaginatedList,
+    as_mapping,
+    deep_redact,
+    omada_mac,
+    pagination_status,
+    try_api_result,
+    try_paginate,
+)
 from ._common import as_float as _as_float
 from ._device_helpers import collect_ap_radios_data, collect_switch_ports_data
-from ._network_helpers import collect_vpn_tunnels_data, collect_wan_status_data
+from ._network_helpers import collect_vpn_tunnels_data, collect_wan_status_data, read_audit_source
 from ._tool_model import (
     _DIAGNOSTIC_FINDING_SCHEMA,
     _as_int,
@@ -22,6 +33,14 @@ from ._tool_model import (
 from ._write_fetchers import _fetch_devices
 from .clients_read import _fetch_clients
 from .networks_read import _WAN_STATUS_SCHEMA
+
+_CLIENT_DIAGNOSTIC_REQUEST_LIMIT = 64
+_WAN_DIAGNOSTIC_REQUEST_LIMIT = 32
+_HISTORY_FIELDS = (
+    "mac", "name", "hostName", "ip", "ssid", "apMac", "apName", "switchMac", "switchName",
+    "firstSeen", "lastSeen", "associationTime", "connectTime", "time", "duration", "uptime",
+)
+_RATE_LIMIT_FIELDS = ("enable", "rateLimitId", "upLimit", "downLimit", "upEnable", "downEnable")
 
 
 def _explain_error(
@@ -93,7 +112,7 @@ def _list_logs(
         matched_rows.append({
             "id": str(cleaned.get("id") or cleaned.get("logId") or ""),
             "category": cat,
-            "time": _iso(raw_time),
+            "time": _iso(_diagnostic_time_ms(raw_time)),
             "level": row_level,
             "type": cleaned.get("type") if cleaned.get("type") is not None else cleaned.get("auditType"),
             "module": cleaned.get("module"),
@@ -128,14 +147,67 @@ def _safe_recent_logs(
     hours: int,
     warnings: list[str],
     limit: int = 50,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], str]:
     events: list[dict[str, Any]] = []
+    statuses: list[str] = []
     for cat in ("alerts", "events"):
         try:
-            events.extend(_list_logs(client, category=cat, hours=hours, limit=limit))
+            rows = _list_logs(client, category=cat, hours=hours, limit=limit)
+            events.extend(rows)
+            if isinstance(rows, PaginatedList) and rows.truncated:
+                statuses.append("partial")
+                warnings.append(f"logs/{cat}: partial (bounded collection).")
+            else:
+                statuses.append("available")
         except OmadaError as exc:
-            warnings.append(f"logs/{cat}: unavailable ({exc.code}: {exc})")
-    return events
+            statuses.append("unavailable")
+            warnings.append(f"logs/{cat}: unavailable (controller code {exc.code}).")
+    if statuses == ["unavailable", "unavailable"]:
+        return events, "unavailable"
+    if any(status != "available" for status in statuses):
+        return events, "partial"
+    return events, "available" if events else "empty"
+
+
+def _diagnostic_time_ms(value: Any) -> int | None:
+    """Read controller epoch stamps and ISO timestamps without guessing missing time."""
+    if isinstance(value, bool):
+        return None
+    try:
+        stamp = float(value)
+    except (TypeError, ValueError):
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return int(parsed.timestamp() * 1000) if parsed.tzinfo is not None else None
+        except (OSError, OverflowError, ValueError):
+            return None
+    if math.isfinite(stamp) and stamp > 0:
+        return int(stamp * 1000) if stamp < 100_000_000_000 else int(stamp)
+    return None
+
+
+def _window_start(now_ms: int, hours: int) -> int | None:
+    return max(1, now_ms - hours * 3600 * 1000) if hours else None
+
+
+def _matches_identity(text: str, identities: set[str]) -> bool:
+    # A complete identifier is evidence; an identifier embedded in another name or address is not.
+    return any(
+        re.search(rf"(?<![\w:.@-]){re.escape(value)}(?![\w:@-]|\.(?=\w))", text)
+        for value in identities
+    )
+
+
+def _mac_forms(value: str) -> set[str]:
+    if not re.fullmatch(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", value):
+        return set()
+    return {value, omada_mac(value).lower(), value.replace(":", "")}
+
+
+def _prioritize_recent(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=lambda row: _diagnostic_time_ms(row.get("time")) or 0, reverse=True)
 
 
 def _diagnose_client(
@@ -143,8 +215,13 @@ def _diagnose_client(
     mac: str,
     hours: int = 24,
 ) -> dict[str, Any]:
-    with client.scoped_cache():
-        return _diagnose_client_impl(client, mac, hours=hours)
+    with client.request_budget(_CLIENT_DIAGNOSTIC_REQUEST_LIMIT) as budget, client.scoped_cache():
+        result = _diagnose_client_impl(client, mac, hours=hours)
+    result["controllerRequests"] = budget.used
+    result["requestLimit"] = budget.limit
+    if budget.used >= budget.limit:
+        result["warnings"].append("The request budget limited client diagnostic checks.")
+    return result
 
 
 def _diagnose_client_impl(
@@ -156,11 +233,17 @@ def _diagnose_client_impl(
         raise OmadaError("hours must be a non-negative integer")
     site = _site(client)
     warnings: list[str] = []
+    coverage: dict[str, str] = {}
+    now_ms = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
+    start_ms = _window_start(now_ms, hours)
     wanted_mac = normalize_mac(mac)
     needle = str(mac or "").strip().lower()
 
     matched_live: dict[str, Any] | None = None
-    for entry in _fetch_clients(client, limit=0):
+    live_rows = read_audit_source(
+        lambda: _fetch_clients(client, limit=0), "activeClients", "Active clients", coverage, warnings,
+    )
+    for entry in live_rows or []:
         if normalize_mac(entry.get("mac", "")) == wanted_mac:
             matched_live = entry
             break
@@ -174,7 +257,7 @@ def _diagnose_client_impl(
 
     target_mac = normalize_mac(matched_live["mac"]) if matched_live else wanted_mac
     detail_raw: dict[str, Any] = {}
-    if len(target_mac) == 17 and ":" in target_mac:
+    if _mac_forms(target_mac):
         raw_d, ok_d = try_api_result(
             client, f"sites/{site.site_id}/clients/{omada_mac(target_mac)}",
             warnings, label="client detail",
@@ -182,16 +265,35 @@ def _diagnose_client_impl(
         if ok_d and isinstance(raw_d, dict):
             detail_raw = raw_d
 
-    search_key = omada_mac(target_mac) if ":" in target_mac else str(mac).strip()
-    past_rows, _, ok_past = try_paginate(
-        client, f"sites/{site.site_id}/insight/pastConnection?searchKey={search_key}",
+    search_key = omada_mac(target_mac) if _mac_forms(target_mac) else str(mac).strip()
+    past_rows, past_meta, ok_past = try_paginate(
+        client, f"sites/{site.site_id}/insight/pastConnection?searchKey={quote(search_key, safe='')}",
         warnings, label="client connection history", page_size=20, max_pages=1,
     )
-    past_connections = [deep_redact(r) for r in past_rows[:20]] if ok_past else []
+    history_rows = [
+        {key: row[key] for key in _HISTORY_FIELDS if isinstance(row.get(key), (str, int, float))}
+        for row in past_rows
+        if (normalize_mac(str(row.get("mac") or "")) == target_mac if _mac_forms(target_mac)
+            else needle and needle in {str(row.get(key, "")).lower() for key in ("name", "hostName", "ip")})
+    ]
+    sessions_chrono: list[tuple[int, dict[str, Any]]] = []
+    past_undated = 0
+    past_outside_window = 0
+    for row in history_rows:
+        when = _diagnostic_time_ms(_pick(row, "firstSeen", "associationTime", "connectTime", "time", "lastSeen"))
+        if when is None:
+            past_undated += 1
+        elif when > now_ms or (start_ms is not None and when < start_ms):
+            past_outside_window += 1
+        else:
+            sessions_chrono.append((when, row))
+    sessions_chrono.sort(key=lambda pair: pair[0])
+    past_connections = [row for _, row in reversed(sessions_chrono)]
 
-    if matched_live is None and not detail_raw and not past_connections:
+    if matched_live is None and not detail_raw and not history_rows:
+        complete_search = coverage["activeClients"] == "complete" and pagination_status(past_meta, available=ok_past) == "complete"
         raise OmadaError(
-            f"no client matches {mac!r}",
+            f"no client matches {mac!r}" if complete_search else f"could not resolve client {mac!r} with the available telemetry",
             hint="check list_clients; accepts MAC, hostname, or IP",
         )
 
@@ -201,8 +303,9 @@ def _diagnose_client_impl(
     c_host = str(detail_raw.get("hostName") or base.get("hostName") or "")
     c_ip = str(detail_raw.get("ip") or base.get("ip") or "")
     is_wireless = bool(detail_raw.get("wireless") if "wireless" in detail_raw else base.get("wireless", False))
-    if not matched_live and not detail_raw and past_connections:
-        latest = past_connections[0]
+    if not matched_live and not detail_raw and history_rows:
+        latest = past_connections[0] if past_connections else history_rows[0]
+        c_mac = normalize_mac(str(latest.get("mac") or c_mac))
         is_wireless = bool(latest.get("ssid"))
         c_name = str(latest.get("name") or latest.get("hostName") or c_name)
         c_ip = str(latest.get("ip") or c_ip)
@@ -225,7 +328,8 @@ def _diagnose_client_impl(
         "name": c_name,
         "hostName": c_host,
         "ip": c_ip,
-        "active": bool(detail_raw.get("active", bool(matched_live or detail_raw))),
+        "active": (bool(detail_raw["active"]) if detail_raw.get("active") in (True, False)
+                   else True if matched_live else False if coverage["activeClients"] == "complete" else None),
         "wireless": is_wireless,
         "ssid": str(detail_raw.get("ssid") or base.get("ssid") or ""),
         "apMac": ap_mac,
@@ -243,14 +347,14 @@ def _diagnose_client_impl(
         "txRateKbps": detail_raw.get("txRate"),
         "uptimeSec": detail_raw.get("uptime") if detail_raw.get("uptime") is not None else base.get("duration"),
         "rateLimitEnabled": bool(rate_limit.get("enable", False)),
-        "rateLimit": deep_redact(rate_limit) if rate_limit else None,
+        "rateLimit": ({key: rate_limit[key] for key in _RATE_LIMIT_FIELDS
+                       if isinstance(rate_limit.get(key), (str, int, bool))} if rate_limit else None),
         "lockToApMac": normalize_mac(str(detail_raw.get("lockToApMac") or "")) if detail_raw.get("lockToApMac") else "",
     }
 
-    try:
-        raw_devices = _fetch_devices(client, site)
-    except OmadaError:
-        raw_devices = []
+    raw_devices = read_audit_source(
+        lambda: _fetch_devices(client, site), "devices", "Devices", coverage, warnings,
+    ) or []
 
     parent_radio: dict[str, Any] | None = None
     parent_switch_port: dict[str, Any] | None = None
@@ -264,9 +368,11 @@ def _diagnose_client_impl(
             None,
         )
         if ap_dev is not None:
-            ap_data = collect_ap_radios_data(
-                client, site, ap_dev, include_rf_scan=False, include_available_channels=False,
-            )
+            ap_data = read_audit_source(
+                lambda: collect_ap_radios_data(
+                    client, site, ap_dev, include_rf_scan=False, include_available_channels=False,
+                ), "parentDevice", "Parent AP", coverage, warnings,
+            ) or {}
             warnings.extend(ap_data.get("warnings") or [])
             rid = as_int_or_none(radio_id)
             band_hint = {0: "2g", 1: "5g", 2: "5g2", 3: "6g"}.get(rid) if rid is not None else None
@@ -274,7 +380,7 @@ def _diagnose_client_impl(
                 if (band_hint and r["band"] == band_hint) or (channel is not None and r.get("channel") == channel):
                     parent_radio = r
                     break
-            if parent_radio is None and ap_data.get("radios"):
+            if parent_radio is None and len(ap_data.get("radios") or []) == 1:
                 parent_radio = ap_data["radios"][0]
 
     elif not is_wireless and (switch_mac or switch_name):
@@ -286,9 +392,11 @@ def _diagnose_client_impl(
             None,
         )
         if sw_dev is not None:
-            sw_data = collect_switch_ports_data(
-                client, site, sw_dev, include_counters=True, include_cable_test=True, include_topology=False,
-            )
+            sw_data = read_audit_source(
+                lambda: collect_switch_ports_data(
+                    client, site, sw_dev, include_counters=True, include_cable_test=True, include_topology=False,
+                ), "parentDevice", "Parent switch", coverage, warnings,
+            ) or {}
             warnings.extend(sw_data.get("warnings") or [])
             if switch_port is not None:
                 pnum = _as_int(switch_port, -1)
@@ -296,27 +404,36 @@ def _diagnose_client_impl(
                     (p for p in (sw_data.get("ports") or []) if p.get("port") == pnum), None,
                 )
 
-    match_tokens = {
-        tok.lower()
-        for tok in (
-            c_mac, omada_mac(c_mac), c_name, c_host, c_ip,
-            ap_mac, omada_mac(ap_mac), ap_name, switch_mac, switch_name,
-        )
-        if tok
-    }
-    all_logs = _safe_recent_logs(client, hours, warnings)
-    recent_logs = [
-        entry for entry in all_logs
-        if any(
-            tok in f"{entry.get('target', '')} {entry.get('content', '')}".lower()
-            for tok in match_tokens
-        )
-    ][:25]
+    parent_tokens = {value.lower() for value in (ap_name, switch_name) if value}
+    parent_tokens.update(_mac_forms(ap_mac) | _mac_forms(switch_mac))
+    client_tokens = {value.lower() for value in (c_name, c_host, c_ip) if value and value != "0.0.0.0"}
+    client_tokens.difference_update(parent_tokens)
+    client_tokens.update(_mac_forms(c_mac))
+    all_logs, logs_state = _safe_recent_logs(client, hours, warnings)
+    direct_logs: list[dict[str, Any]] = []
+    infrastructure_logs: list[dict[str, Any]] = []
+    logs_undated = 0
+    logs_outside_window = 0
+    for entry in all_logs:
+        time_ms = _diagnostic_time_ms(entry.get("time"))
+        if time_ms is None:
+            logs_undated += 1
+            continue
+        if time_ms > now_ms or (start_ms is not None and time_ms < start_ms):
+            logs_outside_window += 1
+            continue
+        message = f"{entry.get('target', '')} {entry.get('content', '')}".lower()
+        if _matches_identity(message, client_tokens):
+            direct_logs.append(entry)
+        elif _matches_identity(message, parent_tokens):
+            infrastructure_logs.append(entry)
+    if logs_state == "available" and logs_undated:
+        logs_state = "partial"
 
     findings: list[dict[str, str]] = []
     next_steps: list[str] = []
 
-    if not client_summary["active"]:
+    if client_summary["active"] is False:
         findings.append({
             "code": "CLIENT_OFFLINE",
             "severity": "warning",
@@ -412,25 +529,12 @@ def _diagnose_client_impl(
             "detail": "A client bandwidth rate limit is active on this client.",
         })
 
-    # Correlate pastConnections + recentLogs for roaming / disconnect history.
-    sessions_chrono: list[tuple[int, dict[str, Any]]] = []
-    for row in past_connections:
-        ts_val = _as_int(
-            _pick(row, "firstSeen", "associationTime", "connectTime", "time", "lastSeen", default=0),
-            0,
-        )
-        sessions_chrono.append((ts_val, row))
-    if any(ts > 0 for ts, _ in sessions_chrono):
-        sessions_chrono.sort(key=lambda item: item[0])
-    else:
-        sessions_chrono.reverse()
-
     ap_transitions: list[dict[str, Any]] = []
     unique_aps: set[str] = set()
     short_sessions = 0
     prev_ap_id = ""
     prev_ap_label = ""
-    for _ts, row in sessions_chrono:
+    for ts, row in sessions_chrono:
         row_ap_mac = normalize_mac(str(_pick(row, "apMac", default="") or ""))
         row_ap_name = str(_pick(row, "apName", default="") or "")
         ap_id = row_ap_mac or row_ap_name.lower()
@@ -441,7 +545,7 @@ def _diagnose_client_impl(
                 ap_transitions.append({
                     "fromAp": prev_ap_label,
                     "toAp": ap_label,
-                    "time": _iso(_pick(row, "firstSeen", "associationTime", "time", "lastSeen")),
+                    "time": _iso(ts),
                     "ssid": str(_pick(row, "ssid", default="") or ""),
                 })
             prev_ap_id = ap_id
@@ -453,7 +557,7 @@ def _diagnose_client_impl(
     roam_log_events: list[dict[str, Any]] = []
     disconnect_log_events: list[dict[str, Any]] = []
     connect_log_count = 0
-    for entry in recent_logs:
+    for entry in _prioritize_recent(direct_logs):
         text = f"{entry.get('target', '')} {entry.get('content', '')}".lower()
         if any(tok in text for tok in ("roam", "handoff", "steer")):
             roam_log_events.append({
@@ -470,19 +574,11 @@ def _diagnose_client_impl(
         elif any(tok in text for tok in ("connect", "joined", "associat")):
             connect_log_count += 1
 
-    logs_alerts_missing = any("logs/alerts: unavailable" in w for w in warnings)
-    logs_events_missing = any("logs/events: unavailable" in w for w in warnings)
-    if logs_alerts_missing and logs_events_missing:
-        logs_state = "unavailable"
-    elif logs_alerts_missing or logs_events_missing:
-        logs_state = "partial"
-    elif all_logs:
-        logs_state = "available"
-    else:
-        logs_state = "empty"
-
-    if not ok_past:
+    past_status = pagination_status(past_meta, available=ok_past)
+    if past_status == "unavailable":
         past_state = "unavailable"
+    elif past_status == "partial" or past_undated:
+        past_state = "partial"
     elif past_connections:
         past_state = "available"
     else:
@@ -496,6 +592,7 @@ def _diagnose_client_impl(
         parent_state = "not_applicable"
 
     telemetry_availability = {
+        "activeClients": coverage["activeClients"],
         "clientDetail": "available" if detail_raw else "unavailable",
         "pastConnections": past_state,
         "logs": logs_state,
@@ -549,26 +646,38 @@ def _diagnose_client_impl(
             "code": "ROAM_HISTORY_UNAVAILABLE",
             "severity": "info",
             "detail": (
-                "No pastConnection entries or roam log events were returned for this wireless client; "
+                "No dated connection sessions or direct roam events were observed in the selected window; "
                 "roaming stability cannot be confirmed from current history."
             ),
         })
 
     if not next_steps:
-        if roaming_summary["historyAvailable"] and not missing_sources:
+        if any(f["severity"] != "info" for f in findings):
+            next_steps.append("Inspect the evidence in the reported findings and recheck the affected client link.")
+        elif roaming_summary["historyAvailable"] and not missing_sources and client_summary["active"] is True:
             next_steps.append("Live link and observed connection/roam history show no faults.")
         else:
-            next_steps.append(
-                "No live link faults detected, but connection/roam history is incomplete or empty; "
-                "enable controller history/logs or inspect again after roaming activity."
-            )
+            next_steps.append("Collect the missing or empty controller telemetry and inspect again after client activity.")
 
     return {
         "client": client_summary,
         "parentRadio": parent_radio,
         "parentSwitchPort": parent_switch_port,
         "pastConnections": past_connections,
-        "recentLogs": recent_logs,
+        "recentLogs": _prioritize_recent(direct_logs)[:25],
+        "infrastructureLogs": _prioritize_recent(infrastructure_logs)[:25],
+        "timeWindow": {"hours": hours, "start": _iso(start_ms) if start_ms is not None else None, "end": _iso(now_ms)},
+        "coverage": {
+            "pastConnections": {
+                "status": past_state, "scanned": len(past_rows), "inWindow": len(past_connections),
+                "outsideWindow": past_outside_window, "undated": past_undated,
+            },
+            "logs": {
+                "status": logs_state, "scanned": len(all_logs), "outsideWindow": logs_outside_window,
+                "undated": logs_undated, "directClientMatches": len(direct_logs),
+                "infrastructureMatches": len(infrastructure_logs),
+            },
+        },
         "roamingSummary": roaming_summary,
         "telemetryAvailability": telemetry_availability,
         "findings": findings,
@@ -582,8 +691,13 @@ def _diagnose_wan(
     includeSpeedtest: bool = True,
     hours: int = 24,
 ) -> dict[str, Any]:
-    with client.scoped_cache():
-        return _diagnose_wan_impl(client, includeSpeedtest=includeSpeedtest, hours=hours)
+    with client.request_budget(_WAN_DIAGNOSTIC_REQUEST_LIMIT) as budget, client.scoped_cache():
+        result = _diagnose_wan_impl(client, includeSpeedtest=includeSpeedtest, hours=hours)
+    result["controllerRequests"] = budget.used
+    result["requestLimit"] = budget.limit
+    if budget.used >= budget.limit:
+        result["warnings"].append("The request budget limited WAN diagnostic checks.")
+    return result
 
 
 def _diagnose_wan_impl(
@@ -612,7 +726,7 @@ def _diagnose_wan_impl(
                     wan.get("gatewayName", ""), wan.get("gatewayMac", ""))
         if tok
     }
-    all_logs = _safe_recent_logs(client, hours, warnings)
+    all_logs, logs_state = _safe_recent_logs(client, hours, warnings)
     recent_logs = [
         entry for entry in all_logs
         if any(
@@ -623,16 +737,23 @@ def _diagnose_wan_impl(
 
     findings: list[dict[str, str]] = []
     next_steps: list[str] = []
-    ports = wan.get("ports") or []
+    ports = [p for p in wan.get("ports") or [] if p.get("enabled", True)]
+    observed_internet = [p for p in ports if p.get("internetStatusKnown")]
+    confirmed_outage = bool(ports) and len(observed_internet) == len(ports) and not any(
+        p.get("internetUp") for p in observed_internet
+    )
 
     if not wan.get("hasGateway"):
+        known_absence = wan.get("gatewayInventoryKnown")
         findings.append({
-            "code": "WAN_NO_GATEWAY",
+            "code": "WAN_NO_GATEWAY" if known_absence else "WAN_GATEWAY_INVENTORY_UNAVAILABLE",
             "severity": "info",
-            "detail": "No Omada gateway is adopted on this site; WAN diagnostics are limited.",
+            "detail": ("No Omada gateway is adopted on this site."
+                       if known_absence else "Controller data did not establish whether this site has a gateway."),
         })
+        next_steps.append("Check the upstream router directly or verify the site's adopted gateway inventory.")
     else:
-        if ports and wan.get("internetUpCount", 0) == 0:
+        if confirmed_outage:
             findings.append({
                 "code": "WAN_ALL_LINKS_DOWN",
                 "severity": "critical",
@@ -640,13 +761,14 @@ def _diagnose_wan_impl(
             })
             next_steps.append("Check ISP modem/fiber link, physical WAN cable, and gateway PPPoE/DHCP authentication.")
         for p in ports:
-            if p.get("enabled", True) and not p.get("linkUp"):
+            if p.get("linkStatusKnown") and not p.get("linkUp"):
                 findings.append({
                     "code": "WAN_PORT_LINK_DOWN",
                     "severity": "warning",
                     "detail": f"WAN port {p['port']} ({p['name']}) physical link is down.",
                 })
-            elif p.get("linkUp") and not p.get("internetUp"):
+                next_steps.append(f"Check the modem and physical link on {p['name']}.")
+            elif p.get("linkUp") and p.get("internetStatusKnown") and not p.get("internetUp"):
                 findings.append({
                     "code": "WAN_PORT_INTERNET_OFFLINE",
                     "severity": "warning",
@@ -675,11 +797,37 @@ def _diagnose_wan_impl(
                     "detail": f"WAN port {p['name']} reports {errs} packet errors.",
                 })
 
+    if confirmed_outage:
+        status = "offline"
+    elif any(f["severity"] in ("warning", "critical") for f in findings):
+        status = "degraded"
+    elif ports and len(observed_internet) == len(ports):
+        status = "operational"
+    elif not wan.get("hasGateway") and wan.get("gatewayInventoryKnown"):
+        status = "no_gateway"
+    else:
+        status = "unknown"
+
     if not next_steps:
-        next_steps.append("WAN links look operational; inspect latency, packet loss, and recent gateway logs if users report intermittent drops.")
+        if status == "operational":
+            next_steps.append("All enabled WAN ports report internet reachability. Check latency and recent gateway logs for intermittent drops.")
+        elif status == "degraded":
+            next_steps.append("Check the affected WAN ports and compare the reported latency, loss, or errors with the gateway's online detection.")
+        else:
+            next_steps.append("Check gateway permissions and online detection to obtain WAN reachability evidence.")
 
     return {
         "wan": wan,
+        "status": status,
+        "telemetryAvailability": {
+            "gatewayInventory": "available" if wan.get("gatewayInventoryKnown") else "unavailable",
+            "internetReachability": (
+                "empty" if status == "no_gateway" else
+                "unavailable" if not observed_internet else
+                "available" if len(observed_internet) == len(ports) else "partial"
+            ),
+            "logs": logs_state,
+        },
         "vpnSummary": vpn_summary,
         "recentLogs": recent_logs,
         "findings": findings,
@@ -732,7 +880,46 @@ _DIAGNOSE_CLIENT_SCHEMA: dict[str, Any] = {
         "parentRadio": {"type": ["object", "null"]},
         "parentSwitchPort": {"type": ["object", "null"]},
         "pastConnections": {"type": "array", "items": {"type": "object"}},
-        "recentLogs": {"type": "array", "items": {"type": "object"}},
+        "recentLogs": {"type": "array", "items": _LOG_SCHEMA},
+        "infrastructureLogs": {"type": "array", "items": _LOG_SCHEMA},
+        "timeWindow": {
+            "type": "object",
+            "properties": {
+                "hours": {"type": "integer", "minimum": 0},
+                "start": {"type": ["string", "null"]},
+                "end": {"type": "string"},
+            },
+            "required": ["hours", "start", "end"],
+        },
+        "coverage": {
+            "type": "object",
+            "properties": {
+                "pastConnections": {
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                        "scanned": {"type": "integer", "minimum": 0},
+                        "inWindow": {"type": "integer", "minimum": 0},
+                        "outsideWindow": {"type": "integer", "minimum": 0},
+                        "undated": {"type": "integer", "minimum": 0},
+                    },
+                },
+                "logs": {
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                        "scanned": {"type": "integer", "minimum": 0},
+                        "outsideWindow": {"type": "integer", "minimum": 0},
+                        "undated": {"type": "integer", "minimum": 0},
+                        "directClientMatches": {"type": "integer", "minimum": 0},
+                        "infrastructureMatches": {"type": "integer", "minimum": 0},
+                    },
+                },
+            },
+            "required": ["pastConnections", "logs"],
+        },
+        "controllerRequests": {"type": "integer", "minimum": 0},
+        "requestLimit": {"type": "integer", "minimum": 1},
         "roamingSummary": {
             "type": "object",
             "properties": {
@@ -756,18 +943,20 @@ _DIAGNOSE_CLIENT_SCHEMA: dict[str, Any] = {
             "type": "object",
             "properties": {
                 "clientDetail": {"type": "string"},
+                "activeClients": {"type": "string"},
                 "pastConnections": {"type": "string"},
                 "logs": {"type": "string"},
                 "parentTelemetry": {"type": "string"},
             },
-            "required": ["clientDetail", "pastConnections", "logs", "parentTelemetry"],
+            "required": ["activeClients", "clientDetail", "pastConnections", "logs", "parentTelemetry"],
         },
         "findings": {"type": "array", "items": _DIAGNOSTIC_FINDING_SCHEMA},
         "nextSteps": {"type": "array", "items": {"type": "string"}},
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
     "required": [
-        "client", "pastConnections", "recentLogs", "roamingSummary",
+        "client", "pastConnections", "recentLogs", "infrastructureLogs", "roamingSummary",
+        "timeWindow", "coverage", "controllerRequests", "requestLimit",
         "telemetryAvailability", "findings", "nextSteps", "warnings",
     ],
 }
@@ -826,13 +1015,20 @@ _DIAGNOSE_WAN_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "wan": _WAN_STATUS_SCHEMA,
+        "status": {"enum": ["offline", "degraded", "operational", "no_gateway", "unknown"]},
+        "telemetryAvailability": {"type": "object"},
+        "controllerRequests": {"type": "integer", "minimum": 0},
+        "requestLimit": {"type": "integer", "minimum": 1},
         "vpnSummary": {"type": "object"},
         "recentLogs": {"type": "array", "items": {"type": "object"}},
         "findings": {"type": "array", "items": _DIAGNOSTIC_FINDING_SCHEMA},
         "nextSteps": {"type": "array", "items": {"type": "string"}},
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["wan", "vpnSummary", "recentLogs", "findings", "nextSteps", "warnings"],
+    "required": [
+        "wan", "status", "telemetryAvailability", "controllerRequests", "requestLimit",
+        "vpnSummary", "recentLogs", "findings", "nextSteps", "warnings",
+    ],
 }
 
 

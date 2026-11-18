@@ -8,7 +8,8 @@ import json
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
-from ..client import OmadaClient, OmadaError, SiteInfo, redact_secrets
+from .._projections import project_controller_row
+from ..client import OmadaClient, OmadaError, SiteInfo
 from ..write_previews import require_confirmation
 from ._common import deep_redact
 
@@ -408,7 +409,7 @@ def _validate_vlan_id(vlan: Any) -> int:
 def _redact_ssid(ssid: Mapping[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(ssid, Mapping):
         return None
-    cleaned = redact_secrets(dict(ssid))
+    cleaned = project_controller_row("ssid", ssid)
     psk = ssid.get("pskSetting")
     cleaned["hasPresharedKey"] = bool(
         ssid.get("securityKey")

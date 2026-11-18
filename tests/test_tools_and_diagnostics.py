@@ -328,7 +328,11 @@ class V11FeatureTests(unittest.TestCase):
             "params": {"name": "network_audit", "arguments": {}},
         })["result"]["structuredContent"]
 
-        self.assertEqual(r1, r2)
+        # Repeated optional endpoint failures can be cached, reducing transport requests.
+        self.assertEqual(
+            {key: value for key, value in r1.items() if key != "controllerRequests"},
+            {key: value for key, value in r2.items() if key != "controllerRequests"},
+        )
         self.assertFalse(r1["healthy"])
         codes = {f["code"] for f in r1["findings"]}
         self.assertEqual(codes, {
@@ -338,8 +342,10 @@ class V11FeatureTests(unittest.TestCase):
             "CLIENT_ON_GUEST_NETWORK",
             "CLIENT_UNEXPECTED_VLAN",
             "VLAN_UNISOLATED",
-            "DHCP_POOL_NEAR_EXHAUSTION",
+            "DHCP_CLIENT_COUNT_HIGH_RELATIVE_TO_POOL",
         })
+        self.assertEqual(r1["dhcpPools"][0]["observedClientToPoolPct"], 100)
+        self.assertNotIn("utilizationPct", r1["dhcpPools"][0])
 
     def test_doctor_json_matches_schema_and_reports_family_and_cookie(self):
         schema_path = Path(__file__).resolve().parents[1] / "schemas" / "doctor.schema.json"

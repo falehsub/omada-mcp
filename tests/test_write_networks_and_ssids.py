@@ -322,6 +322,7 @@ class SsidAndGatewayServiceWriteTests(unittest.TestCase):
                 "confirm": c_dry["result"]["structuredContent"]["confirmToken"],
             })
             self.assertNotIn(secret_a, json.dumps(c_res))
+            self.assertTrue(c_res["result"]["structuredContent"]["after"]["hasPresharedKey"])
 
             u_dry = unwrap_ok(call_tool(server, "update_ssid", {
                 "ssid": "Lab-Test-WiFi",
@@ -342,6 +343,11 @@ class SsidAndGatewayServiceWriteTests(unittest.TestCase):
             self.assertNotIn(secret_a, json.dumps(u_res))
             self.assertNotIn(secret_b, json.dumps(u_res))
 
+            for response in (c_dry, c_res, u_dry, u_res):
+                rendered = json.dumps(response)
+                for field in ("pskSetting", "ppskSetting", "securityKey"):
+                    self.assertNotIn(f'"{field}"', rendered)
+
             d_dry = unwrap_ok(call_tool(server, "delete_ssid", {"ssid": "Lab-Test-WiFi"}))
             unwrap_ok(call_tool(server, "delete_ssid", {
                 "ssid": "Lab-Test-WiFi",
@@ -354,6 +360,7 @@ class SsidAndGatewayServiceWriteTests(unittest.TestCase):
                     raw_txt = fpath.read_text(encoding="utf-8")
                     self.assertNotIn(secret_a, raw_txt, str(fpath))
                     self.assertNotIn(secret_b, raw_txt, str(fpath))
+                    self.assertNotIn('"pskSetting"', raw_txt, str(fpath))
 
     def test_port_forward_static_route_mdns_and_upnp(self):
         with tempfile.TemporaryDirectory() as tmp:

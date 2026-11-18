@@ -7,7 +7,10 @@ the tool inventory stays at 54 read tools and 78 optional write tools.
 Existing calls retain full client fields, the default `limit=500`, and a JSON
 array in the first text block. Internal audit, snapshot, and write helpers keep
 their bounded full-collection behavior. The list tools describe connected
-clients; use `search_clients` to include inactive history.
+clients; use `search_clients` to include inactive history. If the rich endpoint
+is unavailable, the list tools include only insight rows with explicit active
+status. A lookup or unfiltered search can return `active: null` when the
+controller does not establish whether that client is connected.
 
 ## Read one page
 
@@ -86,13 +89,20 @@ fields, source failures, and capacity limits remain visible. Narrow or restart
 the query to investigate. Older legacy unfiltered callers still receive their
 numeric `totalRows`; `totalRowsExact=false` identifies an unverified count.
 Legacy filtered calls scan their bounded collection for exact match totals when
-possible, even if the returned array is capped.
+possible, even if the returned array is capped. Viewer fallback history never
+provides an exact matching total. `sourceTotalRows` can still describe the
+controller's raw history size. Legacy `list_clients` keeps its numeric
+`totalRows` as an observed count of confirmed active rows on this fallback.
 
 Combined paged search scans active clients first. An active MAC takes precedence
 before filtering, so an older inactive duplicate cannot reappear because the
 current record failed a filter. Legacy combined search retains inactive insertion
 order with active values replacing duplicates. Viewer fallback uses the first
 observed insight record and is pinned once a paged response has been emitted.
+Filters use validated controller values. Missing or invalid status fields
+cannot match an explicit `false`, and an unknown VLAN cannot match VLAN `0`.
+The compatibility display defaults for `wireless`, `guest`, and `vlan` do not
+affect filtering.
 
 ## Resource and consistency limits
 

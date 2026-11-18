@@ -5,11 +5,17 @@ on:
     - cron: "0 4 * * 1"
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - ".github/workflows/compat.yml"
       - "scripts/docker_lab_init.py"
       - "scripts/read_selftest.py"
+      - "scripts/qualify_client_queries.py"
       - "src/omada_mcp/client.py"
+      - "src/omada_mcp/cli.py"
+      - "src/omada_mcp/doctor.py"
+      - "src/omada_mcp/domains/**"
+      - "src/omada_mcp/server.py"
       - "src/omada_mcp/transport.py"
 
 permissions:
@@ -25,9 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       github.event_name != 'pull_request' ||
-      contains(github.event.pull_request.labels.*.name, 'compat') ||
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch'
+      contains(github.event.pull_request.labels.*.name, 'compat')
     strategy:
       fail-fast: false
       matrix:
@@ -64,10 +68,10 @@ jobs:
             --out-dir "${{ runner.temp }}/lab" \
             --timeout 240
 
-      - name: Run --doctor --json (Viewer and Admin, CA verified)
+      - name: Run share-safe doctor (Viewer and Admin, CA verified)
         run: |
-          OMADA_ENV_FILE="${{ runner.temp }}/lab/viewer.env" omada-mcp --doctor --json > "reports/doctor-viewer-${{ matrix.label }}.json"
-          OMADA_ENV_FILE="${{ runner.temp }}/lab/admin.env" omada-mcp --doctor --json > "reports/doctor-admin-${{ matrix.label }}.json"
+          OMADA_ENV_FILE="${{ runner.temp }}/lab/viewer.env" omada-mcp --doctor --json --share-safe > "reports/doctor-viewer-${{ matrix.label }}.json"
+          OMADA_ENV_FILE="${{ runner.temp }}/lab/admin.env" omada-mcp --doctor --json --share-safe > "reports/doctor-admin-${{ matrix.label }}.json"
           python -c "
           import json
           for p in ('reports/doctor-viewer-${{ matrix.label }}.json', 'reports/doctor-admin-${{ matrix.label }}.json'):

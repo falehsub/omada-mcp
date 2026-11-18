@@ -172,5 +172,8 @@ jobs:
         run: |
           uid=$(docker run --rm --entrypoint id omada-mcp:ci -u)
           test "$uid" = "10001"
+          registry_name=$(docker image inspect omada-mcp:ci --format '{{ index .Config.Labels "io.modelcontextprotocol.server.name" }}')
+          expected_name=$(python3 -c 'import json; print(json.load(open("server.json"))["name"])')
+          test "$registry_name" = "$expected_name"
           docker run --rm omada-mcp:ci --list-tools | python3 -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==54, len(d['tools'])"
           docker run --rm omada-mcp:ci --list-tools --all | python3 -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==132, len(d['tools'])"

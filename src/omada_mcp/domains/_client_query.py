@@ -11,8 +11,15 @@ from typing import Any
 
 from ..client import OmadaClient, OmadaError, RequestBudgetExceeded
 from ..client_cursors import CursorCapacityError, CursorError
-from ._client_projection import _CLIENT_SCHEMA, _SEARCH_CLIENT_SCHEMA, project_client
-from ._common import PaginatedList
+from ._client_projection import (
+    _CLIENT_SCHEMA,
+    _SEARCH_CLIENT_SCHEMA,
+    client_flag,
+    client_text,
+    client_vlan,
+    project_client,
+)
+from ._common import PaginatedList, as_mapping
 from ._tool_model import normalize_mac
 
 NATIVE_SIZE = 100
@@ -20,6 +27,8 @@ MAX_PAGES = 20
 MAX_REQUESTS = 24
 MAX_ROWS = 100_000
 FALLBACK_CODES = (-1007, -41011, -1600)
+VIEWER_HISTORY_WARNING = "Using Viewer-safe insight/clients history; matching totals are not authoritative."
+FILTER_EVIDENCE_WARNING = "Some rows omit or contain invalid filter fields; matching totals are incomplete."
 
 
 def selected_fields(fields: list[str] | None, search: bool) -> list[str]:
@@ -33,29 +42,36 @@ def selected_fields(fields: list[str] | None, search: bool) -> list[str]:
 
 def project_search_client(row: dict[str, Any]) -> dict[str, Any]:
     projected = project_client(row)
-    if "blocked" in row:
-        projected["blocked"] = bool(row["blocked"])
+    blocked = client_flag(row.get("blocked"))
+    if blocked is not None:
+        projected["blocked"] = blocked
     setting = row.get("ipSetting")
-    if isinstance(setting, dict) and setting.get("useFixedAddr"):
-        projected["fixedIp"] = str(setting.get("ip") or "")
-        if setting.get("netId"):
-            projected["fixedNetId"] = str(setting["netId"])
+    if isinstance(setting, dict) and client_flag(setting.get("useFixedAddr")) is True:
+        projected["fixedIp"] = client_text(setting.get("ip")) or ""
+        if network_id := client_text(setting.get("netId")):
+            projected["fixedNetId"] = network_id
     return projected
 
 
-def _available(row: dict[str, Any]) -> list[str]:
-    """Track controller field presence before the projection supplies defaults."""
-    keys = set(row)
-    for key, aliases in {"vlan": ("vid", "vlan"), "name": ("name", "hostName"),
-                         "networkName": ("networkName", "network"),
-                         "ip": ("ip", "ipSetting")}.items():
-        if any(alias in row for alias in aliases):
-            keys.add(key)
-    return sorted(keys & set(_SEARCH_CLIENT_SCHEMA["properties"]))
+def _available(row: dict[str, Any]) -> dict[str, str | bool | int]:
+    """Return validated filter evidence before display defaults are applied."""
+    values: dict[str, str | bool | int | None] = {
+        "active": client_flag(row.get("active")),
+        "wireless": client_flag(row.get("wireless")),
+        "guest": client_flag(row.get("guest")),
+        "vlan": client_vlan(row),
+        "mac": client_text(row.get("mac")),
+        "name": client_text(row.get("name"), row.get("hostName")),
+        "hostName": client_text(row.get("hostName")),
+        "ip": client_text(row.get("ip"), as_mapping(row.get("ipSetting")).get("ip")),
+        "ssid": client_text(row.get("ssid")),
+        "networkName": client_text(row.get("networkName"), row.get("network")),
+    }
+    return {key: value for key, value in values.items() if value is not None}
 
 
-def matches(row: dict[str, Any], available: list[str], filters: dict[str, Any]) -> tuple[bool, bool]:
-    """Return (match, indeterminate): absent filter data cannot prove a negative."""
+def matches(available: dict[str, str | bool | int], filters: dict[str, Any]) -> tuple[bool, bool]:
+    """Return (match, indeterminate). A definite nonmatch resolves an AND query."""
     missing = False
     for key in ("active", "wireless", "guest", "vlan", "ssid"):
         wanted = filters.get(key)
@@ -64,26 +80,28 @@ def matches(row: dict[str, Any], available: list[str], filters: dict[str, Any]) 
         if key not in available:
             missing = True
             continue
-        value = row[key]
+        value = available[key]
         if key == "ssid":
             if str(wanted).strip().lower() not in str(value).strip().lower():
-                return False, missing
+                return False, False
         elif value != wanted:
-            return False, missing
+            return False, False
     query = str(filters.get("query") or "").strip().lower()
     if query:
         keys = ("mac", "name", "hostName", "ip", "ssid", "networkName")
         mac_query = normalize_mac(query)
-        values = [str(row.get(key, "")).lower() for key in keys if key in available]
+        values = [str(available[key]).lower() for key in keys if key in available]
         if not any(query in value for value in values) and not (
-            mac_query and mac_query in normalize_mac(row.get("mac", ""))
+            mac_query and mac_query in normalize_mac(str(available.get("mac", "")))
         ):
-            if any(key not in available for key in keys):
-                missing = True
-            else:
-                return False, missing
-            return False, missing
+            return False, any(key not in available for key in keys)
     return not missing, missing
+
+
+def _source_filters(options: dict[str, Any], search: bool, source: str) -> dict[str, Any]:
+    if not search and source == "insight/clients":
+        return {**options["filters"], "active": True}
+    return options["filters"]
 
 
 def _scope(client: OmadaClient, tool: str, site_id: str) -> str:
@@ -161,6 +179,7 @@ def query_clients(
     if not 1 <= options["size"] <= 500 or options["format"] not in ("legacy", "envelope"):
         raise OmadaError("invalid pageSize or resultFormat")
     site = client.current_site()
+    source_filters = _source_filters(options, search, state["source"])
     output: list[dict[str, Any]] = []
     seen = set(state["seen"])
     source_seen = set(state["sourceSeen"])
@@ -185,10 +204,10 @@ def query_clients(
                 else:
                     state["identityMissing"] = True
                     _warning(state, "A row has no MAC; identity deduplication is unavailable for that row.")
-                hit, missing = matches(row, item["available"], options["filters"])
+                hit, missing = matches(item["available"], source_filters)
                 if missing:
                     state["missing"] = True
-                    _warning(state, "Some rows omit fields required by the filters; absence is not a negative match.")
+                    _warning(state, FILTER_EVIDENCE_WARNING)
                 if hit:
                     state["matched"] += 1
                     output.append({key: row[key] for key in options["fields"] if key in row})
@@ -231,10 +250,11 @@ def query_clients(
                     state["rowsScanned"] = previously_scanned
                     state["sources"] = ["insight/clients"]
                     state["source"] = "insight/clients"
+                    source_filters = _source_filters(options, search, state["source"])
                     output.clear()
                     seen.clear()
                     source_seen.clear()
-                    _warning(state, "Rich client endpoint unavailable; using Viewer-safe insight/clients.")
+                    _warning(state, VIEWER_HISTORY_WARNING)
                     continue
                 if not state["emitted"] and not output:
                     raise
@@ -270,7 +290,7 @@ def query_clients(
                     break
                 state["fingerprints"].append(fingerprint)
             state["pending"] = [{"row": project_search_client(row) if search else project_client(row),
-                                 "available": _available(row)} for row in raw]
+                                 "available": _available(row) if source_filters else {}} for row in raw]
             scanned += len(raw)
             state["rowsScanned"] += len(raw)
             page = state["page"]
@@ -304,7 +324,7 @@ def query_clients(
         except CursorCapacityError:
             stop, has_more = "cursor_capacity", False
             _warning(state, "Cursor state capacity reached; narrow the query and restart.")
-    exact = complete and not state["identityMissing"]
+    exact = complete and not state["identityMissing"] and state["source"] != "insight/clients"
     metadata: dict[str, Any] = {
         "totalRowsExact": exact, "totalRowsSource": "matched" if exact else "observed",
         "rowsScanned": scanned, "pagesFetched": pages, "controllerRequests": requests,

@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from ..client import OmadaClient, OmadaError
+from ._client_projection import client_text
+from ._client_query import VIEWER_HISTORY_WARNING
 from ._tool_model import normalize_mac
 
 MAX_SEARCH_PAGES = 20
@@ -60,7 +62,7 @@ def collect_search_rows(
                 )
                 source_metas.append(meta)
                 for row in rows:
-                    mac = normalize_mac(row.get("mac", ""))
+                    mac = normalize_mac(client_text(row.get("mac")) or "")
                     if active is None:
                         # The legacy merge drops rows without MACs. Assignment
                         # replaces an inactive value while preserving position.
@@ -81,9 +83,7 @@ def collect_search_rows(
                 raise
             fallback = True
             source_name = "insight/clients"
-            warnings.append(
-                "Rich client source unavailable; using Viewer-safe insight/clients."
-            )
+            warnings.append(VIEWER_HISTORY_WARNING)
 
         if fallback:
             # Do not mix rich-source rows into a Viewer-safe fallback result.
@@ -101,7 +101,7 @@ def collect_search_rows(
             )
             source_metas = [fallback_meta]
             for row in rows:
-                mac = normalize_mac(row.get("mac", ""))
+                mac = normalize_mac(client_text(row.get("mac")) or "")
                 if mac:
                     rows_by_mac.setdefault(mac, row)
                 else:
@@ -140,7 +140,7 @@ def collect_search_rows(
         result_meta: dict[str, Any] = {
             "complete": all_complete,
             "truncated": not all_complete,
-            "totalRowsExact": all_complete,
+            "totalRowsExact": all_complete and not fallback,
             "pagesFetched": pages_fetched,
             "maxPages": MAX_SEARCH_PAGES,
             "controllerRequests": budget.used,
@@ -148,7 +148,7 @@ def collect_search_rows(
             "source": source_name,
             "warnings": warnings,
         }
-        if all_complete:
+        if result_meta["totalRowsExact"]:
             result_meta["totalRows"] = len(collected)
         elif truncation_reason:
             result_meta["truncationReason"] = truncation_reason

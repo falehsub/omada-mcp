@@ -72,6 +72,8 @@ class LegacyClientSearchTests(unittest.TestCase):
 
         self.assertEqual(len(collected), 205)
         self.assertTrue(meta["complete"])
+        self.assertFalse(meta["totalRowsExact"])
+        self.assertNotIn("totalRows", meta)
         self.assertEqual(meta["source"], "insight/clients")
         self.assertTrue(meta["warnings"])
         # One denied rich request plus three native insight pages.

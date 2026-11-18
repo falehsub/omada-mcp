@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import copy
+import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .._projections import project_controller_row
 from ..client import OmadaClient, OmadaError
 from ._common import as_int
+from ._ip_group_checkpoint import (
+    checkpoint_key,
+    checkpoint_path,
+    checkpoint_scope,
+    claim_checkpoint,
+    persist_checkpoint,
+    read_checkpoint,
+    recovery_path,
+)
 from ._write_common import (
     _committed_result,
     _delete_entity,
@@ -189,6 +200,94 @@ def _verify_rule_references(expected: Mapping[str, Any], actual: Any) -> tuple[b
     return True, None
 
 
+def _swap_plan(rule_ids: Sequence[str]) -> list[dict[str, str]]:
+    plan = [{"action": "create_temp_group"}] if rule_ids else []
+    plan.extend({"action": "repoint_acls_to_temp", "ruleId": rid} for rid in rule_ids)
+    plan.extend(({"action": "delete_old_group"}, {"action": "recreate_group"}))
+    plan.extend({"action": "repoint_acls_to_new", "ruleId": rid} for rid in rule_ids)
+    if rule_ids:
+        plan.append({"action": "delete_temp_group"})
+    return plan
+
+
+def _swap_state(groups: Sequence[dict[str, Any]], rules: Sequence[dict[str, Any]],
+                operation: Mapping[str, Any]) -> dict[str, Any]:
+    original = operation["original"]
+    group_names = {original["name"].casefold(), operation["temporaryName"].casefold()}
+    known_ids = {original["id"], operation.get("temporaryId"), operation.get("replacementId")}
+    related = [row for row in groups if _group_id(row) in known_ids
+               or (as_int(row.get("type"), -1) == 0 and str(row.get("name") or "").casefold() in group_names)]
+    group_state = {_group_id(row): _swap_group_state(row) for row in related}
+    if "" in group_state or len(group_state) != len(related):
+        raise OmadaError("IP group recovery inventory has ambiguous group identities")
+    known_ids.update(group_state)
+    rule_ids = set(operation["ruleIds"])
+    rule_state: dict[str, Any] = {}
+    for rule in rules:
+        rid = str(rule.get("id") or "")
+        references = any(as_int(rule.get(f"{side}Type"), -1) == 1
+                         and any(str(item) in known_ids for item in rule.get(f"{side}Ids") or [])
+                         for side in ("source", "destination"))
+        if rid in rule_ids or references:
+            if not rid or rid in rule_state:
+                raise OmadaError("IP group recovery inventory has ambiguous ACL identities")
+            rule_state[rid] = project_controller_row("acls", rule)
+    return {"groups": group_state, "rules": rule_state}
+
+
+def _swap_group_state(group: Mapping[str, Any]) -> dict[str, Any]:
+    return {"name": group.get("name"), "type": as_int(group.get("type"), -1),
+            "resource": as_int(group.get("resource"), 0),
+            "ipList": [list(pair) for pair in _ip_list_canonical(group.get("ipList") or [])]}
+
+
+def _swap_transition(operation: Mapping[str, Any], step: Mapping[str, str],
+                     created_id: str | None = None) -> dict[str, Any]:
+    state = copy.deepcopy(operation["expected"])
+    action = step["action"]
+    old_id = operation["original"]["id"]
+    temporary_id = operation.get("temporaryId")
+    if action in ("create_temp_group", "recreate_group"):
+        if not created_id or created_id in (old_id, temporary_id) or created_id in state["groups"]:
+            raise OmadaError("IP group recovery could not establish a distinct new group identity")
+        temporary = action == "create_temp_group"
+        state["groups"][created_id] = _swap_group_state({
+            "name": operation["temporaryName"] if temporary else operation["original"]["name"],
+            "type": 0, "resource": 0,
+            "ipList": operation["original"]["ipList"] if temporary else operation["entries"],
+        })
+    elif action == "delete_old_group":
+        del state["groups"][old_id]
+    elif action == "delete_temp_group":
+        del state["groups"][temporary_id]
+    else:
+        rid = step["ruleId"]
+        before_id, after_id = ((old_id, temporary_id) if action == "repoint_acls_to_temp"
+                               else (temporary_id, operation["replacementId"]))
+        if not isinstance(before_id, str) or not isinstance(after_id, str):
+            raise OmadaError("IP group recovery could not establish the referenced group identities")
+        state["rules"][rid] = _swap_rule_group_id(state["rules"][rid], before_id, after_id)
+    return state
+
+
+def _observe_pending(operation: Mapping[str, Any], step: Mapping[str, str],
+                     observed: dict[str, Any]) -> tuple[dict[str, Any], str | None] | None:
+    if observed == operation["expected"]:
+        return None
+    action = step["action"]
+    created_id = None
+    if action in ("create_temp_group", "recreate_group"):
+        name = operation["temporaryName"] if action == "create_temp_group" else operation["original"]["name"]
+        ids = [gid for gid, row in observed["groups"].items() if row["name"] == name]
+        if len(ids) != 1:
+            raise OmadaError("IP group recovery could not identify the pending creation")
+        created_id = ids[0]
+    expected = _swap_transition(operation, step, created_id)
+    if observed != expected:
+        raise OmadaError("live IP groups or ACLs changed outside the checkpoint; inspect them before recovering")
+    return expected, created_id
+
+
 def replace_ip_group(
     client: OmadaClient,
     group: str,
@@ -196,37 +295,87 @@ def replace_ip_group(
     ipRange: str | None = None,
     dryRun: bool = True,
     confirm: str | None = None,
+    recoveryId: str | None = None,
 ) -> dict[str, Any]:
-    """Replace an IPv4 IP group's entries via delete+create (or 6-step tmp-group swap if ACL-referenced)."""
-    new_ip_list = pack_ip_entries(cidrs=cidrs, ip_range=ipRange)
+    """Replace an IPv4 IP group or resume a checkpointed swap."""
     site = _site(client)
+    scope = checkpoint_scope(client)
     groups_before = _fetch_groups(client, site)
-    target_group = _find_ip_group(groups_before, group)
-
-    if int(target_group.get("resource", 0) or 0) != 0 or str(target_group.get("name")) == "IPGroup_Any":
-        raise OmadaError(
-            f"refusing to replace built-in/protected group {target_group.get('name')!r}",
-        )
-
-    old_id = _group_id(target_group)
-    group_name = str(target_group["name"])
-    group_type = int(target_group.get("type", 0))
-    _require_confirm("replace_ip_group", old_id, dryRun, confirm)
-
     _, acls_before = _fetch_acls(client, site)
-    networks = _fetch_lan_collection(client, site)
-    ref_rules = [
-        dict(rule)
-        for rule in acls_before
-        if (int(rule.get("sourceType", -1)) == 1 and old_id in [str(x) for x in (rule.get("sourceIds") or [])])
-        or (int(rule.get("destinationType", -1)) == 1 and old_id in [str(x) for x in (rule.get("destinationIds") or [])])
-    ]
+    if recoveryId is not None:
+        if cidrs is not None or ipRange is not None:
+            raise OmadaError("omit cidrs and ipRange when resuming; use the checkpointed entries")
+        path = recovery_path(client, recoveryId)
+        prior = read_checkpoint(path)
+        if prior is None or prior.get("operationId") != recoveryId or prior.get("scope") != scope:
+            raise OmadaError("IP group recoveryId is unknown or belongs to a different controller or site")
+        if prior.get("finished") is True:
+            raise OmadaError("IP group recovery checkpoint is already complete")
+        operation = prior
+        try:
+            target_group = operation["original"]
+            group_name = target_group["name"]
+            old_id = target_group["id"]
+            ref_rules = operation["originalRules"]
+            plan = _swap_plan(operation["ruleIds"])
+            new_ip_list = pack_ip_entries(cidrs=operation["entries"])
+            seen_steps = operation["completed"]
+            if (checkpoint_path(client, checkpoint_key(scope, group_name)) != path
+                    or not isinstance(seen_steps, list) or len(seen_steps) > len(plan)
+                    or type(operation.get("pending")) is not bool
+                    or (operation["pending"] and len(seen_steps) == len(plan))
+                    or not isinstance(operation.get("expected"), dict)
+                    or not isinstance(operation["expected"].get("groups"), dict)
+                    or not isinstance(operation["expected"].get("rules"), dict)
+                    or not isinstance(ref_rules, list)
+                    or sorted(rule["id"] for rule in ref_rules) != operation["ruleIds"]
+                    or any(any(event.get(key) != value for key, value in step.items())
+                           for event, step in zip(seen_steps, plan, strict=False))):
+                raise ValueError("checkpoint fields are inconsistent")
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise OmadaError("IP group recovery checkpoint is inconsistent") from exc
+        if group.strip().casefold() not in (group_name.casefold(), old_id.casefold()):
+            raise OmadaError("group must match the original name or ID in the recovery checkpoint")
+    else:
+        new_ip_list = pack_ip_entries(cidrs=cidrs, ip_range=ipRange)
+        target_group = _normalize_group_output(project_controller_row("groups", _find_ip_group(groups_before, group)))
+        old_id = _group_id(target_group)
+        group_name = str(target_group.get("name") or "")
+        path = checkpoint_path(client, checkpoint_key(scope, group_name))
+        prior = read_checkpoint(path)
+        if prior is not None and prior.get("finished") is not True:
+            raise OmadaError("an unfinished IP group replacement already exists",
+                             hint=f"preview {group_name!r} with recoveryId={prior.get('operationId')!r}")
+        used_names = {str(row.get("name") or "").casefold() for row in groups_before}
+        tmp_name = f"{group_name}__tmp"
+        suffix = 1
+        while tmp_name.casefold() in used_names:
+            suffix += 1
+            tmp_name = f"{group_name}__tmp_{suffix}"
+        operation = {"version": 1, "scope": scope, "original": target_group,
+                     "entries": new_ip_list, "temporaryName": tmp_name,
+                     "ruleIds": [], "temporaryId": None, "replacementId": None,
+                     "completed": [], "pending": False, "finished": False}
+        observed = _swap_state(groups_before, acls_before, operation)
+        operation["ruleIds"] = sorted(observed["rules"])
+        ref_rules = [observed["rules"][rid] for rid in operation["ruleIds"]]
+        operation["originalRules"] = ref_rules
+        operation["expected"] = observed
+        plan = _swap_plan(operation["ruleIds"])
+
+    if not old_id or int(target_group.get("resource", 0) or 0) != 0 or group_name == "IPGroup_Any":
+        raise OmadaError(f"refusing to replace built-in/protected or unidentified group {group_name!r}")
+    group_type = int(target_group.get("type", 0))
+    if group_type != 0:
+        raise OmadaError("IP group replacement requires an IPv4 IP profile group")
+    _require_confirm("replace_ip_group", old_id, dryRun, confirm)
 
     # Check anti-stranding against any active deny ACL rules referencing this group.
     if ref_rules:
+        networks = _fetch_lan_collection(client, site)
         simulated_groups = [
-            ({**g, "ipList": new_ip_list} if _group_id(g) == old_id else g)
-            for g in groups_before
+            *[g for g in groups_before if _group_id(g) != old_id],
+            {**target_group, "ipList": new_ip_list},
         ]
         for rule in ref_rules:
             _check_acl_safety(
@@ -243,7 +392,15 @@ def replace_ip_group(
             )
 
     old_ip_list = copy.deepcopy(target_group.get("ipList") or [])
-    diff = {"ipList": {"before": old_ip_list, "after": new_ip_list}}
+    observed = _swap_state(groups_before, acls_before, operation)
+    observed_progress = len(operation["completed"])
+    if operation["pending"] and observed_progress < len(plan):
+        if _observe_pending(operation, plan[observed_progress], observed) is not None:
+            observed_progress += 1
+    elif observed != operation["expected"]:
+        raise OmadaError("live IP groups or ACLs changed outside the checkpoint; inspect them before recovering")
+    diff = {"ipList": {"before": old_ip_list, "after": new_ip_list},
+            "swapProgress": {"before": observed_progress, "after": len(plan)}}
     warnings = [
         "IP groups do not support PATCH; replacing deletes and recreates the group (non-atomic, receives a new groupId)"
     ]
@@ -251,21 +408,11 @@ def replace_ip_group(
         warnings.append(
             f"group is referenced by {len(ref_rules)} gateway ACL rule(s) "
             f"({', '.join(str(r.get('name') or r.get('id')) for r in ref_rules)}); "
-            "will execute the 6-step tmp-group swap"
+            f"will execute the {len(plan)}-step temporary-group swap"
         )
-        steps_plan = [
-            {"step": 1, "action": "create_temp_group", "name": f"{group_name}__tmp"},
-            {"step": 2, "action": "repoint_acls_to_temp", "ruleIds": [str(r.get("id")) for r in ref_rules]},
-            {"step": 3, "action": "delete_old_group", "groupId": old_id},
-            {"step": 4, "action": "recreate_group", "name": group_name},
-            {"step": 5, "action": "repoint_acls_to_new", "ruleIds": [str(r.get("id")) for r in ref_rules]},
-            {"step": 6, "action": "delete_temp_group"},
-        ]
-    else:
-        steps_plan = [
-            {"step": 1, "action": "delete_old_group", "groupId": old_id},
-            {"step": 2, "action": "recreate_group", "name": group_name},
-        ]
+    if recoveryId is not None:
+        warnings.append("Resume will finish the originally approved swap from the verified checkpoint.")
+    steps_plan = [{"step": index, **step} for index, step in enumerate(plan, start=1) if index > observed_progress]
 
     proposed_after = {
         "groupId": "<new-group-id>",
@@ -289,7 +436,7 @@ def replace_ip_group(
         return _dry_run_result(
             tool_name="replace_ip_group",
             target_id=old_id,
-            before=target_group,
+            before={**target_group, "swapInventory": observed},
             after=proposed_after,
             diff=diff,
             warnings=warnings,
@@ -297,16 +444,15 @@ def replace_ip_group(
             steps=steps_plan,
         )
 
-    expected_new_pairs = _ip_list_canonical(new_ip_list)
-    completed: list[dict[str, Any]] = []
-    snapshots: list[str] = []
-    tmp_id: str | None = None
-    new_id: str | None = None
+    completed: list[dict[str, Any]] = operation["completed"]
+    snapshots = [str(step["snapshot"]) for step in completed if step.get("snapshot")]
+    operation_id = recoveryId or f"{path.stem}-{uuid.uuid4().hex}"
+    durable = recoveryId is not None
 
     def _read_ip_groups() -> list[dict[str, Any]]:
         return [g for g in _fetch_groups(client, site) if int(g.get("type", 0)) == group_type]
 
-    def _delete_group(gid: str, step_label: str, snap_extra: Any) -> None:
+    def _delete_group(gid: str, step_label: str, snap_extra: Any) -> str:
         del_ep = f"sites/{site.site_id}/setting/profiles/groups/{group_type}/{gid}"
         res = client.write(
             del_ep,
@@ -323,10 +469,9 @@ def replace_ip_group(
             ),
             fields_changed=[step_label],
         )
-        snapshots.append(str(res["snapshot"]))
-        completed.append({"action": step_label, "groupId": gid, "snapshot": res["snapshot"]})
+        return str(res["snapshot"])
 
-    def _create_group(gname: str, glist: list[dict[str, Any]], step_label: str) -> dict[str, Any]:
+    def _create_group(gname: str, glist: list[dict[str, Any]], step_label: str) -> str:
         post_ep = f"sites/{site.site_id}/setting/profiles/groups"
         pairs = _ip_list_canonical(glist)
 
@@ -358,12 +503,9 @@ def replace_ip_group(
             reauth_prepare=_reauth_create,
             fields_changed=[step_label],
         )
-        snapshots.append(str(res["snapshot"]))
-        created = next(g for g in res["after"] if str(g.get("name")) == gname)
-        completed.append({"action": step_label, "groupId": _group_id(created), "snapshot": res["snapshot"]})
-        return created
+        return str(res["snapshot"])
 
-    def _repoint_rule(rule: dict[str, Any], from_id: str, to_id: str, step_label: str) -> None:
+    def _repoint_rule(rule: dict[str, Any], from_id: str, to_id: str, step_label: str) -> str:
         rid = str(rule["id"])
         patched_rule = _swap_rule_group_id(rule, from_id, to_id)
         acl_ep = f"sites/{site.site_id}/setting/firewall/acls/{rid}?type=0"
@@ -382,8 +524,8 @@ def replace_ip_group(
             ok, _ = _verify_rule(rule, fresh)
             if ok:
                 return True, None, None
-            if not _verify_rule_references(rule, fresh)[0]:
-                raise OmadaError(f"ACL rule {rid} references changed during session recovery")
+            if project_controller_row("acls", rule) != project_controller_row("acls", fresh):
+                raise OmadaError(f"ACL rule {rid} changed during session recovery")
             return False, _swap_rule_group_id(fresh, from_id, to_id), fresh
 
         res = client.write(
@@ -399,65 +541,92 @@ def replace_ip_group(
             reauth_prepare=_reauth_rule,
             fields_changed=[step_label, "sourceIds", "destinationIds"],
         )
-        snapshots.append(str(res["snapshot"]))
-        completed.append({"action": step_label, "ruleId": rid, "fromId": from_id, "toId": to_id})
+        return str(res["snapshot"])
+
+    def _execute_step(step: Mapping[str, str], live_rules: Sequence[dict[str, Any]]) -> str:
+        action = step["action"]
+        if action == "create_temp_group":
+            return _create_group(operation["temporaryName"], old_ip_list, action)
+        if action == "recreate_group":
+            return _create_group(group_name, new_ip_list, action)
+        if action == "delete_old_group":
+            return _delete_group(old_id, action, {"targetGroup": target_group, "tmpId": operation["temporaryId"]})
+        if action == "delete_temp_group":
+            return _delete_group(operation["temporaryId"], action, {"newId": operation["replacementId"]})
+        rule_id = step["ruleId"]
+        rule = next(row for row in live_rules if str(row.get("id")) == rule_id)
+        if action == "repoint_acls_to_temp":
+            return _repoint_rule(rule, old_id, operation["temporaryId"], action)
+        return _repoint_rule(rule, operation["temporaryId"], operation["replacementId"], action)
+
+    def _finish_step(step: Mapping[str, str], checked: tuple[dict[str, Any], str | None],
+                     snapshot: str | None) -> None:
+        state, group_id = checked
+        event: dict[str, Any] = dict(step)
+        if group_id is not None:
+            key = "temporaryId" if step["action"] == "create_temp_group" else "replacementId"
+            operation[key] = group_id
+            event["groupId"] = group_id
+        if snapshot is None:
+            event["reconciled"] = True
+        else:
+            event["snapshot"] = snapshot
+            snapshots.append(snapshot)
+        completed.append(event)
+        operation["expected"] = state
+        operation["pending"] = False
+        persist_checkpoint(path, operation)
 
     try:
-        if not ref_rules:
-            _delete_group(old_id, "delete_old_group", {"targetGroup": target_group})
-            created = _create_group(group_name, new_ip_list, "recreate_group")
-            new_id = _group_id(created)
-        else:
-            existing_names = {str(g.get("name")) for g in groups_before}
-            tmp_name = f"{group_name}__tmp"
-            suffix = 1
-            while tmp_name in existing_names:
-                suffix += 1
-                tmp_name = f"{group_name}__tmp_{suffix}"
-            tmp_group = _create_group(tmp_name, old_ip_list, "create_temp_group")
-            tmp_id = _group_id(tmp_group)
-            for rule in ref_rules:
-                _repoint_rule(rule, old_id, tmp_id, "repoint_acls_to_temp")
-            _delete_group(old_id, "delete_old_group", {"targetGroup": target_group, "tmpId": tmp_id})
-            created = _create_group(group_name, new_ip_list, "recreate_group")
-            new_id = _group_id(created)
-            for rule in ref_rules:
-                # Re-fetch rule with tmp_id so full object reflects live rule state.
-                _, live_acls = _fetch_acls(client, site)
-                live_rule = next((r for r in live_acls if str(r.get("id")) == str(rule["id"])), None)
-                if live_rule is None:
-                    raise OmadaError(f"referencing ACL rule {rule['id']} disappeared during replacement")
-                expected_temp = _swap_rule_group_id(rule, old_id, tmp_id)
-                ok, reason = _verify_rule_references(expected_temp, live_rule)
-                if not ok:
-                    raise OmadaError(f"ACL rule {rule['id']} changed during replacement: {reason}")
-                _repoint_rule(live_rule, tmp_id, new_id, "repoint_acls_to_new")
-            _delete_group(tmp_id, "delete_temp_group", {"tmpGroup": tmp_group, "newId": new_id})
+        with claim_checkpoint(client, path):
+            if read_checkpoint(path) != prior:
+                raise OmadaError("IP group recovery checkpoint changed; preview the current state again")
+            if not durable:
+                operation["operationId"] = operation_id
+                persist_checkpoint(path, operation)
+                durable = True
+            for step in plan[len(completed):]:
+                live_groups, (_, live_rules) = _fetch_groups(client, site), _fetch_acls(client, site)
+                observed = _swap_state(live_groups, live_rules, operation)
+                if operation["pending"]:
+                    reconciled = _observe_pending(operation, step, observed)
+                    if reconciled is not None:
+                        _finish_step(step, reconciled, None)
+                        continue
+                elif observed != operation["expected"]:
+                    raise OmadaError("live IP groups or ACLs changed outside the checkpoint; inspect them before recovering")
+                operation["pending"] = True
+                persist_checkpoint(path, operation)
+                latest_snapshot = _execute_step(step, live_rules)
+                live_groups, (_, live_rules) = _fetch_groups(client, site), _fetch_acls(client, site)
+                checked = _observe_pending(operation, step, _swap_state(live_groups, live_rules, operation))
+                if checked is None:
+                    raise OmadaError(f"live state did not verify the {step['action']} step")
+                _finish_step(step, checked, latest_snapshot)
 
-        final_group = next((g for g in _read_ip_groups() if _group_id(g) == new_id), None)
-        if not new_id or final_group is None or _ip_list_canonical(final_group.get("ipList") or []) != expected_new_pairs:
-            raise OmadaError("final IP group verification failed after replace_ip_group")
-        if ref_rules:
-            _, final_acls = _fetch_acls(client, site)
-            for rule in ref_rules:
-                live = next((r for r in final_acls if str(r.get("id")) == str(rule["id"])), None)
-                ok, reason = _verify_rule_references(_swap_rule_group_id(rule, old_id, new_id), live)
-                if not ok:
-                    raise OmadaError(f"ACL rule {rule['id']} did not retain intended references after the swap: {reason}")
+            new_id = operation["replacementId"]
+            final_groups, (_, final_acls) = _fetch_groups(client, site), _fetch_acls(client, site)
+            final_group = next((g for g in final_groups if _group_id(g) == new_id), None)
+            if final_group is None or _swap_state(final_groups, final_acls, operation) != operation["expected"]:
+                raise OmadaError("final IP group verification failed after replace_ip_group")
+            operation["finished"] = True
+            persist_checkpoint(path, operation)
     except OmadaError as exc:
+        if not durable:
+            raise
         failure = OmadaError(
             f"replace_ip_group failed mid-operation after {len(completed)} step(s): {exc.message}",
             code=exc.code,
             hint=(
                 f"completed steps={json_summary(completed)}; "
-                f"old_id={old_id}, tmp_id={tmp_id}, new_id={new_id}; "
-                f"snapshots={snapshots}; inspect live groups and ACL rules before recovering"
+                f"inspect the live inventory, then preview group={group_name!r} "
+                f"with recoveryId={operation_id!r} and omit cidrs and ipRange"
             ),
             endpoint=exc.endpoint,
         )
-        failure.write_status = exc.write_status
-        if failure.write_status is None and snapshots:
-            failure.write_status = {"outcome": "uncertain", "verified": False, "snapshot": snapshots[-1]}
+        failure.write_status = {**(exc.write_status or {"outcome": "uncertain", "verified": False,
+                                                       "snapshot": snapshots[-1] if snapshots else None}),
+                                "recoveryId": operation_id}
         raise failure from None
 
     committed_rollback = (
@@ -472,7 +641,7 @@ def replace_ip_group(
         tool_name="replace_ip_group",
         target_id=old_id,
         before=target_group,
-        after=_normalize_group_output(final_group),
+        after=_normalize_group_output(project_controller_row("groups", final_group)),
         diff=diff,
         snapshot=snapshots[0] if snapshots else None,
         warnings=warnings,

@@ -225,10 +225,9 @@ READ_TOOLS: list[Tool] = [
     Tool(
         name="network_audit",
         title="Audit site network health",
-        description=("One-call read-only health audit checking WAN state/packet loss, offline "
-                    "devices, pending firmware upgrades, switch PoE budget and downgraded "
-                    "uplinks, AP retry/interference spikes, 0-client APs, guest/unexpected "
-                    "VLAN clients, unisolated VLANs, and DHCP pool utilization."),
+        description=("Bounded read-only health audit for WAN, devices, switch/AP telemetry, "
+                     "clients, and VLANs. Reports source coverage and ratios of observed active "
+                     "clients to configured DHCP pool capacity."),
         input_schema=_EMPTY,
         output_schema=_NETWORK_AUDIT_SCHEMA,
         handler=_network_audit_enriched,
@@ -619,14 +618,15 @@ READ_TOOLS: list[Tool] = [
         name="diagnose_client",
         title="Diagnose a WiFi or wired client",
         description=(
-            "Correlate client signal/link state, connection history, parent AP radio or switch port "
-            "telemetry, and recent logs into actionable diagnostic findings."
+            "Correlate live client and parent device telemetry with dated sessions and logs. "
+            "Separate direct client events from infrastructure events and report source coverage."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "mac": {"type": "string", "description": "Client MAC (any format), hostname, or IP"},
-                "hours": {"type": "integer", "minimum": 0, "default": 24},
+                "hours": {"type": "integer", "minimum": 0, "default": 24,
+                          "description": "Connection history and log window in hours (0 for all dated history)"},
             },
             "required": ["mac"],
         },
@@ -637,8 +637,8 @@ READ_TOOLS: list[Tool] = [
         name="diagnose_wan",
         title="Diagnose gateway WAN & VPN health",
         description=(
-            "Correlate live WAN link state, latency/packet loss, speedtest, VPN tunnel health, "
-            "and gateway alerts/events into deterministic findings."
+            "Correlate WAN reachability evidence, latency, loss, speed tests, VPNs, and gateway logs. "
+            "Distinguish missing gateway or telemetry from a confirmed outage."
         ),
         input_schema={
             "type": "object",
@@ -918,7 +918,7 @@ READ_TOOLS: list[Tool] = [
         name="audit_all_sites",
         title="Audit all visible sites",
         description=(
-            "Cross-site fleet health rollup across visible sites (strictly refused unless OMADA_ALLOW_CROSS_SITE=true)."
+            "Bounded fleet health rollup with per-site coverage and partial results. Requires OMADA_ALLOW_CROSS_SITE=true."
         ),
         input_schema={
             "type": "object",

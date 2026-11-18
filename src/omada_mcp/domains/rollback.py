@@ -103,8 +103,9 @@ def _check_rollback_not_superseded(
     *,
     force: bool,
     scope: Mapping[str, Any],
+    resource: Any,
 ) -> None:
-    """Refuse rolling back a snapshot superseded by a newer write on the same target."""
+    """Require newer writes on this resource to be restored in reverse order."""
     if force or not orig_target:
         return
     audit_path = client._snapshot_dir() / "audit.jsonl"
@@ -128,28 +129,37 @@ def _check_rollback_not_superseded(
             entries.append(row)
 
     sid_idx = next((idx for idx, row in enumerate(entries) if row.get("snapshot") == sid), None)
-    newer: list[dict[str, Any]] = []
+    newer: dict[str, dict[str, Any]] = {}
     if sid_idx is not None:
         candidates = entries[sid_idx + 1:]
     else:
         candidates = [row for row in entries if snap_timestamp and str(row.get("timestamp") or "") > snap_timestamp]
 
     for row in candidates:
-        if row.get("result") != "success":
-            continue
-        if str(row.get("tool") or "") == "rollback_from_snapshot":
-            continue
         if any(row.get(key) is not None and value != row[key] for key, value in scope.items()):
             continue
-        if str(row.get("target") or "") == orig_target:
-            newer.append(row)
+        target = row.get("target")
+        result = row.get("result")
+        if row.get("tool") == "rollback_from_snapshot":
+            if (isinstance(target, str) and result == "success" and row.get("verified") is True
+                    and scope and all(row.get(key) == value for key, value in scope.items())):
+                newer.pop(target, None)
+            continue
+        row_resource = row.get("resource")
+        if isinstance(resource, Mapping) and isinstance(row_resource, Mapping):
+            same_resource = resource == row_resource
+        else:
+            same_resource = target == orig_target
+        row_snapshot = row.get("snapshot")
+        if same_resource and isinstance(row_snapshot, str) and result in ("success", "accepted", "verification_failed", "error"):
+            newer[row_snapshot] = row
 
     if newer:
-        latest = newer[-1]
+        latest = next(reversed(newer.values()))
         raise OmadaError(
-            f"stale snapshot {sid!r}: newer committed write {latest.get('snapshot')!r} "
+            f"stale snapshot {sid!r}: newer unresolved write {latest.get('snapshot')!r} "
             f"({latest.get('tool')}) modified target {orig_target!r}",
-            hint="review the newer write and current controller state before setting force=true to override",
+            hint="restore the newer write first, or inspect current state before using force=true",
         )
 
 
@@ -219,7 +229,8 @@ def rollback_from_snapshot(
             f"snapshot {sid!r} requires manual restoration of credentials",
             hint="restore the configuration with the intended credentials; snapshots do not retain them",
         )
-    _check_rollback_not_superseded(client, sid, orig_target, snap_timestamp, force=bool(force), scope=scope)
+    _check_rollback_not_superseded(client, sid, orig_target, snap_timestamp, force=bool(force),
+                                   scope=scope, resource=envelope.get("resource"))
     _require_confirm("rollback_from_snapshot", sid, dryRun, confirm)
 
     warnings: list[str] = [f"Rolling back snapshot {sid} created by {orig_tool} (target={orig_target})."]
