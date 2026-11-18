@@ -189,6 +189,8 @@ WRITE_TOOLS_A: list[Tool] = [
             "type": "object",
             "properties": {
                 "group": {"type": "string", "description": "IP group ID or exact name"},
+                "id": {"type": "string", "description": "Legacy alias for group"},
+                "groupId": {"type": "string", "description": "Legacy alias for group"},
                 "cidrs": {
                     "type": "array",
                     "description": "Replacement IPv4 CIDRs, IPs, ranges, or {ip, mask} objects",
@@ -573,6 +575,8 @@ WRITE_TOOLS_A: list[Tool] = [
             "type": "object",
             "properties": {
                 "group": {"type": "string", "description": "IP group ID or exact name"},
+                "id": {"type": "string", "description": "Legacy alias for group"},
+                "groupId": {"type": "string", "description": "Legacy alias for group"},
                 **_WRITE_CONTROL_PROPS,
             },
             "required": ["group"],
@@ -641,7 +645,7 @@ WRITE_TOOLS_A: list[Tool] = [
                 "clearVlan": {"type": "boolean", "default": False, "description": "Reset SSID VLAN binding to default"},
                 "guest": {"type": "boolean", "description": "Toggle guest network mode"},
                 "broadcast": {"type": "boolean", "description": "Enable/disable SSID broadcast"},
-                "pmfMode": {"type": ["string", "integer"], "description": "'disable', 'capable', or 'mandatory'"},
+                "pmfMode": {"type": ["string", "integer"], "description": "'disable' (3), 'capable' (2), or 'mandatory' (1)"},
                 "enable11r": {"type": "boolean", "description": "Toggle 802.11r fast roaming"},
                 "bandSteering": {
                     "type": ["string", "integer"],

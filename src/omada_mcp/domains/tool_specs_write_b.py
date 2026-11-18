@@ -739,6 +739,8 @@ WRITE_TOOLS_B: list[Tool] = [
             "type": "object",
             "properties": {
                 "group": {"type": "string", "description": "Port group ID or exact name"},
+                "id": {"type": "string", "description": "Legacy alias for group"},
+                "groupId": {"type": "string", "description": "Legacy alias for group"},
                 **_WRITE_CONTROL_PROPS,
             },
             "required": ["group"],
@@ -783,6 +785,8 @@ WRITE_TOOLS_B: list[Tool] = [
             "type": "object",
             "properties": {
                 "group": {"type": "string", "description": "MAC group ID or exact name"},
+                "id": {"type": "string", "description": "Legacy alias for group"},
+                "groupId": {"type": "string", "description": "Legacy alias for group"},
                 **_WRITE_CONTROL_PROPS,
             },
             "required": ["group"],

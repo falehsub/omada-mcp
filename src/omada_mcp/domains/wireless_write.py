@@ -259,6 +259,27 @@ def create_ssid(
     )
 
 
+def _apply_bool_or_enable_object(
+    field: str,
+    enabled: bool,
+    before_safe: Mapping[str, Any],
+    patch_body: dict[str, Any],
+    diff: dict[str, Any],
+    expected: dict[str, Any],
+) -> None:
+    """Update a toggle field that may be a bare bool (5.x/6.2) or ``{enable: bool}`` (6.3+)."""
+    existing = patch_body.get(field)
+    if isinstance(existing, Mapping):
+        updated = {**dict(existing), "enable": enabled}
+        diff[field] = {"before": copy.deepcopy(before_safe.get(field)), "after": copy.deepcopy(updated)}
+        patch_body[field] = updated
+        expected[field] = {"enable": enabled}
+    else:
+        diff[field] = {"before": before_safe.get(field), "after": enabled}
+        patch_body[field] = enabled
+        expected[field] = enabled
+
+
 def update_ssid(
     client: OmadaClient,
     ssid: str,
@@ -350,20 +371,14 @@ def update_ssid(
         patch_body["bandSteeringForMultiBand"] = cur_bs
         expected["bandSteeringForMultiBand"] = {"mode": bs_mode}
     if loadBalance is not None:
-        lb_val = bool(loadBalance)
-        diff["loadBalance"] = {"before": before_safe.get("loadBalance"), "after": lb_val}
-        patch_body["loadBalance"] = lb_val
-        expected["loadBalance"] = lb_val
+        _apply_bool_or_enable_object("loadBalance", bool(loadBalance), before_safe, patch_body, diff, expected)
     if wifiCalling is not None:
         wc_val = bool(wifiCalling)
         diff["wifiCallingEnable"] = {"before": before_safe.get("wifiCallingEnable"), "after": wc_val}
         patch_body["wifiCallingEnable"] = wc_val
         expected["wifiCallingEnable"] = wc_val
     if condBroadcast is not None:
-        cb_val = bool(condBroadcast)
-        diff["condBroadcastCtrl"] = {"before": before_safe.get("condBroadcastCtrl"), "after": cb_val}
-        patch_body["condBroadcastCtrl"] = cb_val
-        expected["condBroadcastCtrl"] = cb_val
+        _apply_bool_or_enable_object("condBroadcastCtrl", bool(condBroadcast), before_safe, patch_body, diff, expected)
     if macFilterEnable is not None:
         mf_val = bool(macFilterEnable)
         diff["macFilterEnable"] = {"before": before_safe.get("macFilterEnable"), "after": mf_val}
