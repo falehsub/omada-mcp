@@ -17,6 +17,7 @@ from .devices_write import (
     run_traceroute,
     start_rf_scan,
     start_wan_speedtest,
+    survey_wifi,
     update_ap_radio,
     update_device,
 )
@@ -343,7 +344,7 @@ WRITE_TOOLS_B: list[Tool] = [
         title="Start AP RF environment scan",
         description=(
             "Trigger an RF spectrum scan on an adopted AP (POST cmd/eaps/{MAC}/tools/rfScan). "
-            "Briefly interrupts client service while scanning."
+            "Reports affected client counts on preview and briefly interrupts client service while scanning."
         ),
         input_schema={
             "type": "object",
@@ -356,6 +357,31 @@ WRITE_TOOLS_B: list[Tool] = [
         },
         output_schema=WRITE_ENVELOPE_SCHEMA,
         handler=start_rf_scan,
+        read_only=False,
+        destructive=True,
+        idempotent=False,
+    ),
+    Tool(
+        name="survey_wifi",
+        title="Impact-aware AP Wi-Fi RF survey",
+        description=(
+            "Preview per-radio client disconnect impact on dryRun=true, then trigger an AP RF scan and "
+            "optionally poll until terminal status to return per-band neighbor/channel results."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "deviceMac": {"type": "string", "description": "Adopted AP MAC address or exact name"},
+                "bands": {"type": "array", "items": {"type": "string"}, "description": "Optional bands e.g. ['2g', '5g']"},
+                "wait": {"type": "boolean", "default": True, "description": "Poll until scan completes (default true)"},
+                "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 180, "default": 90, "description": "Max poll seconds"},
+                "pollIntervalSeconds": {"type": "integer", "minimum": 1, "maximum": 30, "default": 5, "description": "Poll interval seconds"},
+                **_WRITE_CONTROL_PROPS,
+            },
+            "required": ["deviceMac"],
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=survey_wifi,
         read_only=False,
         destructive=True,
         idempotent=False,

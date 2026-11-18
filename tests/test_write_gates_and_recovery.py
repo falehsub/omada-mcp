@@ -49,10 +49,10 @@ class WriteConfigTests(unittest.TestCase):
         ro_names = {t.name for t in TOOLS if t.read_only}
         wr_names = {t.name for t in TOOLS if not t.read_only}
         self.assertEqual(len(ro_names), 55)
-        self.assertEqual(len(wr_names), 79)
+        self.assertEqual(len(wr_names), 80)
         self.assertEqual(config_mod._READ_ONLY_TOOL_NAMES, ro_names)
         self.assertEqual(set(WRITE_TOOL_NAMES), wr_names)
-        self.assertEqual(len(TOOLS), 134)
+        self.assertEqual(len(TOOLS), 135)
 
     def test_parse_write_tools_validation(self):
         self.assertEqual(parse_write_tools(None), ())
@@ -280,6 +280,7 @@ class GateAndProtocolTests(unittest.TestCase):
             "delete_port_profile": (False, True, True),
             "update_ap_radio": (False, False, True),
             "start_rf_scan": (False, True, False),
+            "survey_wifi": (False, True, False),
             "assign_ap_wlan_group": (False, False, True),
             "upsert_policy_route": (False, False, True),
             "delete_policy_route": (False, True, True),

@@ -255,10 +255,23 @@ def _get_ap_radios(
         )
 
 
-def _get_rf_scan(client: OmadaClient, mac: str) -> dict[str, Any]:
+def _get_rf_scan(
+    client: OmadaClient,
+    mac: str,
+    wait: bool = False,
+    timeoutSeconds: int = 90,
+    pollIntervalSeconds: int = 5,
+) -> dict[str, Any]:
     site = _site(client)
     ap = resolve_raw_device(client, site, mac, expected_type="ap")
-    return collect_rf_scan_data(client, site, ap)
+    return collect_rf_scan_data(
+        client,
+        site,
+        ap,
+        wait=bool(wait),
+        timeout_seconds=as_int_or_none(timeoutSeconds) or 90,
+        poll_interval_seconds=as_int_or_none(pollIntervalSeconds) or 5,
+    )
 
 
 def _list_port_profiles(client: OmadaClient) -> list[dict[str, Any]]:
@@ -504,9 +517,14 @@ _RF_SCAN_SCHEMA: dict[str, Any] = {
         "supportRfScan": {"type": "boolean"},
         "scanTime": {"type": ["integer", "string", "null"]},
         "status": {"type": ["integer", "string", "null"]},
+        "statusLabel": {"type": ["string", "null"]},
         "bandStatuses": {"type": "object"},
+        "bandStatusLabels": {"type": "object"},
+        "bandTimes": {"type": "object"},
+        "timedOut": {"type": "boolean"},
         "radioUtilization": {"type": "array", "items": {"type": "object"}},
         "channels": {"type": "array", "items": {"type": "object"}},
+        "channelsByBand": {"type": "object"},
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["mac", "name", "supportRfScan", "radioUtilization", "channels", "warnings"],

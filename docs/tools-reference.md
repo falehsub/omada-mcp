@@ -2,7 +2,7 @@
 
 # Tool & Configuration Reference
 
-Generated directly from `omada_mcp.tools.TOOLS` (**134 total**: **55 read-only**, **79 opt-in write**).
+Generated directly from `omada_mcp.tools.TOOLS` (**135 total**: **55 read-only**, **80 opt-in write**).
 
 - Required parameters are shown in **`bold`**; optional parameters carry `?`.
 - Site-scoped tools accept optional `site?` (pinned when `OMADA_SITE_NAME`/`OMADA_SITE_ID` is set unless `OMADA_ALLOW_CROSS_SITE=true`).
@@ -19,7 +19,7 @@ Generated directly from `omada_mcp.tools.TOOLS` (**134 total**: **55 read-only**
 | `routing` | 8 | 18 | 26 |
 | `security` | 6 | 13 | 19 |
 | `switch` | 5 | 11 | 16 |
-| `wifi` | 8 | 12 | 20 |
+| `wifi` | 8 | 13 | 21 |
 
 ## Read-Only Tools (55)
 
@@ -50,7 +50,7 @@ Generated directly from `omada_mcp.tools.TOOLS` (**134 total**: **55 read-only**
 | `list_logs` | read-only | `diagnostics` | `readOnly=true, destructive=false, idempotent=true` | `category?`, `hours?`, `level?`, `limit?`, `site?` | Query controller site logs ('alerts', 'events', or 'audit') with time window, optional level filter, and row cap. |
 | `get_switch_ports` | read-only | `switch` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `includeCounters?`, `includeCableTest?`, `includeDownPorts?`, `compact?`, `site?` | Inspect switch port links, PoE, VLANs, counters, cable tests, LAGs, and uplinks. collectionStatus reports partial or unavailable inventory, and unknown LAG membership is null. |
 | `get_ap_radios` | read-only | `wifi` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `includeRfScan?`, `includeAvailableChannels?`, `site?` | Inspect an AP's 2.4G/5G/5G2/6G radios: channel, width, TX power, channel utilization, interference, retry/drop counters, supported channels, and latest RF scan. |
-| `get_rf_scan` | read-only | `wifi` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `site?` | Read the latest cached RF scan status/neighbor results (empty channels list if no scan was triggered) and per-radio utilization for an AP. |
+| `get_rf_scan` | read-only | `wifi` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `wait?`, `timeoutSeconds?`, `pollIntervalSeconds?`, `site?` | Read per-band RF scan status, timestamps, neighbor channels, and radio utilization for an AP; pass wait=true to poll until a running scan completes. |
 | `get_wan_status` | read-only | `diagnostics` | `readOnly=true, destructive=false, idempotent=true` | `includeSpeedtest?`, `maskWanIp?`, `site?` | Inspect gateway WAN link state, gateway/DNS/WAN IP, failover/load-balance mode, latency/packet loss health metrics, and latest speedtest results. |
 | `list_vpn_tunnels` | read-only | `routing` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List WireGuard, OpenVPN, IPsec, and SSL/L2TP VPN tunnel state and configured profiles (all private keys, PSKs, and passwords redacted). |
 | `get_topology` | read-only | `diagnostics` | `readOnly=true, destructive=false, idempotent=true` | `includeClients?`, `site?` | Build the site's Gateway -> Switch(port) -> AP/Switch uplink tree with device counts. |
@@ -81,7 +81,7 @@ Generated directly from `omada_mcp.tools.TOOLS` (**134 total**: **55 read-only**
 | `list_hotspot_vouchers` | read-only | `hotspot` | `readOnly=true, destructive=false, idempotent=true` | `groupId?`, `limit?`, `site?` | Read hotspot voucher groups and individual voucher statuses without redeemable codes (category 'hotspot'). |
 | `audit_all_sites` | read-only | `diagnostics` | `readOnly=true, destructive=false, idempotent=true, global` | `maxSites?` | Bounded fleet health rollup with per-site coverage and partial results. Requires OMADA_ALLOW_CROSS_SITE=true. |
 
-## Opt-In Write Tools (79)
+## Opt-In Write Tools (80)
 
 | Tool | Tier | Category | Hints | Parameters | Description |
 |---|---|---|---|---|---|
@@ -122,7 +122,8 @@ Generated directly from `omada_mcp.tools.TOOLS` (**134 total**: **55 read-only**
 | `upsert_port_profile` | opt-in write | `switch` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, `profileId?`, `poeMode?`, `nativeNetworkId?`, `nativeNetworkName?`, `taggedNetworkIds?`, `untaggedNetworkIds?`, `portIsolationEnable?`, `lldpMedEnable?`, `spanningTreeEnable?`, `loopbackDetectEnable?`, `flowControlEnable?`, `eeeEnable?`, `dot1x?`, `dryRun?`, `confirm?`, `site?` | Create or update a wired LAN switch port profile (setting/lan/profiles). Refuses modifying protected built-in profiles (prohibitModify=true). |
 | `delete_port_profile` | opt-in write | `switch` | `readOnly=false, destructive=true, idempotent=true` | **`profile`**, `dryRun?`, `confirm?`, `site?` | Delete a custom wired LAN switch port profile by ID or exact name (DELETE setting/lan/profiles/{id}). Refuses built-in protected profiles. |
 | `update_ap_radio` | opt-in write | `wifi` | `readOnly=false, destructive=false, idempotent=true` | **`deviceMac`**, **`band`**, `enabled?`, `channel?`, `channelWidth?`, `txPowerLevel?`, `txPower?`, `dryRun?`, `confirm?`, `site?` | Update one band ('2g', '5g', '5g2', '6g') of an adopted AP while preserving sibling band blocks (PUT eaps/{MAC}/config/radios). Validates channel/channelWidth against AP channelInfo first. |
-| `start_rf_scan` | opt-in write | `wifi` | `readOnly=false, destructive=true, idempotent=false` | **`deviceMac`**, `bands?`, `dryRun?`, `confirm?`, `site?` | Trigger an RF spectrum scan on an adopted AP (POST cmd/eaps/{MAC}/tools/rfScan). Briefly interrupts client service while scanning. |
+| `start_rf_scan` | opt-in write | `wifi` | `readOnly=false, destructive=true, idempotent=false` | **`deviceMac`**, `bands?`, `dryRun?`, `confirm?`, `site?` | Trigger an RF spectrum scan on an adopted AP (POST cmd/eaps/{MAC}/tools/rfScan). Reports affected client counts on preview and briefly interrupts client service while scanning. |
+| `survey_wifi` | opt-in write | `wifi` | `readOnly=false, destructive=true, idempotent=false` | **`deviceMac`**, `bands?`, `wait?`, `timeoutSeconds?`, `pollIntervalSeconds?`, `dryRun?`, `confirm?`, `site?` | Preview per-radio client disconnect impact on dryRun=true, then trigger an AP RF scan and optionally poll until terminal status to return per-band neighbor/channel results. |
 | `assign_ap_wlan_group` | opt-in write | `wifi` | `readOnly=false, destructive=false, idempotent=true` | **`deviceMac`**, **`wlanGroup`**, `dryRun?`, `confirm?`, `site?` | Assign a WLAN group by ID or exact name to an adopted AP (PUT eaps/{MAC}/config/wlans) while preserving existing ssidOverrides. |
 | `set_wifi_radio_features` | opt-in write | `wifi` | `readOnly=false, destructive=false, idempotent=true` | `fastRoaming80211r?`, `aiRoamingEnable?`, `dualBand11kReportEnable?`, `forceDisassociationEnable?`, `nonStickRoamingEnable?`, `nonPingPongRoamingEnable?`, `bandSteeringEnable?`, `connectionThreshold?`, `differenceThreshold?`, `maxFailures?`, `multiBandMode?`, `atf2g?`, `atf5g?`, `atf6g?`, `meshEnable?`, `autoFailoverEnable?`, `lldpEnable?`, `advancedFeatureEnable?`, `dryRun?`, `confirm?`, `site?` | Update site-wide Wi-Fi roaming (802.11r/11k, AI/non-stick/non-ping-pong roaming, force disassociation), band steering thresholds, airtime fairness, and mesh flags. |
 | `upsert_policy_route` | opt-in write | `routing` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, `routeId?`, `status?`, `protocols?`, `sourceType?`, `sourceIds?`, `destinationType?`, `destinationIds?`, `interfaceIds?`, `backupInterface?`, `dryRun?`, `confirm?`, `site?` | Create or update a gateway PBR / policy routing rule (setting/transmission/policyRoutings). Requires an adopted gateway. |

@@ -84,7 +84,7 @@ jobs:
           python -m pip install --force-reinstall --no-deps dist/*.whl
           omada-mcp --version
           omada-mcp --list-tools | python -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==55, len(d['tools'])"
-          omada-mcp --list-tools --all | python -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==134, len(d['tools'])"
+          omada-mcp --list-tools --all | python -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==135, len(d['tools'])"
 
       - name: Verify clean uvx execution from built wheel
         uses: astral-sh/setup-uv@v5
@@ -176,4 +176,4 @@ jobs:
           expected_name=$(python3 -c 'import json; print(json.load(open("server.json"))["name"])')
           test "$registry_name" = "$expected_name"
           docker run --rm omada-mcp:ci --list-tools | python3 -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==55, len(d['tools'])"
-          docker run --rm omada-mcp:ci --list-tools --all | python3 -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==134, len(d['tools'])"
+          docker run --rm omada-mcp:ci --list-tools --all | python3 -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==135, len(d['tools'])"

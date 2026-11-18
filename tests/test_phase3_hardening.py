@@ -411,6 +411,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "set_wifi_radio_features": {"nonStickRoamingEnable": True},
                 "start_cable_test": {"deviceMac": "AA-BB-CC-00-00-02", "ports": [3]},
                 "start_rf_scan": {"deviceMac": "AA-BB-CC-00-00-03"},
+                "survey_wifi": {"deviceMac": "AA-BB-CC-00-00-03"},
                 "start_wan_speedtest": {},
                 "update_ap_radio": {"deviceMac": "AA-BB-CC-00-00-03", "band": "5g", "channel": 36},
                 "update_client": {"mac": "AA-BB-CC-11-11-01", "name": "workstation-1"},
@@ -465,7 +466,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 },
                 "upsert_wireguard_tunnel": {"name": "wg-lab-new", "localIp": "10.68.0.1/24"},
             }
-            self.assertEqual(len(WRITE_TOOL_NAMES), 79)
+            self.assertEqual(len(WRITE_TOOL_NAMES), 80)
             self.assertEqual(set(sample_args.keys()), set(WRITE_TOOL_NAMES))
 
             for tool_name in sorted(WRITE_TOOL_NAMES):

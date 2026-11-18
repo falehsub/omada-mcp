@@ -95,6 +95,7 @@ _TOOL_CATEGORIES: dict[str, str] = {
     "delete_ssid": "wifi",
     "update_ap_radio": "wifi",
     "start_rf_scan": "wifi",
+    "survey_wifi": "wifi",
     "assign_ap_wlan_group": "wifi",
     "set_client_lock_to_ap": "wifi",
     "upsert_rate_limit_profile": "wifi",

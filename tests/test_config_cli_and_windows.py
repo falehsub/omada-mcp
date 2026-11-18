@@ -390,7 +390,7 @@ class CliTests(unittest.TestCase):
             finally:
                 sys.stdout = original
             payload_all = json.loads(buffer_all.getvalue())
-            self.assertEqual(len(payload_all["tools"]), 134)
+            self.assertEqual(len(payload_all["tools"]), 135)
 
         with tempfile.TemporaryDirectory() as tmp:
             env_file = Path(tmp) / "custom.env"

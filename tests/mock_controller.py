@@ -528,6 +528,8 @@ class MockController:
         self.corrupt_dhcp_on_patch: bool = False
         self.drop_collection_isolation_sync: bool = False
         self.omada62_lan_normalization: bool = False
+        self.rf_scan_poll_sequence: list[dict[str, Any]] = []
+        self.rf_scan_post_poll_sequence: list[dict[str, Any]] = []
         self.next_fault_hook: Callable[[str, str, Any], tuple[int, dict[str, Any]] | None] | None = None
 
     @property
@@ -1489,6 +1491,9 @@ class MockController:
             mac = _normalize_mac(urllib.parse.unquote(m_eap_rf.group(2)))
             if mac not in self.eap_rf_scan:
                 return self._err(-39303, "EAP does not exist.")
+            if self.rf_scan_poll_sequence:
+                nxt = self.rf_scan_poll_sequence.pop(0)
+                self.eap_rf_scan[mac].update(copy.deepcopy(nxt))
             return self._ok(copy.deepcopy(self.eap_rf_scan[mac]))
 
         m_eap_rf_cmd = re.fullmatch(r"sites/([^/]+)/cmd/eaps/([^/]+)/tools/rfScan", ep)
@@ -1498,8 +1503,13 @@ class MockController:
                 return self._err(-39303, "EAP does not exist.")
             rf_obj = self.eap_rf_scan.setdefault(mac, {"status": 0})
             rf_obj["lastScanAt"] = int(time.time() * 1000)
+            if isinstance(body, Mapping) and "radioIdList" in body:
+                rf_obj["lastRadioIdList"] = copy.deepcopy(body["radioIdList"])
             if isinstance(body, Mapping) and "scanType" in body:
                 rf_obj["lastScanBands"] = copy.deepcopy(body["scanType"])
+            if self.rf_scan_post_poll_sequence:
+                self.rf_scan_poll_sequence = copy.deepcopy(self.rf_scan_post_poll_sequence)
+                self.rf_scan_post_poll_sequence = []
             return self._ok({})
 
         m_eap_radios = re.fullmatch(r"sites/([^/]+)/eaps/([^/]+)/config/radios", ep)

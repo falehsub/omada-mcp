@@ -557,11 +557,17 @@ READ_TOOLS: list[Tool] = [
     Tool(
         name="get_rf_scan",
         title="Get AP RF scan results",
-        description="Read the latest cached RF scan status/neighbor results (empty channels list if no scan was triggered) and per-radio utilization for an AP.",
+        description=(
+            "Read per-band RF scan status, timestamps, neighbor channels, and radio utilization for an AP; "
+            "pass wait=true to poll until a running scan completes."
+        ),
         input_schema={
             "type": "object",
             "properties": {
                 "mac": {"type": "string", "description": "Managed access point MAC address or exact name"},
+                "wait": {"type": "boolean", "default": False, "description": "Poll until scanning completes"},
+                "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 180, "default": 90, "description": "Max poll duration (s)"},
+                "pollIntervalSeconds": {"type": "integer", "minimum": 1, "maximum": 30, "default": 5, "description": "Poll interval (s)"},
             },
             "required": ["mac"],
         },
