@@ -238,7 +238,7 @@ def init_lab(
                 },
                 "deviceAccountSetting": {
                     "username": "labdev",
-                    "password": admin_password,
+                    "password": _default_lab_password("LabDev"),
                 },
             },
         ]
@@ -356,14 +356,20 @@ def init_lab(
     }
 
 
+def _default_lab_password(prefix: str) -> str:
+    # Omada v5.x wizardConfig rejects passwords longer than 16 characters; keep
+    # generated passwords at 15 chars with uppercase, lowercase, digits, and '!'.
+    return f"{prefix}!{secrets.randbelow(9000) + 1000}{secrets.token_hex(2)}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="https://127.0.0.1:8043")
     parser.add_argument("--site-name", default="DockerLab")
     parser.add_argument("--admin-user", default="omada_lab_admin")
     parser.add_argument("--viewer-user", default="omada_lab_viewer")
-    parser.add_argument("--admin-password", default=os.environ.get("LAB_ADMIN_PASSWORD") or f"LabAdm!{secrets.token_hex(6)}")
-    parser.add_argument("--viewer-password", default=os.environ.get("LAB_VIEWER_PASSWORD") or f"LabVwr!{secrets.token_hex(6)}")
+    parser.add_argument("--admin-password", default=os.environ.get("LAB_ADMIN_PASSWORD") or _default_lab_password("LabAdm"))
+    parser.add_argument("--viewer-password", default=os.environ.get("LAB_VIEWER_PASSWORD") or _default_lab_password("LabVwr"))
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--timeout", type=float, default=240.0)
     args = parser.parse_args(argv)
