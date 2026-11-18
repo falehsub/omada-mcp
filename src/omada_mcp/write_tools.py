@@ -105,7 +105,13 @@ from .domains.clients_write import (
     set_client_rate_limit,
     update_client,
 )
-from .domains.devices_write import reboot_device, start_rf_scan, survey_wifi, update_ap_radio, update_device
+from .domains.devices_write import (
+    reboot_device,
+    start_rf_scan,
+    survey_wifi,
+    update_ap_radio,
+    update_device,
+)
 from .domains.networks_write import (
     create_lan_network,
     delete_lan_network,
