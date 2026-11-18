@@ -43,7 +43,12 @@ class V251LiveFixesTests(unittest.TestCase):
             )
             ctrl.rf_scan_post_poll_sequence = [
                 {"status": 2, "status5g": 2, "channel5g": []},
-                {"status": 1, "status5g": 1, "channel5g": [{"channel": 36, "ssid": "Lab-Neighbor", "rssi": -65}]},
+                {
+                    "status": 0,
+                    "status5g": 0,
+                    "time5g": 1795026269759,
+                    "channel5g": [{"chan": 36, "chanWidth": 3, "inter": -95, "util": 0}],
+                },
             ]
             applied = unwrap_ok(
                 call_tool(
@@ -58,7 +63,55 @@ class V251LiveFixesTests(unittest.TestCase):
                 )
             )
             self.assertTrue(applied["applied"])
+            self.assertTrue(applied["verified"])
+            self.assertEqual(applied["outcome"], "verified")
+            self.assertEqual(applied["after"]["statusLabel"], "idle")
+            self.assertFalse(applied["after"]["timedOut"])
+            self.assertFalse(applied["after"]["scanning"])
+            self.assertGreaterEqual(applied["after"]["polls"], 1)
+            self.assertEqual(applied["after"]["channelCount"], 1)
+            row_5g = applied["after"]["channelsByBand"]["5g"][0]
+            self.assertEqual(row_5g["chanWidth"], 3)
+            self.assertEqual(row_5g["chanWidthLabel"], "40MHz")
             self.assertEqual(len(applied["after"]["rfScan"]["channelsByBand"]["5g"]), 1)
+
+            # Timeout during polling must report outcome='accepted' / verified=False rather than raising
+            pv_to = unwrap_ok(
+                call_tool(
+                    server,
+                    "survey_wifi",
+                    {
+                        "deviceMac": "AA-BB-CC-00-00-03",
+                        "bands": ["5g"],
+                        "wait": True,
+                        "timeoutSeconds": 3,
+                        "pollIntervalSeconds": 2,
+                        "dryRun": True,
+                    },
+                )
+            )
+            ctrl.rf_scan_post_poll_sequence = [{"status": 2, "status5g": 2, "channel5g": []}]
+            timed_out_res = unwrap_ok(
+                call_tool(
+                    server,
+                    "survey_wifi",
+                    {
+                        "deviceMac": "AA-BB-CC-00-00-03",
+                        "bands": ["5g"],
+                        "wait": True,
+                        "timeoutSeconds": 3,
+                        "pollIntervalSeconds": 2,
+                        "dryRun": False,
+                        "confirm": pv_to["confirmToken"],
+                    },
+                )
+            )
+            self.assertTrue(timed_out_res["applied"])
+            self.assertFalse(timed_out_res["verified"])
+            self.assertEqual(timed_out_res["outcome"], "accepted")
+            self.assertTrue(timed_out_res["after"]["timedOut"])
+            # Reset rf_scan state to completed before the raw-scan check below
+            ctrl.eap_rf_scan["AA-BB-CC-00-00-03"].update({"status": 1, "status5g": 1})
 
             # Same stability for start_rf_scan when controller 'time' advances between preview and apply
             pv_raw = unwrap_ok(
