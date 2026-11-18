@@ -408,6 +408,7 @@ class V11FeatureTests(unittest.TestCase):
             ("get_device", {"mac": "AA-BB-CC-00-00-01"}),
             ("get_client", {"mac": "AA-BB-CC-11-11-01"}),
             ("list_wlans", {}),
+            ("get_ssid", {"ssid": "lab"}),
             ("list_lan_networks", {}),
             ("list_dhcp_reservations", {}),
             ("list_acls", {}),

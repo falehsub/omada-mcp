@@ -112,6 +112,62 @@ ACL_TYPE_LABELS: dict[int, str] = {
     2: "eap",
 }
 
+BAND_STEERING_LABELS: dict[int, str] = {
+    0: "disable",
+    1: "prefer_5g",
+    2: "balanced",
+    3: "site",
+}
+
+BAND_STEERING_TO_CODE: dict[str, int] = {
+    "disable": 0,
+    "off": 0,
+    "0": 0,
+    "prefer_5g": 1,
+    "prefer5g": 1,
+    "prefer-5g": 1,
+    "1": 1,
+    "balanced": 2,
+    "2": 2,
+    "site": 3,
+    "follow_site": 3,
+    "3": 3,
+}
+
+PMF_MODE_LABELS: dict[int, str] = {
+    1: "mandatory",
+    2: "capable",
+    3: "disable",
+}
+
+
+def decode_band_steering_mode(mode: Any) -> str | None:
+    """Decode Omada ``bandSteeringForMultiBand.mode`` integer to its symbolic name."""
+    if mode is None or isinstance(mode, bool):
+        return None
+    try:
+        code = int(mode)
+    except (TypeError, ValueError):
+        return None
+    return BAND_STEERING_LABELS.get(code)
+
+
+def parse_band_steering_mode(value: Any) -> int:
+    """Parse a band-steering mode name or integer code (0..3)."""
+    if isinstance(value, bool):
+        raise OmadaError(f"invalid bandSteering mode {value!r}")
+    if isinstance(value, int):
+        if value in BAND_STEERING_LABELS:
+            return value
+        raise OmadaError(f"invalid bandSteering mode {value!r}; expected 0..3 or 'disable', 'prefer_5g', 'balanced', 'site'")
+    key = str(value or "").strip().lower()
+    if key in BAND_STEERING_TO_CODE:
+        return BAND_STEERING_TO_CODE[key]
+    raise OmadaError(
+        f"invalid bandSteering mode {value!r}",
+        hint="expected 'disable' (0), 'prefer_5g' (1), 'balanced' (2), or 'site' (3)",
+    )
+
 
 def normalize_mac(value: str) -> str:
     """Normalise ``AABBCCDDEEFF`` / ``AA-BB-CC-DD-EE-FF`` / ``aa:bb:..`` to colons."""

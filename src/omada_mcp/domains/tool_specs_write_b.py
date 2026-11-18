@@ -59,6 +59,7 @@ from .wireless_write import (
     delete_rate_limit_profile,
     run_wlan_optimization,
     set_ap_ssid_overrides,
+    set_wifi_radio_features,
     upsert_rate_limit_profile,
 )
 
@@ -377,6 +378,46 @@ WRITE_TOOLS_B: list[Tool] = [
         },
         output_schema=WRITE_ENVELOPE_SCHEMA,
         handler=assign_ap_wlan_group,
+        read_only=False,
+        destructive=False,
+        idempotent=True,
+    ),
+    Tool(
+        name="set_wifi_radio_features",
+        title="Update site Wi-Fi radio and roaming features",
+        description=(
+            "Update site-wide Wi-Fi roaming (802.11r/11k, AI/non-stick/non-ping-pong roaming, "
+            "force disassociation), band steering thresholds, airtime fairness, and mesh flags."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "fastRoaming80211r": {"type": "boolean", "description": "802.11r fast roaming"},
+                "aiRoamingEnable": {"type": "boolean", "description": "AI roaming"},
+                "dualBand11kReportEnable": {"type": "boolean", "description": "802.11k neighbor reports"},
+                "forceDisassociationEnable": {"type": "boolean", "description": "Force disassociation"},
+                "nonStickRoamingEnable": {"type": "boolean", "description": "Non-stick roaming"},
+                "nonPingPongRoamingEnable": {"type": "boolean", "description": "Non-ping-pong roaming"},
+                "bandSteeringEnable": {"type": "boolean", "description": "Site band steering"},
+                "connectionThreshold": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Steering connection threshold"},
+                "differenceThreshold": {"type": "integer", "minimum": 0, "maximum": 100, "description": "Steering signal difference threshold"},
+                "maxFailures": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Steering max failures"},
+                "multiBandMode": {
+                    "type": ["string", "integer"],
+                    "description": "Multi-band mode: 'disable' (0), 'prefer_5g' (1), 'balanced' (2), or 'site' (3)",
+                },
+                "atf2g": {"type": "boolean", "description": "2.4 GHz airtime fairness"},
+                "atf5g": {"type": "boolean", "description": "5 GHz airtime fairness"},
+                "atf6g": {"type": "boolean", "description": "6 GHz airtime fairness"},
+                "meshEnable": {"type": "boolean", "description": "Site wireless mesh"},
+                "autoFailoverEnable": {"type": "boolean", "description": "Mesh auto failover"},
+                "lldpEnable": {"type": "boolean", "description": "AP LLDP"},
+                "advancedFeatureEnable": {"type": "boolean", "description": "Advanced wireless features"},
+                **_WRITE_CONTROL_PROPS,
+            },
+        },
+        output_schema=WRITE_ENVELOPE_SCHEMA,
+        handler=set_wifi_radio_features,
         read_only=False,
         destructive=False,
         idempotent=True,

@@ -192,11 +192,11 @@ class ProtocolTests(unittest.TestCase):
     def test_tools_list_annotations(self):
         server, _, _ = self._server()
         tools = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
-        self.assertEqual(len(tools), 54)
+        self.assertEqual(len(tools), 55)
         self.assertEqual({t["name"] for t in tools},
                          {"list_devices", "list_clients", "list_wifi_clients",
                           "list_wired_clients", "search_clients", "get_device",
-                          "get_client", "list_wlans", "list_lan_networks",
+                          "get_client", "list_wlans", "get_ssid", "list_lan_networks",
                           "list_dhcp_reservations", "list_acls", "list_ip_groups",
                           "list_port_forwards", "list_static_routes",
                           "get_network_services", "list_logs",

@@ -408,6 +408,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "set_vlan_dhcp_pools": {"vlan": 20, "pools": [{"start": "192.168.20.100", "end": "192.168.20.200"}]},
                 "set_vlan_isolation": {"vlan": 20, "isolation": False},
                 "set_vpn_tunnel_status": {"vpn": "vpn-seed-1", "enabled": False},
+                "set_wifi_radio_features": {"nonStickRoamingEnable": True},
                 "start_cable_test": {"deviceMac": "AA-BB-CC-00-00-02", "ports": [3]},
                 "start_rf_scan": {"deviceMac": "AA-BB-CC-00-00-03"},
                 "start_wan_speedtest": {},
@@ -464,7 +465,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 },
                 "upsert_wireguard_tunnel": {"name": "wg-lab-new", "localIp": "10.68.0.1/24"},
             }
-            self.assertEqual(len(WRITE_TOOL_NAMES), 78)
+            self.assertEqual(len(WRITE_TOOL_NAMES), 79)
             self.assertEqual(set(sample_args.keys()), set(WRITE_TOOL_NAMES))
 
             for tool_name in sorted(WRITE_TOOL_NAMES):

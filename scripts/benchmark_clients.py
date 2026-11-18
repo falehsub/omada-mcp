@@ -396,7 +396,7 @@ def _deterministic_checks(report: dict[str, Any], *, require_tokens: bool = Fals
     checks["schema_function_proxy_within_budget"] = (
         schema_tokens is None or schema_tokens <= 5_200
     )
-    checks["schema_function_proxy_has_54_tools"] = schema["tool_count"] == 54
+    checks["schema_function_proxy_has_55_tools"] = schema["tool_count"] == 55
     rpc = measurements["server_rpc_layers"]
     checks["rpc_envelope_content_structured_match"] = all(
         result["content_and_structured_identical"] for result in rpc["sparse_envelope"]

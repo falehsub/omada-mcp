@@ -2,7 +2,7 @@
 
 # Tool & Configuration Reference
 
-Generated directly from `omada_mcp.tools.TOOLS` (**132 total**: **54 read-only**, **78 opt-in write**).
+Generated directly from `omada_mcp.tools.TOOLS` (**134 total**: **55 read-only**, **79 opt-in write**).
 
 - Required parameters are shown in **`bold`**; optional parameters carry `?`.
 - Site-scoped tools accept optional `site?` (pinned when `OMADA_SITE_NAME`/`OMADA_SITE_ID` is set unless `OMADA_ALLOW_CROSS_SITE=true`).
@@ -19,9 +19,9 @@ Generated directly from `omada_mcp.tools.TOOLS` (**132 total**: **54 read-only**
 | `routing` | 8 | 18 | 26 |
 | `security` | 6 | 13 | 19 |
 | `switch` | 5 | 11 | 16 |
-| `wifi` | 7 | 11 | 18 |
+| `wifi` | 8 | 12 | 20 |
 
-## Read-Only Tools (54)
+## Read-Only Tools (55)
 
 | Tool | Tier | Category | Hints | Parameters | Description |
 |---|---|---|---|---|---|
@@ -32,6 +32,7 @@ Generated directly from `omada_mcp.tools.TOOLS` (**132 total**: **54 read-only**
 | `get_device` | read-only | `core` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `site?` | Get one device by MAC address or device name. |
 | `get_client` | read-only | `core` | `readOnly=true, destructive=false, idempotent=true` | **`mac`**, `site?` | Get one client by MAC address, hostname or IP address. |
 | `list_wlans` | read-only | `core` | `readOnly=true, destructive=false, idempotent=true` | `site?` | List configured WLANs/SSIDs with band, VLAN, security type and guest flag. Pre-shared keys are never returned; a boolean hasPresharedKey reports whether one is set. |
+| `get_ssid` | read-only | `wifi` | `readOnly=true, destructive=false, idempotent=true` | **`ssid`**, `wlanGroup?`, `site?` | Get non-secret configuration for one SSID (band steering, load balance, PMF, 802.11r, Wi-Fi calling, VLAN, and schedule flags). |
 | `get_site_info` | read-only | `core` | `readOnly=true, destructive=false, idempotent=true` | `site?` | Site summary: name, id, WAN/LAN/WLAN state, device and client counts, controller version. |
 | `list_sites` | read-only | `core` | `readOnly=true, destructive=false, idempotent=true, global` | — | List sites visible to the authenticated Viewer or Admin account with site IDs, names, connectivity flags, and configured default indicator. |
 | `network_audit` | read-only | `diagnostics` | `readOnly=true, destructive=false, idempotent=true` | `site?` | Bounded read-only health audit for WAN, devices, switch/AP telemetry, clients, and VLANs. Reports source coverage and ratios of observed active clients to configured DHCP pool capacity. |
@@ -80,7 +81,7 @@ Generated directly from `omada_mcp.tools.TOOLS` (**132 total**: **54 read-only**
 | `list_hotspot_vouchers` | read-only | `hotspot` | `readOnly=true, destructive=false, idempotent=true` | `groupId?`, `limit?`, `site?` | Read hotspot voucher groups and individual voucher statuses without redeemable codes (category 'hotspot'). |
 | `audit_all_sites` | read-only | `diagnostics` | `readOnly=true, destructive=false, idempotent=true, global` | `maxSites?` | Bounded fleet health rollup with per-site coverage and partial results. Requires OMADA_ALLOW_CROSS_SITE=true. |
 
-## Opt-In Write Tools (78)
+## Opt-In Write Tools (79)
 
 | Tool | Tier | Category | Hints | Parameters | Description |
 |---|---|---|---|---|---|
@@ -101,7 +102,7 @@ Generated directly from `omada_mcp.tools.TOOLS` (**132 total**: **54 read-only**
 | `delete_gateway_acl` | opt-in write | `security` | `readOnly=false, destructive=true, idempotent=true` | **`rule`**, `aclType?`, `dryRun?`, `confirm?`, `site?` | Delete a gateway, switch, or EAP ACL rule by ID or exact name (DELETE setting/firewall/acls/{id}?type=0\|1\|2). |
 | `delete_ip_group` | opt-in write | `security` | `readOnly=false, destructive=true, idempotent=true` | **`group`**, `dryRun?`, `confirm?`, `site?` | Delete an unreferenced IPv4 IP group (DELETE setting/profiles/groups/0/{id}); pre-checks gateway ACL references before deletion. |
 | `create_ssid` | opt-in write | `wifi` | `readOnly=false, destructive=false, idempotent=false` | **`name`**, `wlanGroup?`, `bands?`, `security?`, `psk?`, `vlanId?`, `guest?`, `broadcast?`, `pmfMode?`, `enable11r?`, `dryRun?`, `confirm?`, `site?` | Create a Wi-Fi SSID in a WLAN group with band selection, security mode (open or WPA2/WPA3 PSK), optional VLAN binding, PMF, and 802.11r. PSKs are never returned in diffs, snapshots, or outputs. |
-| `update_ssid` | opt-in write | `wifi` | `readOnly=false, destructive=true, idempotent=true` | **`ssid`**, `wlanGroup?`, `name?`, `bands?`, `psk?`, `vlanId?`, `clearVlan?`, `guest?`, `broadcast?`, `pmfMode?`, `enable11r?`, `dryRun?`, `confirm?`, `site?` | Update an SSID via full-object PATCH (setting/wlans/{wlanId}/ssids/{ssidId}) with PSK redaction in snapshots/outputs. |
+| `update_ssid` | opt-in write | `wifi` | `readOnly=false, destructive=true, idempotent=true` | **`ssid`**, `wlanGroup?`, `name?`, `bands?`, `psk?`, `vlanId?`, `clearVlan?`, `guest?`, `broadcast?`, `pmfMode?`, `enable11r?`, `bandSteering?`, `loadBalance?`, `wifiCalling?`, `condBroadcast?`, `macFilterEnable?`, `rateLimitEnable?`, `rateLimitProfile?`, `wlanScheduleEnable?`, `schedule?`, `mloEnable?`, `dryRun?`, `confirm?`, `site?` | Update an SSID via full-object PATCH (setting/wlans/{wlanId}/ssids/{ssidId}) with PSK redaction in snapshots/outputs. |
 | `delete_ssid` | opt-in write | `wifi` | `readOnly=false, destructive=true, idempotent=true` | **`ssid`**, `wlanGroup?`, `dryRun?`, `confirm?`, `site?` | Delete a Wi-Fi SSID from its WLAN group (redacts PSKs in snapshots). |
 | `upsert_port_forward` | opt-in write | `routing` | `readOnly=false, destructive=true, idempotent=true` | **`name`**, **`externalPort`**, **`forwardIp`**, **`forwardPort`**, `id?`, `protocol?`, `status?`, `fromIp?`, `interfaceWanPortIds?`, `dmz?`, `dryRun?`, `confirm?`, `site?` | Create or update a NAT port forwarding rule (setting/transmission/portForwardings). |
 | `delete_port_forward` | opt-in write | `routing` | `readOnly=false, destructive=true, idempotent=true` | **`rule`**, `dryRun?`, `confirm?`, `site?` | Delete a port forwarding rule by ID or exact name. |
@@ -123,6 +124,7 @@ Generated directly from `omada_mcp.tools.TOOLS` (**132 total**: **54 read-only**
 | `update_ap_radio` | opt-in write | `wifi` | `readOnly=false, destructive=false, idempotent=true` | **`deviceMac`**, **`band`**, `enabled?`, `channel?`, `channelWidth?`, `txPowerLevel?`, `txPower?`, `dryRun?`, `confirm?`, `site?` | Update one band ('2g', '5g', '5g2', '6g') of an adopted AP while preserving sibling band blocks (PUT eaps/{MAC}/config/radios). Validates channel/channelWidth against AP channelInfo first. |
 | `start_rf_scan` | opt-in write | `wifi` | `readOnly=false, destructive=true, idempotent=false` | **`deviceMac`**, `bands?`, `dryRun?`, `confirm?`, `site?` | Trigger an RF spectrum scan on an adopted AP (POST cmd/eaps/{MAC}/tools/rfScan). Briefly interrupts client service while scanning. |
 | `assign_ap_wlan_group` | opt-in write | `wifi` | `readOnly=false, destructive=false, idempotent=true` | **`deviceMac`**, **`wlanGroup`**, `dryRun?`, `confirm?`, `site?` | Assign a WLAN group by ID or exact name to an adopted AP (PUT eaps/{MAC}/config/wlans) while preserving existing ssidOverrides. |
+| `set_wifi_radio_features` | opt-in write | `wifi` | `readOnly=false, destructive=false, idempotent=true` | `fastRoaming80211r?`, `aiRoamingEnable?`, `dualBand11kReportEnable?`, `forceDisassociationEnable?`, `nonStickRoamingEnable?`, `nonPingPongRoamingEnable?`, `bandSteeringEnable?`, `connectionThreshold?`, `differenceThreshold?`, `maxFailures?`, `multiBandMode?`, `atf2g?`, `atf5g?`, `atf6g?`, `meshEnable?`, `autoFailoverEnable?`, `lldpEnable?`, `advancedFeatureEnable?`, `dryRun?`, `confirm?`, `site?` | Update site-wide Wi-Fi roaming (802.11r/11k, AI/non-stick/non-ping-pong roaming, force disassociation), band steering thresholds, airtime fairness, and mesh flags. |
 | `upsert_policy_route` | opt-in write | `routing` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, `routeId?`, `status?`, `protocols?`, `sourceType?`, `sourceIds?`, `destinationType?`, `destinationIds?`, `interfaceIds?`, `backupInterface?`, `dryRun?`, `confirm?`, `site?` | Create or update a gateway PBR / policy routing rule (setting/transmission/policyRoutings). Requires an adopted gateway. |
 | `delete_policy_route` | opt-in write | `routing` | `readOnly=false, destructive=true, idempotent=true` | **`routeId`**, `dryRun?`, `confirm?`, `site?` | Delete a gateway policy route by ID or exact name (DELETE setting/transmission/policyRoutings/{id}). |
 | `upsert_lan_dns_rule` | opt-in write | `routing` | `readOnly=false, destructive=false, idempotent=true` | **`name`**, **`domain`**, `ruleType?`, `ruleId?`, `enable?`, `ipAddresses?`, `ipv6Addresses?`, `cname?`, `dnsServers?`, `lanNetworkIds?`, `aliases?`, `customTtl?`, `ttl?`, `dryRun?`, `confirm?`, `site?` | Create or update a local LAN DNS record/CNAME/forward rule (setting/lan/dns; Omada v5.14+/v6.x gateway). |

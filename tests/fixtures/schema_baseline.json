@@ -1,0 +1,1787 @@
+{
+  "assign_ap_wlan_group": {
+    "properties": [
+      "confirm",
+      "deviceMac",
+      "dryRun",
+      "site",
+      "wlanGroup"
+    ],
+    "readOnly": false,
+    "required": [
+      "deviceMac",
+      "wlanGroup"
+    ]
+  },
+  "audit_all_sites": {
+    "properties": [
+      "maxSites"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "bind_poe_schedule": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "mac",
+      "poeSchedule",
+      "ports",
+      "replace",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "poeSchedule",
+      "mac",
+      "ports"
+    ]
+  },
+  "create_eap_acl": {
+    "properties": [
+      "confirm",
+      "destination",
+      "dryRun",
+      "name",
+      "policy",
+      "protocols",
+      "site",
+      "source",
+      "status",
+      "syslog"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "policy",
+      "source",
+      "destination"
+    ]
+  },
+  "create_gateway_acl": {
+    "properties": [
+      "biDirectional",
+      "confirm",
+      "destination",
+      "direction",
+      "dryRun",
+      "name",
+      "policy",
+      "protocols",
+      "site",
+      "source",
+      "status",
+      "syslog"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "policy",
+      "source",
+      "destination",
+      "direction"
+    ]
+  },
+  "create_hotspot_vouchers": {
+    "properties": [
+      "amount",
+      "codeFormat",
+      "codeLength",
+      "confirm",
+      "description",
+      "downLimitKbps",
+      "dryRun",
+      "durationMinutes",
+      "maxUsers",
+      "name",
+      "site",
+      "trafficLimitMb",
+      "upLimitKbps"
+    ],
+    "readOnly": false,
+    "required": [
+      "name"
+    ]
+  },
+  "create_ip_group": {
+    "properties": [
+      "cidrs",
+      "confirm",
+      "dryRun",
+      "ipRange",
+      "name",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "name"
+    ]
+  },
+  "create_lan_network": {
+    "properties": [
+      "confirm",
+      "dhcpEnable",
+      "domain",
+      "dryRun",
+      "gatewaySubnet",
+      "icmpPingEnable",
+      "igmpSnoopEnable",
+      "interfaceIds",
+      "isolation",
+      "leaseTime",
+      "name",
+      "pools",
+      "purpose",
+      "site",
+      "vlan"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "vlan"
+    ]
+  },
+  "create_ssid": {
+    "properties": [
+      "bands",
+      "broadcast",
+      "confirm",
+      "dryRun",
+      "enable11r",
+      "guest",
+      "name",
+      "pmfMode",
+      "psk",
+      "security",
+      "site",
+      "vlanId",
+      "wlanGroup"
+    ],
+    "readOnly": false,
+    "required": [
+      "name"
+    ]
+  },
+  "create_switch_acl": {
+    "properties": [
+      "biDirectional",
+      "bindingType",
+      "confirm",
+      "customAclPorts",
+      "destination",
+      "dryRun",
+      "etherType",
+      "name",
+      "networkId",
+      "policy",
+      "protocols",
+      "site",
+      "source",
+      "status",
+      "syslog"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "policy",
+      "source",
+      "destination"
+    ]
+  },
+  "cycle_poe_port": {
+    "properties": [
+      "allowUplinkMutation",
+      "confirm",
+      "deviceMac",
+      "dryRun",
+      "port",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "deviceMac",
+      "port"
+    ]
+  },
+  "delete_ddns": {
+    "properties": [
+      "confirm",
+      "ddns",
+      "dryRun",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "ddns"
+    ]
+  },
+  "delete_dhcp_reservation": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "mac",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac"
+    ]
+  },
+  "delete_gateway_acl": {
+    "properties": [
+      "aclType",
+      "confirm",
+      "dryRun",
+      "rule",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "rule"
+    ]
+  },
+  "delete_ip_group": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "group",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "group"
+    ]
+  },
+  "delete_lan_dns_rule": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "ruleId",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "ruleId"
+    ]
+  },
+  "delete_lan_network": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "netId",
+      "site",
+      "vlan"
+    ],
+    "readOnly": false,
+    "required": []
+  },
+  "delete_mac_group": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "group",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "group"
+    ]
+  },
+  "delete_mdns_rule": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "rule",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "rule"
+    ]
+  },
+  "delete_poe_schedule": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "poeSchedule",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "poeSchedule"
+    ]
+  },
+  "delete_policy_route": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "routeId",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "routeId"
+    ]
+  },
+  "delete_port_forward": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "rule",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "rule"
+    ]
+  },
+  "delete_port_group": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "group",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "group"
+    ]
+  },
+  "delete_port_profile": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "profile",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "profile"
+    ]
+  },
+  "delete_rate_limit_profile": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "profile",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "profile"
+    ]
+  },
+  "delete_schedule": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "schedule",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "schedule"
+    ]
+  },
+  "delete_ssid": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "site",
+      "ssid",
+      "wlanGroup"
+    ],
+    "readOnly": false,
+    "required": [
+      "ssid"
+    ]
+  },
+  "delete_static_route": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "rule",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "rule"
+    ]
+  },
+  "delete_switch_lag": {
+    "properties": [
+      "allowUplinkMutation",
+      "confirm",
+      "dryRun",
+      "lagId",
+      "mac",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac",
+      "lagId"
+    ]
+  },
+  "delete_wireguard_peer": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "peer",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "peer"
+    ]
+  },
+  "delete_wireguard_tunnel": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "site",
+      "tunnel"
+    ],
+    "readOnly": false,
+    "required": [
+      "tunnel"
+    ]
+  },
+  "diagnose_client": {
+    "properties": [
+      "hours",
+      "mac",
+      "site"
+    ],
+    "readOnly": true,
+    "required": [
+      "mac"
+    ]
+  },
+  "diagnose_wan": {
+    "properties": [
+      "hours",
+      "includeSpeedtest",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "diff_config_snapshots": {
+    "properties": [
+      "baseline",
+      "current",
+      "objects",
+      "site"
+    ],
+    "readOnly": true,
+    "required": [
+      "baseline"
+    ]
+  },
+  "explain_error": {
+    "properties": [
+      "code",
+      "endpoint"
+    ],
+    "readOnly": true,
+    "required": [
+      "code"
+    ]
+  },
+  "export_controller_backup": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "fileName",
+      "retainUsers",
+      "retentionDays",
+      "timeoutSeconds"
+    ],
+    "readOnly": false,
+    "required": []
+  },
+  "get_ap_radios": {
+    "properties": [
+      "includeAvailableChannels",
+      "includeRfScan",
+      "mac",
+      "site"
+    ],
+    "readOnly": true,
+    "required": [
+      "mac"
+    ]
+  },
+  "get_ap_ssid_overrides": {
+    "properties": [
+      "mac",
+      "site"
+    ],
+    "readOnly": true,
+    "required": [
+      "mac"
+    ]
+  },
+  "get_client": {
+    "properties": [
+      "mac",
+      "site"
+    ],
+    "readOnly": true,
+    "required": [
+      "mac"
+    ]
+  },
+  "get_config_snapshot": {
+    "properties": [
+      "objects",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_controller_status": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_device": {
+    "properties": [
+      "mac",
+      "site"
+    ],
+    "readOnly": true,
+    "required": [
+      "mac"
+    ]
+  },
+  "get_ipv6_status": {
+    "properties": [
+      "maskWanIp",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_mesh_status": {
+    "properties": [
+      "mac",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_network_services": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_rf_scan": {
+    "properties": [
+      "mac",
+      "site"
+    ],
+    "readOnly": true,
+    "required": [
+      "mac"
+    ]
+  },
+  "get_security_status": {
+    "properties": [
+      "hours",
+      "limit",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_site_info": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_ssid": {
+    "properties": [
+      "site",
+      "ssid",
+      "wlanGroup"
+    ],
+    "readOnly": true,
+    "required": [
+      "ssid"
+    ]
+  },
+  "get_switch_global_features": {
+    "properties": [
+      "mac",
+      "site"
+    ],
+    "readOnly": true,
+    "required": [
+      "mac"
+    ]
+  },
+  "get_switch_ports": {
+    "properties": [
+      "compact",
+      "includeCableTest",
+      "includeCounters",
+      "includeDownPorts",
+      "mac",
+      "site"
+    ],
+    "readOnly": true,
+    "required": [
+      "mac"
+    ]
+  },
+  "get_topology": {
+    "properties": [
+      "includeClients",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_wan_ip_details": {
+    "properties": [
+      "maskWanIp",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_wan_status": {
+    "properties": [
+      "includeSpeedtest",
+      "maskWanIp",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_wifi_radio_features": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "get_wlan_optimization_status": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_acls": {
+    "properties": [
+      "aclType",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_backups": {
+    "properties": [],
+    "readOnly": true,
+    "required": []
+  },
+  "list_blocked_clients": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_clients": {
+    "properties": [
+      "cursor",
+      "fields",
+      "limit",
+      "pageSize",
+      "resultFormat",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_controller_users": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_devices": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_dhcp_reservations": {
+    "properties": [
+      "site",
+      "vlan"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_hotspot_vouchers": {
+    "properties": [
+      "groupId",
+      "limit",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_ip_groups": {
+    "properties": [
+      "groupType",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_lan_dns_rules": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_lan_networks": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_logs": {
+    "properties": [
+      "category",
+      "hours",
+      "level",
+      "limit",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_poe_schedules": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_policy_routes": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_port_forwards": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_port_profiles": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_qos_rules": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_rate_limit_profiles": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_schedules": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_sites": {
+    "properties": [],
+    "readOnly": true,
+    "required": []
+  },
+  "list_static_routes": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_switch_lags": {
+    "properties": [
+      "mac",
+      "site"
+    ],
+    "readOnly": true,
+    "required": [
+      "mac"
+    ]
+  },
+  "list_traffic_rules": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_vpn_tunnels": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_wifi_clients": {
+    "properties": [
+      "cursor",
+      "fields",
+      "limit",
+      "pageSize",
+      "resultFormat",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_wired_clients": {
+    "properties": [
+      "cursor",
+      "fields",
+      "limit",
+      "pageSize",
+      "resultFormat",
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_wlan_groups": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "list_wlans": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "network_audit": {
+    "properties": [
+      "site"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "reboot_device": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "mac",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac"
+    ]
+  },
+  "reconnect_client": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "mac",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac"
+    ]
+  },
+  "release_client_fixed_ip": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "mac",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac"
+    ]
+  },
+  "replace_ip_group": {
+    "properties": [
+      "cidrs",
+      "confirm",
+      "dryRun",
+      "group",
+      "ipRange",
+      "recoveryId",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "group"
+    ]
+  },
+  "revoke_hotspot_voucher": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "site",
+      "target",
+      "targetType"
+    ],
+    "readOnly": false,
+    "required": [
+      "target"
+    ]
+  },
+  "rollback_from_snapshot": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "force",
+      "site",
+      "snapshotId"
+    ],
+    "readOnly": false,
+    "required": [
+      "snapshotId"
+    ]
+  },
+  "run_ping": {
+    "properties": [
+      "confirm",
+      "count",
+      "deviceMac",
+      "dryRun",
+      "packetSize",
+      "site",
+      "target"
+    ],
+    "readOnly": false,
+    "required": [
+      "deviceMac",
+      "target"
+    ]
+  },
+  "run_traceroute": {
+    "properties": [
+      "confirm",
+      "deviceMac",
+      "dryRun",
+      "site",
+      "target"
+    ],
+    "readOnly": false,
+    "required": [
+      "deviceMac",
+      "target"
+    ]
+  },
+  "run_wlan_optimization": {
+    "properties": [
+      "action",
+      "chanWidth2g",
+      "chanWidth5g",
+      "chanWidth6g",
+      "channelDeployEnable2g",
+      "channelDeployEnable5g",
+      "channelDeployEnable6g",
+      "confirm",
+      "dayOfMonth",
+      "dayOfWeek",
+      "dryRun",
+      "hour",
+      "minute",
+      "mode",
+      "powerAdjustEnable2g",
+      "powerAdjustEnable5g",
+      "powerAdjustEnable6g",
+      "scheduleEnable",
+      "site",
+      "timingType"
+    ],
+    "readOnly": false,
+    "required": []
+  },
+  "search_clients": {
+    "properties": [
+      "active",
+      "cursor",
+      "fields",
+      "guest",
+      "limit",
+      "pageSize",
+      "query",
+      "resultFormat",
+      "site",
+      "ssid",
+      "vlan",
+      "wireless"
+    ],
+    "readOnly": true,
+    "required": []
+  },
+  "set_acl_rule_status": {
+    "properties": [
+      "aclType",
+      "confirm",
+      "dryRun",
+      "rule",
+      "site",
+      "status"
+    ],
+    "readOnly": false,
+    "required": [
+      "rule",
+      "status"
+    ]
+  },
+  "set_ap_ssid_overrides": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "mac",
+      "overrides",
+      "site",
+      "wlanGroup"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac",
+      "overrides"
+    ]
+  },
+  "set_client_blocked": {
+    "properties": [
+      "blocked",
+      "confirm",
+      "dryRun",
+      "mac",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac",
+      "blocked"
+    ]
+  },
+  "set_client_fixed_ip": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "ip",
+      "mac",
+      "netId",
+      "site",
+      "vlan"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac",
+      "ip"
+    ]
+  },
+  "set_client_lock_to_ap": {
+    "properties": [
+      "apMacs",
+      "clientMac",
+      "confirm",
+      "dryRun",
+      "enabled",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "clientMac",
+      "enabled"
+    ]
+  },
+  "set_client_rate_limit": {
+    "properties": [
+      "clientMac",
+      "confirm",
+      "downLimitKbps",
+      "dryRun",
+      "enabled",
+      "rateLimitProfileId",
+      "rateLimitProfileName",
+      "site",
+      "upLimitKbps"
+    ],
+    "readOnly": false,
+    "required": [
+      "clientMac",
+      "enabled"
+    ]
+  },
+  "set_switch_port_mirror": {
+    "properties": [
+      "allowUplinkMutation",
+      "confirm",
+      "dryRun",
+      "mac",
+      "mirroredLags",
+      "mirroredPorts",
+      "mirroringPort",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac",
+      "mirroringPort",
+      "mirroredPorts"
+    ]
+  },
+  "set_upnp": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "enable",
+      "networkIds",
+      "site",
+      "wanPortIds"
+    ],
+    "readOnly": false,
+    "required": [
+      "enable"
+    ]
+  },
+  "set_vlan_dhcp_pools": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "netId",
+      "pools",
+      "site",
+      "vlan"
+    ],
+    "readOnly": false,
+    "required": [
+      "pools"
+    ]
+  },
+  "set_vlan_isolation": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "isolation",
+      "netId",
+      "site",
+      "vlan"
+    ],
+    "readOnly": false,
+    "required": [
+      "isolation"
+    ]
+  },
+  "set_vpn_tunnel_status": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "enabled",
+      "site",
+      "vpn"
+    ],
+    "readOnly": false,
+    "required": [
+      "vpn",
+      "enabled"
+    ]
+  },
+  "set_wifi_radio_features": {
+    "properties": [
+      "advancedFeatureEnable",
+      "aiRoamingEnable",
+      "atf2g",
+      "atf5g",
+      "atf6g",
+      "autoFailoverEnable",
+      "bandSteeringEnable",
+      "confirm",
+      "connectionThreshold",
+      "differenceThreshold",
+      "dryRun",
+      "dualBand11kReportEnable",
+      "fastRoaming80211r",
+      "forceDisassociationEnable",
+      "lldpEnable",
+      "maxFailures",
+      "meshEnable",
+      "multiBandMode",
+      "nonPingPongRoamingEnable",
+      "nonStickRoamingEnable",
+      "site"
+    ],
+    "readOnly": false,
+    "required": []
+  },
+  "start_cable_test": {
+    "properties": [
+      "allowUplinkMutation",
+      "confirm",
+      "deviceMac",
+      "dryRun",
+      "ports",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "deviceMac",
+      "ports"
+    ]
+  },
+  "start_rf_scan": {
+    "properties": [
+      "bands",
+      "confirm",
+      "deviceMac",
+      "dryRun",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "deviceMac"
+    ]
+  },
+  "start_wan_speedtest": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "pollSeconds",
+      "pure",
+      "site"
+    ],
+    "readOnly": false,
+    "required": []
+  },
+  "update_ap_radio": {
+    "properties": [
+      "band",
+      "channel",
+      "channelWidth",
+      "confirm",
+      "deviceMac",
+      "dryRun",
+      "enabled",
+      "site",
+      "txPower",
+      "txPowerLevel"
+    ],
+    "readOnly": false,
+    "required": [
+      "deviceMac",
+      "band"
+    ]
+  },
+  "update_client": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "mac",
+      "name",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac",
+      "name"
+    ]
+  },
+  "update_device": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "ledSetting",
+      "locate",
+      "mac",
+      "name",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac"
+    ]
+  },
+  "update_gateway_acl": {
+    "properties": [
+      "aclType",
+      "biDirectional",
+      "confirm",
+      "destination",
+      "direction",
+      "dryRun",
+      "name",
+      "policy",
+      "protocols",
+      "rule",
+      "site",
+      "source",
+      "status",
+      "syslog"
+    ],
+    "readOnly": false,
+    "required": [
+      "rule"
+    ]
+  },
+  "update_lan_network": {
+    "properties": [
+      "confirm",
+      "dhcpEnable",
+      "dnsMode",
+      "dnsServers",
+      "domain",
+      "dryRun",
+      "icmpPingEnable",
+      "igmpSnoopEnable",
+      "leaseTime",
+      "name",
+      "netId",
+      "site",
+      "vlan"
+    ],
+    "readOnly": false,
+    "required": []
+  },
+  "update_ssid": {
+    "properties": [
+      "bandSteering",
+      "bands",
+      "broadcast",
+      "clearVlan",
+      "condBroadcast",
+      "confirm",
+      "dryRun",
+      "enable11r",
+      "guest",
+      "loadBalance",
+      "macFilterEnable",
+      "mloEnable",
+      "name",
+      "pmfMode",
+      "psk",
+      "rateLimitEnable",
+      "rateLimitProfile",
+      "schedule",
+      "site",
+      "ssid",
+      "vlanId",
+      "wifiCalling",
+      "wlanGroup",
+      "wlanScheduleEnable"
+    ],
+    "readOnly": false,
+    "required": [
+      "ssid"
+    ]
+  },
+  "update_switch_global_features": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "forwardDelay",
+      "helloTime",
+      "jumbo",
+      "jumboEnable",
+      "loopbackDetectEnable",
+      "mac",
+      "maxAge",
+      "maxHops",
+      "site",
+      "stpMode",
+      "stpPriority",
+      "txHoldCount"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac"
+    ]
+  },
+  "update_switch_port": {
+    "properties": [
+      "allowUplinkMutation",
+      "confirm",
+      "deviceMac",
+      "dryRun",
+      "duplex",
+      "enabled",
+      "linkSpeed",
+      "lldpMedEnable",
+      "name",
+      "nativeNetworkId",
+      "poeEnabled",
+      "port",
+      "portIsolationEnable",
+      "profileId",
+      "profileName",
+      "profileOverrideEnable",
+      "site",
+      "spanningTreeEnable",
+      "taggedNetworkIds",
+      "untaggedNetworkIds"
+    ],
+    "readOnly": false,
+    "required": [
+      "deviceMac",
+      "port"
+    ]
+  },
+  "upsert_ddns": {
+    "properties": [
+      "confirm",
+      "ddnsId",
+      "domainName",
+      "dryRun",
+      "interface",
+      "password",
+      "service",
+      "site",
+      "status",
+      "updateInterval",
+      "username"
+    ],
+    "readOnly": false,
+    "required": [
+      "domainName"
+    ]
+  },
+  "upsert_dhcp_reservation": {
+    "properties": [
+      "confirm",
+      "description",
+      "dryRun",
+      "exportToIpMacBinding",
+      "ip",
+      "mac",
+      "netId",
+      "site",
+      "status",
+      "vlan"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac",
+      "ip"
+    ]
+  },
+  "upsert_lan_dns_rule": {
+    "properties": [
+      "aliases",
+      "cname",
+      "confirm",
+      "customTtl",
+      "dnsServers",
+      "domain",
+      "dryRun",
+      "enable",
+      "ipAddresses",
+      "ipv6Addresses",
+      "lanNetworkIds",
+      "name",
+      "ruleId",
+      "ruleType",
+      "site",
+      "ttl"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "domain"
+    ]
+  },
+  "upsert_mac_group": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "entries",
+      "groupId",
+      "name",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "entries"
+    ]
+  },
+  "upsert_mdns_rule": {
+    "properties": [
+      "clientNetworks",
+      "confirm",
+      "dryRun",
+      "id",
+      "name",
+      "profiles",
+      "ruleType",
+      "serviceNetworks",
+      "site",
+      "status"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "profiles",
+      "serviceNetworks",
+      "clientNetworks"
+    ]
+  },
+  "upsert_poe_schedule": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "enabled",
+      "name",
+      "poeScheduleId",
+      "portBindings",
+      "schedule",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "name"
+    ]
+  },
+  "upsert_policy_route": {
+    "properties": [
+      "backupInterface",
+      "confirm",
+      "destinationIds",
+      "destinationType",
+      "dryRun",
+      "interfaceIds",
+      "name",
+      "protocols",
+      "routeId",
+      "site",
+      "sourceIds",
+      "sourceType",
+      "status"
+    ],
+    "readOnly": false,
+    "required": [
+      "name"
+    ]
+  },
+  "upsert_port_forward": {
+    "properties": [
+      "confirm",
+      "dmz",
+      "dryRun",
+      "externalPort",
+      "forwardIp",
+      "forwardPort",
+      "fromIp",
+      "id",
+      "interfaceWanPortIds",
+      "name",
+      "protocol",
+      "site",
+      "status"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "externalPort",
+      "forwardIp",
+      "forwardPort"
+    ]
+  },
+  "upsert_port_group": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "groupId",
+      "ips",
+      "name",
+      "ports",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "ports"
+    ]
+  },
+  "upsert_port_profile": {
+    "properties": [
+      "confirm",
+      "dot1x",
+      "dryRun",
+      "eeeEnable",
+      "flowControlEnable",
+      "lldpMedEnable",
+      "loopbackDetectEnable",
+      "name",
+      "nativeNetworkId",
+      "nativeNetworkName",
+      "poeMode",
+      "portIsolationEnable",
+      "profileId",
+      "site",
+      "spanningTreeEnable",
+      "taggedNetworkIds",
+      "untaggedNetworkIds"
+    ],
+    "readOnly": false,
+    "required": [
+      "name"
+    ]
+  },
+  "upsert_rate_limit_profile": {
+    "properties": [
+      "confirm",
+      "downLimitEnable",
+      "downLimitKbps",
+      "dryRun",
+      "name",
+      "profileId",
+      "site",
+      "upLimitEnable",
+      "upLimitKbps"
+    ],
+    "readOnly": false,
+    "required": [
+      "name"
+    ]
+  },
+  "upsert_schedule": {
+    "properties": [
+      "confirm",
+      "dayMode",
+      "days",
+      "dryRun",
+      "name",
+      "scheduleId",
+      "site",
+      "windows"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "windows"
+    ]
+  },
+  "upsert_static_route": {
+    "properties": [
+      "confirm",
+      "destination",
+      "dryRun",
+      "id",
+      "interfaceId",
+      "metric",
+      "name",
+      "nextHop",
+      "routeType",
+      "site",
+      "status"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "destination",
+      "nextHop"
+    ]
+  },
+  "upsert_switch_lag": {
+    "properties": [
+      "allowUplinkMutation",
+      "confirm",
+      "dryRun",
+      "lagId",
+      "lagType",
+      "mac",
+      "name",
+      "ports",
+      "profileId",
+      "profileName",
+      "site"
+    ],
+    "readOnly": false,
+    "required": [
+      "mac",
+      "lagId",
+      "ports"
+    ]
+  },
+  "upsert_wireguard_peer": {
+    "properties": [
+      "allowAddress",
+      "comment",
+      "confirm",
+      "dryRun",
+      "endPoint",
+      "endPointPort",
+      "interface",
+      "keepAlive",
+      "name",
+      "peerId",
+      "presharedKey",
+      "publicKey",
+      "site",
+      "status"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "interface",
+      "publicKey",
+      "allowAddress"
+    ]
+  },
+  "upsert_wireguard_tunnel": {
+    "properties": [
+      "confirm",
+      "dryRun",
+      "listenPort",
+      "localIp",
+      "mtu",
+      "name",
+      "privateKey",
+      "site",
+      "status",
+      "tunnelId"
+    ],
+    "readOnly": false,
+    "required": [
+      "name",
+      "localIp"
+    ]
+  }
+}

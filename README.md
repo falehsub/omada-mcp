@@ -10,8 +10,8 @@
 
 Your Omada controller already knows which AP is overloaded, which client is
 sitting on the guest VLAN, and which switch dropped a port. `omada-mcp` hands
-that to Claude, Cursor, Hermes or any other MCP host — as 54 read-only tools
-that return clean JSON (plus 78 optional write tools behind an explicit allowlist,
+that to Claude, Cursor, Hermes or any other MCP host — as 55 read-only tools
+that return clean JSON (plus 79 optional write tools behind an explicit allowlist,
 plus `--watch` and `--export-metrics` monitoring modes),
 with a self-test that tells you exactly what to fix when something is wrong.
 
@@ -274,8 +274,8 @@ uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
 
 ## Tools
 
-Fifty-four read-only tools are always registered;
-78 optional write tools stay hidden and disabled until both `OMADA_READ_ONLY=false`
+Fifty-five read-only tools are always registered;
+79 optional write tools stay hidden and disabled until both `OMADA_READ_ONLY=false`
 and `OMADA_WRITE_TOOLS` allowlist them explicitly. All site-scoped tools also accept
 an optional per-call `site` name or ID (strictly pinned when `OMADA_SITE_NAME`/
 `OMADA_SITE_ID` is set unless `OMADA_ALLOW_CROSS_SITE=true`). `list_clients` windowing
@@ -283,7 +283,7 @@ is bounded by `limit` (default 500, max 5000) and de-duplicated by MAC.
 
 ### Read-only tools (always available)
 
-Full generated parameter & safety reference across all 132 tools: [`docs/tools-reference.md`](docs/tools-reference.md).
+Full generated parameter & safety reference across all 134 tools: [`docs/tools-reference.md`](docs/tools-reference.md).
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -301,7 +301,8 @@ Full generated parameter & safety reference across all 132 tools: [`docs/tools-r
 | `get_controller_status` | — | Global controller health, cloud/backup status, NTP/timezone & version metadata (secrets stripped) |
 | `get_device` | `mac` (or name) | One device |
 | `get_client` | `mac` (or hostname/IP) | One client |
-| `list_wlans` | — | SSID, band, VLAN, security, guest, `hasPresharedKey` (expands v6.x WLAN groups; key never returned) |
+| `list_wlans` | — | SSID, band, VLAN, security, guest, steering/advanced flags, `hasPresharedKey` (key never returned) |
+| `get_ssid` | `ssid`, `wlanGroup?` | Detailed non-secret config for one SSID (decoded `bandSteering`, `loadBalance`, PMF, 802.11r, Wi-Fi calling, VLAN, schedule) |
 | `list_wlan_groups` | — | Wireless WLAN group IDs/names and member SSID summaries (secrets stripped) |
 | `list_lan_networks` | — | Merged `setting/lan/networks` + `/interface` view (VLAN, subnet, DHCP `ipRangePool`, `leasetime`, `isolation`, `accessControlRule`) |
 | `list_port_profiles` | — | Switch port profiles (`setting/lan/profiles`) with native/tagged VLANs, PoE mode, and `prohibitModify` flag |
@@ -350,7 +351,7 @@ Every write tool defaults to `dryRun=true`. Pass its fresh `confirmToken` as `co
 |---|---|---|
 | Snapshot rollback | `rollback_from_snapshot` | Loads snapshot strictly inside `OMADA_SNAPSHOT_DIR`, previews drift on `dryRun=true`, and restores pre-mutation config on `dryRun=false` |
 | Switch ports & L2 features | `update_switch_port`, `cycle_poe_port`, `start_cable_test`, `upsert_port_profile`, `delete_port_profile`, `upsert_switch_lag`, `delete_switch_lag`, `update_switch_global_features`, `set_switch_port_mirror`, `upsert_poe_schedule`, `bind_poe_schedule`, `delete_poe_schedule` | Port enable/PoE mode/profile updates, static/LACP LAG CRUD, STP/RSTP/MSTP & loopback/jumbo L2 config, port mirroring, PoE power-saving schedules & port bindings, custom port profile CRUD, PoE power cycling, and switch TDR cable diagnostics (`start_cable_test`); refuses built-in profile deletion or stranding uplink, controller-hosting, or LAG member ports unless `allowUplinkMutation=true` |
-| AP radios, RF scan & WLAN groups | `update_ap_radio`, `start_rf_scan`, `assign_ap_wlan_group`, `set_ap_ssid_overrides`, `run_wlan_optimization`, `upsert_rate_limit_profile`, `delete_rate_limit_profile` | Preserves sibling band configs during `config/radios` PUT, pre-validates channel & width against `availableChannels`, sets redacted per-AP SSID overrides, configures/triggers/cancels AI WLAN RF optimization, and manages site rate-limit profiles (`Default` protected & in-use checked) |
+| AP radios, RF scan & WLAN groups | `update_ap_radio`, `start_rf_scan`, `assign_ap_wlan_group`, `set_ap_ssid_overrides`, `set_wifi_radio_features`, `run_wlan_optimization`, `upsert_rate_limit_profile`, `delete_rate_limit_profile` | Preserves sibling band configs during `config/radios` PUT, pre-validates channel & width against `availableChannels`, sets redacted per-AP SSID overrides, updates site Wi-Fi roaming/band-steering/ATF/mesh features, configures/triggers/cancels AI WLAN RF optimization, and manages site rate-limit profiles (`Default` protected & in-use checked) |
 | Live client controls & fixed IP | `set_client_fixed_ip`, `release_client_fixed_ip`, `set_client_blocked`, `reconnect_client`, `update_client`, `set_client_lock_to_ap`, `set_client_rate_limit` | Full-object stripped client PATCH (`netId` preserved, 20 volatile keys stripped), Lock-to-AP (`clientLockToApSetting`), and rate limits |
 | Offline DHCP reservations | `upsert_dhcp_reservation`, `delete_dhcp_reservation` | Create/update/delete reservations in `setting/service/dhcp` with subnet & IP-overlap validation |
 | LAN & VLAN management | `create_lan_network`, `update_lan_network`, `delete_lan_network`, `set_vlan_dhcp_pools`, `set_vlan_isolation` | Two-endpoint LAN RMW, normalizes `lanNetworkIpv6Config` + `dhcpGuard`/`dhcpv6Guard`, uses `priDns`/`sndDns`, checks `ipRangePool`, refuses management/primary VLAN deletion |
@@ -362,7 +363,7 @@ Every write tool defaults to `dryRun=true`. Pass its fresh `confirmToken` as `co
 | Controller backup & Hotspot | `export_controller_backup`, `create_hotspot_vouchers`, `revoke_hotspot_voucher` | Prepare/download bounded binary controller backups strictly under `OMADA_SNAPSHOT_DIR/backups` (`retentionDays`), and batch-create or revoke Hotspot voucher groups (`hotspot` category) |
 
 `omada-mcp --list-tools` prints active descriptors without touching the network
-(add `--all` to inspect all 132 tools including non-allowlisted writes).
+(add `--all` to inspect all 134 tools including non-allowlisted writes).
 
 Every descriptor in `tools/list` declares MCP annotations and an MCP `2025-06-18`
 `outputSchema`, so hosts can auto-approve reads and validate structured results:

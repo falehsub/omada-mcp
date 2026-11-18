@@ -84,6 +84,7 @@ _TOOL_CATEGORIES: dict[str, str] = {
     # wifi
     "get_ap_radios": "wifi",
     "get_rf_scan": "wifi",
+    "get_ssid": "wifi",
     "list_wlan_groups": "wifi",
     "get_wifi_radio_features": "wifi",
     "get_ap_ssid_overrides": "wifi",
@@ -100,6 +101,7 @@ _TOOL_CATEGORIES: dict[str, str] = {
     "delete_rate_limit_profile": "wifi",
     "set_ap_ssid_overrides": "wifi",
     "run_wlan_optimization": "wifi",
+    "set_wifi_radio_features": "wifi",
     # routing
     "list_port_forwards": "routing",
     "list_static_routes": "routing",

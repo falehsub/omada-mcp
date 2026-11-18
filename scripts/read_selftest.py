@@ -40,7 +40,7 @@ def run_checks(client):
     config = replace(client.config, read_only=True, write_tools=(), tool_categories=())
     server = Server(config, client=client)
     results = []
-    devices, clients = [], []
+    devices, clients, wlans = [], [], []
     snapshot_baseline = None
     for tool in (tool for tool in TOOLS if tool.read_only):
         arguments = {}
@@ -55,6 +55,14 @@ def run_checks(client):
                 continue
             arguments['baseline'] = snapshot_baseline
             arguments['current'] = snapshot_baseline
+        elif tool.name == 'get_ssid':
+            ssid_rows = [w for w in wlans if w.get('id') and ('band' in w or 'security' in w or 'ssid' in w)]
+            if not ssid_rows:
+                results.append({'tool': tool.name, 'status': 'skip', 'reason': 'no matching live target'})
+                continue
+            arguments['ssid'] = ssid_rows[0]['id']
+            if ssid_rows[0].get('wlanGroup'):
+                arguments['wlanGroup'] = ssid_rows[0]['wlanGroup']
         if 'mac' in tool.input_schema.get('required', []):
             targets = clients if tool.name in ('get_client', 'diagnose_client') else devices
             if tool.name in ('get_switch_ports', 'list_switch_lags', 'get_switch_global_features'):
@@ -88,6 +96,8 @@ def run_checks(client):
             devices = items
         elif tool.name == 'list_clients':
             clients = items
+        elif tool.name == 'list_wlans':
+            wlans = items
         elif tool.name == 'get_config_snapshot' and not failed:
             snapshot_baseline = structured
     return {

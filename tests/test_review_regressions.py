@@ -128,7 +128,7 @@ class ReviewRegressionTests(unittest.TestCase):
             _, client, ctrl, _ = make_write_env(tmp, read_only=True)
             report = module.run_checks(client)
             self.assertEqual(report['failed'], 0, report)
-            self.assertEqual(report['passed'] + report['skipped'], 54)
+            self.assertEqual(report['passed'] + report['skipped'], 55)
             self.assertEqual(ctrl.write_request_count, 0)
             rendered = json.dumps(report)
             self.assertNotIn('192.168.', rendered)
