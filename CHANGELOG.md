@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-11-18
+
+Live Omada `6.3.0.45` hardware compatibility fixes (**386 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).
+
+### Fixed
+
+- **`survey_wifi` & `start_rf_scan` confirmation state-digest stability:** Excluded volatile controller read timestamps (`rfScan.time`) and raw idle/completed status codes from preview `before`/`after` state hashes (recording a normalized `scanning` boolean plus stable client-impact summary), so `survey_wifi(..., dryRun=false, confirm=...)` and `start_rf_scan(..., dryRun=false, confirm=...)` succeed when the controller advances `time` on every `GET tools/rfScan`.
+- **Omada 6.3+ object-shaped `loadBalance` & `condBroadcastCtrl` fields:** `_SHAPES['ssid']` now accepts both scalar booleans (`false`/`true`) and `{"enable": bool}` objects, and `update_ssid` preserves dict shapes on PATCH and read-back verification instead of dropping `before` to `null` or overwriting with a bare boolean. Also recognizes `{"enable": false}` in `diff_config_snapshots` `materializedDefaults`.
+- **Schema advertisement for legacy group aliases & PMF enum clarity:** Advertised optional legacy `id` and `groupId` aliases alongside canonical `group` in the JSON Schemas of `delete_ip_group`, `replace_ip_group`, `delete_port_group`, and `delete_mac_group`, and documented PMF codes `1`/`2`/`3` on `update_ssid`.
+
 ## [2.5.0] - 2026-11-18
 
 Expanded Wi-Fi steering, RF survey impact & polling, SSID-level config drift tracking, and backwards-compatible schema guards (**383 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).

@@ -245,6 +245,8 @@
       "confirm",
       "dryRun",
       "group",
+      "groupId",
+      "id",
       "site"
     ],
     "readOnly": false,
@@ -280,6 +282,8 @@
       "confirm",
       "dryRun",
       "group",
+      "groupId",
+      "id",
       "site"
     ],
     "readOnly": false,
@@ -340,6 +344,8 @@
       "confirm",
       "dryRun",
       "group",
+      "groupId",
+      "id",
       "site"
     ],
     "readOnly": false,
@@ -952,6 +958,8 @@
       "confirm",
       "dryRun",
       "group",
+      "groupId",
+      "id",
       "ipRange",
       "recoveryId",
       "site"

@@ -687,7 +687,12 @@ def _materialized_keys(delta: Mapping[str, Mapping[str, Any]]) -> list[str]:
         path
         for path, entry in delta.items()
         if entry.get("before") is None
-        and (entry.get("after") is False or entry.get("after") == "" or entry.get("after") == {})
+        and (
+            entry.get("after") is False
+            or entry.get("after") == ""
+            or entry.get("after") == {}
+            or entry.get("after") == {"enable": False}
+        )
     )
 
 

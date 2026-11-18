@@ -596,6 +596,7 @@ def _prepare_rf_scan_plan(
         "radioIds": radio_ids,
         "targetBands": target_bands,
         "beforeRf": before_rf,
+        "beforeScanning": bool(parsed_before.get("scanning")),
         "baselineTimes": baseline_times,
         "impact": impact,
         "warnings": impact_warnings,
@@ -620,8 +621,7 @@ def start_rf_scan(
     before = {
         "mac": norm_mac,
         "name": plan["apName"],
-        "status": before_rf.get("status"),
-        "time": before_rf.get("time"),
+        "scanning": plan["beforeScanning"],
         "impact": plan["impact"],
     }
     diff = {"rfScanTriggered": {"before": False, "after": True}}
@@ -679,8 +679,7 @@ def survey_wifi(
     before = {
         "mac": norm_mac,
         "name": plan["apName"],
-        "status": before_rf.get("status"),
-        "time": before_rf.get("time"),
+        "scanning": plan["beforeScanning"],
         "impact": plan["impact"],
     }
     diff = {"rfSurveyTriggered": {"before": False, "after": True}}
