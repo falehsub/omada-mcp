@@ -558,8 +558,8 @@ READ_TOOLS: list[Tool] = [
         name="get_rf_scan",
         title="Get AP RF scan results",
         description=(
-            "Read per-band RF scan status, timestamps, neighbor channels, and radio utilization for an AP; "
-            "pass wait=true to poll until a running scan completes."
+            "Read per-band RF scan status, timestamps, channel occupancy/interference (neighbor BSSIDs only when firmware includes them), and radio utilization; "
+            "pass wait=true to poll."
         ),
         input_schema={
             "type": "object",

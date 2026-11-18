@@ -597,6 +597,18 @@ def decode_rf_scan_status(code: Any) -> str | None:
     return RF_SCAN_STATUS_LABELS.get(val, f"unknown ({val})")
 
 
+def _enrich_rf_channel_row(item: Mapping[str, Any], *, band: str | None = None) -> dict[str, Any]:
+    entry = deep_redact(dict(item))
+    if band is not None:
+        entry.setdefault("band", band)
+    width_code = entry.get("chanWidth") if entry.get("chanWidth") is not None else entry.get("channelWidth")
+    if width_code is not None:
+        label = CHANNEL_WIDTH_LABELS.get(str(width_code))
+        if label is not None:
+            entry.setdefault("chanWidthLabel", label)
+    return entry
+
+
 def parse_rf_scan_payload(rf: Mapping[str, Any] | None) -> dict[str, Any]:
     """Normalize per-band and generic Omada ``tools/rfScan`` response keys."""
     raw = rf or {}
@@ -610,8 +622,7 @@ def parse_rf_scan_payload(rf: Mapping[str, Any] | None) -> dict[str, Any]:
             for item in rows:
                 if not isinstance(item, Mapping):
                     continue
-                entry = deep_redact(dict(item))
-                entry.setdefault("band", norm_band)
+                entry = _enrich_rf_channel_row(item, band=norm_band)
                 bucket.append(entry)
                 channels.append(entry)
 
@@ -622,7 +633,7 @@ def parse_rf_scan_payload(rf: Mapping[str, Any] | None) -> dict[str, Any]:
                 for item in rows:
                     if not isinstance(item, Mapping):
                         continue
-                    entry = deep_redact(dict(item))
+                    entry = _enrich_rf_channel_row(item)
                     channels.append(entry)
                     band_tag = str(entry.get("band") or "").strip().lower()
                     if band_tag:
@@ -712,23 +723,33 @@ def poll_rf_scan_payload(
     target_bands: Sequence[str] | None = None,
     baseline_times: Mapping[str, Any] | None = None,
     initial_raw: Mapping[str, Any] | None = None,
+    stats_out: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Poll ``eaps/{MAC}/tools/rfScan`` until terminal status or timeout."""
     timeout = max(1, min(int(timeout_seconds), 180))
     interval = max(1, min(int(poll_interval_seconds), 30))
-    deadline = client._clock() + timeout
+    started_at = client._clock()
+    deadline = started_at + timeout
     latest_raw = dict(initial_raw) if isinstance(initial_raw, Mapping) else {}
     endpoint = f"sites/{site.site_id}/eaps/{mac_wire}/tools/rfScan"
+    polls = 0
 
     while True:
         parsed = parse_rf_scan_payload(latest_raw)
         if _rf_scan_is_terminal(parsed, target_bands=target_bands, baseline_times=baseline_times):
+            if stats_out is not None:
+                stats_out["polls"] = polls
+                stats_out["elapsedSeconds"] = round(max(0.0, client._clock() - started_at), 2)
             return latest_raw, False
         now = client._clock()
         remaining = deadline - now
         if remaining <= 0:
+            if stats_out is not None:
+                stats_out["polls"] = polls
+                stats_out["elapsedSeconds"] = round(max(0.0, now - started_at), 2)
             return latest_raw, True
         client._sleep(min(float(interval), remaining))
+        polls += 1
         fetched = client.api_result(endpoint, use_cache=False)
         latest_raw = dict(fetched) if isinstance(fetched, Mapping) else {}
 
@@ -909,6 +930,7 @@ def collect_rf_scan_data(
     rf = radio_data.get("rfScan") or {}
     timed_out = False
     warnings = list(radio_data["warnings"])
+    poll_stats: dict[str, Any] = {"polls": 0, "elapsedSeconds": 0.0}
     if wait:
         mac_wire = omada_mac(radio_data["mac"])
         rf_polled, timed_out = poll_rf_scan_payload(
@@ -920,6 +942,7 @@ def collect_rf_scan_data(
             target_bands=target_bands,
             baseline_times=baseline_times,
             initial_raw=rf,
+            stats_out=poll_stats,
         )
         rf = rf_polled
         if timed_out:
@@ -934,10 +957,13 @@ def collect_rf_scan_data(
         "scanTime": parsed["scanTime"],
         "status": parsed["status"],
         "statusLabel": parsed["statusLabel"],
+        "scanning": bool(parsed["scanning"]),
         "bandStatuses": parsed["bandStatuses"],
         "bandStatusLabels": parsed["bandStatusLabels"],
         "bandTimes": parsed["bandTimes"],
         "timedOut": timed_out,
+        "polls": poll_stats["polls"],
+        "elapsedSeconds": poll_stats["elapsedSeconds"],
         "radioUtilization": [
             {
                 "band": r["band"],

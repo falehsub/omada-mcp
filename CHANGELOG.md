@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-11-18
+
+RF survey verification, terminal summary promotion, and channel-width decoding (**386 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).
+
+### Fixed
+
+- **`survey_wifi` verification & terminal state surfacing:** When `wait=true` completes polling cleanly, `survey_wifi(..., dryRun=false)` now reports `verified=true` / `outcome="verified"` (leaving `verified=false` / `outcome="accepted"` when `wait=false` or polling times out) and promotes `status`, `statusLabel`, `scanning`, `timedOut`, `polls`, `elapsedSeconds`, `bandStatuses`, `bandStatusLabels`, `bandTimes`, `channelCount`, and `channelsByBand` directly into `after` alongside `rfScan`.
+- **RF channel-width decoding & firmware documentation:** `parse_rf_scan_payload` decodes `chanWidth` enum codes (e.g. `3 -> "40MHz"`, `5 -> "80MHz"`, `7 -> "160MHz"`) to `chanWidthLabel`, and tool descriptions for `get_rf_scan` and `survey_wifi` note that channel rows report per-band occupancy/interference and may omit `bssid`/`ssid` depending on AP firmware (such as EAP725-Wall on 6.3.0.45).
+
 ## [2.5.1] - 2026-11-18
 
 Live Omada `6.3.0.45` hardware compatibility fixes (**386 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).

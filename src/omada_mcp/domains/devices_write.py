@@ -708,17 +708,22 @@ def survey_wifi(
         before=before,
         snapshot_payload={"ap": plan["apMap"], "rfScan": before_rf},
         fields_changed=["rfScan"],
+        read_back=lambda: collect_rf_scan_data(
+            client,
+            site,
+            plan["apStub"],
+            wait=bool(wait),
+            timeout_seconds=as_int(timeoutSeconds, 90),
+            poll_interval_seconds=as_int(pollIntervalSeconds, 5),
+            target_bands=plan["targetBands"],
+            baseline_times=plan["baselineTimes"],
+        ),
+        verify_fn=lambda _before, survey_after: (isinstance(survey_after, Mapping), None),
+        verification_complete=lambda survey_after: (
+            bool(wait) and isinstance(survey_after, Mapping) and not bool(survey_after.get("timedOut"))
+        ),
     )
-    survey = collect_rf_scan_data(
-        client,
-        site,
-        plan["apStub"],
-        wait=bool(wait),
-        timeout_seconds=as_int(timeoutSeconds, 90),
-        poll_interval_seconds=as_int(pollIntervalSeconds, 5),
-        target_bands=plan["targetBands"],
-        baseline_times=plan["baselineTimes"],
-    )
+    survey = dict(write_res["after"]) if isinstance(write_res.get("after"), Mapping) else {}
     warnings = [*plan["warnings"], *survey.get("warnings", [])]
     return _committed_result(
         tool_name="survey_wifi",
@@ -729,6 +734,17 @@ def survey_wifi(
             "name": plan["apName"],
             "impact": plan["impact"],
             "rfSurveyTriggered": True,
+            "status": survey.get("status"),
+            "statusLabel": survey.get("statusLabel"),
+            "scanning": survey.get("scanning"),
+            "timedOut": survey.get("timedOut"),
+            "polls": survey.get("polls"),
+            "elapsedSeconds": survey.get("elapsedSeconds"),
+            "bandStatuses": survey.get("bandStatuses"),
+            "bandStatusLabels": survey.get("bandStatusLabels"),
+            "bandTimes": survey.get("bandTimes"),
+            "channelCount": len(survey.get("channels") or []),
+            "channelsByBand": survey.get("channelsByBand"),
             "rfScan": survey,
         },
         diff=diff,
