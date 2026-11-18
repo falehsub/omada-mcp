@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import re
 import urllib.parse
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
+from .._projections import project_controller_row
 from ..client import OmadaClient, OmadaError
-from ._common import as_int, deep_redact
+from ._common import as_int, require_complete_collection
 from ._write_common import (
     _committed_result,
     _dry_run_result,
@@ -36,6 +39,9 @@ _DDNS_SERVICES: dict[str, int] = {
 }
 
 _VALID_DDNS_INTERVALS = frozenset({0, 1, 6, 12, 24, 48, 72})
+_MANUAL_RECOVERY_WARNING = (
+    "Credential values are excluded from verification and snapshots. Use your credential store for recovery."
+)
 
 
 def _validate_wg_key(value: str, field_name: str) -> str:
@@ -74,24 +80,51 @@ def _validate_cidr(value: str, field_name: str, *, interface: bool = False) -> s
     return text
 
 
-def _fetch_vpns(client: OmadaClient, site_id: str) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site_id}/setting/vpns")
+@contextlib.contextmanager
+def _credential_safe_errors() -> Iterator[None]:
+    """Keep upstream messages from echoing submitted or stored credentials."""
+    try:
+        yield
+    except OmadaError as exc:
+        code = exc.code if type(exc.code) is int else None
+        suffix = f" (controller code {code})" if code is not None else ""
+        error = OmadaError(
+            f"could not confirm VPN or DDNS state{suffix}", code=code,
+            hint="re-read controller state and inspect any recorded snapshot before retrying",
+        )
+        error.write_status = exc.write_status
+        raise error from None
+
+
+def _fetch_rows(client: OmadaClient, endpoint: str) -> list[dict[str, Any]]:
+    with _credential_safe_errors():
+        rows, _ = require_complete_collection(client, endpoint)
     return rows
+
+
+def _fetch_vpns(client: OmadaClient, site_id: str) -> list[dict[str, Any]]:
+    return _fetch_rows(client, f"sites/{site_id}/setting/vpns")
 
 
 def _fetch_wireguard_tunnels(client: OmadaClient, site_id: str) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site_id}/setting/wireguard")
-    return rows
+    return _fetch_rows(client, f"sites/{site_id}/setting/wireguard")
 
 
 def _fetch_wireguard_peers(client: OmadaClient, site_id: str) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site_id}/setting/wireguard/peer")
-    return rows
+    return _fetch_rows(client, f"sites/{site_id}/setting/wireguard/peer")
 
 
 def _fetch_ddns_rows(client: OmadaClient, site_id: str) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site_id}/setting/service/ddns")
-    return rows
+    return _fetch_rows(client, f"sites/{site_id}/setting/service/ddns")
+
+
+def _find_unique(
+    rows: list[dict[str, Any]], predicate: Callable[[dict[str, Any]], bool],
+) -> dict[str, Any] | None:
+    matches = [row for row in rows if predicate(row)]
+    if len(matches) > 1:
+        raise OmadaError("multiple controller records match", hint="use a unique record ID")
+    return matches[0] if matches else None
 
 
 def _resolve_by_id_or_name(
@@ -104,24 +137,59 @@ def _resolve_by_id_or_name(
     wanted = str(needle or "").strip()
     if not wanted:
         raise OmadaError(f"{kind} identifier or name is required")
-    by_id = [dict(r) for r in rows if str(r.get("id") or "") == wanted]
-    if by_id:
-        return by_id[0]
-    low = wanted.lower()
-    by_name = [dict(r) for r in rows if str(r.get(name_key) or "").strip().lower() == low]
-    if len(by_name) == 1:
-        return by_name[0]
-    if len(by_name) > 1:
-        raise OmadaError(
-            f"multiple {kind} entries match {wanted!r}; pass exact id instead",
-            hint=f"matching ids: {', '.join(str(r.get('id')) for r in by_name)}",
-        )
-    raise OmadaError(f"{kind} {wanted!r} not found")
+    match = _find_unique(rows, lambda row: str(row.get("id", "")) == wanted)
+    if match is None:
+        match = _find_unique(rows, lambda row: str(row.get(name_key) or "").strip().casefold() == wanted.casefold())
+    if match is None:
+        raise OmadaError(f"{kind} not found")
+    if not match.get("id"):
+        raise OmadaError(f"{kind} has no usable ID")
+    return match
 
 
-def _strip_secret_keys(obj: dict[str, Any]) -> dict[str, Any]:
-    out = dict(deep_redact(obj))
-    return out
+def _public_row(shape: str, row: Mapping[str, Any]) -> dict[str, Any]:
+    public = project_controller_row(shape, row)
+    if shape == "wireguard" and row:
+        public["hasPrivateKey"] = bool(row.get("privateKey") or row.get("hasPrivateKey"))
+    if shape == "ddnsEntry" and isinstance(row.get("username"), str):
+        public["username"] = row["username"]
+    return public
+
+
+def _upsert_target(existing: dict[str, Any] | None, new_name: str) -> str:
+    if existing is None:
+        return new_name
+    if not existing.get("id"):
+        raise OmadaError("existing controller record has no usable ID")
+    return str(existing["id"])
+
+
+def _write_with_safe_errors(client: OmadaClient, endpoint: str, method: str, **kwargs: Any) -> dict[str, Any]:
+    with _credential_safe_errors():
+        return client.write(endpoint, method, **kwargs)
+
+
+def _write_readback(
+    rows: list[dict[str, Any]], existing: dict[str, Any] | None, *,
+    name: str, name_key: str = "name", interface_id: str | None = None,
+) -> dict[str, Any]:
+    match = _find_unique(
+        rows,
+        lambda row: str(row.get("id")) == str(existing["id"]) if existing else (
+            str(row.get(name_key) or "").strip().casefold() == name.casefold()
+            and (interface_id is None or str(row.get("interfaceId")) == interface_id)
+        ),
+    )
+    return match if match and match.get("id") else {}
+
+
+def _write_result(result: dict[str, Any], *, manual_recovery: bool, verified: bool | None = None) -> dict[str, Any]:
+    if manual_recovery:
+        result["manualRecoveryRequired"] = True
+        result["warnings"].append(_MANUAL_RECOVERY_WARNING)
+    if verified is not None:
+        result["verified"] = verified
+    return result
 
 
 # -- VPN status toggle -------------------------------------------------------
@@ -146,7 +214,7 @@ def set_vpn_tunnel_status(
     desired = bool(enabled)
     _require_confirm("set_vpn_tunnel_status", target_id, dryRun, confirm)
 
-    before_safe = _strip_secret_keys(existing)
+    before_safe = _public_row("vpns", existing)
     after_preview = dict(before_safe)
     after_preview["status"] = desired
     diff = _field_diff(before_safe, after_preview)
@@ -165,19 +233,20 @@ def set_vpn_tunnel_status(
             rollback=rollback,
         )
 
-    endpoint = f"sites/{site.site_id}/setting/vpns/{urllib.parse.quote(vpn_id)}/status"
-    res = client.write(
-        endpoint,
+    endpoint = f"sites/{site.site_id}/setting/vpns/{urllib.parse.quote(vpn_id, safe='')}/status"
+    expected = {key: value for key, value in after_preview.items() if key != "enabled"}
+    res = _write_with_safe_errors(
+        client, endpoint,
         "POST",
         data={"status": desired},
-        expect_keys={"status": desired},
+        expect_keys=expected,
         tool_name="set_vpn_tunnel_status",
         target=target_id,
         before=before_safe,
         snapshot_payload={"siteId": site.site_id, "vpn": before_safe},
-        read_back=lambda: next(
-            (dict(r) for r in _fetch_vpns(client, site.site_id) if str(r.get("id")) == vpn_id),
-            {},
+        read_back=lambda: _public_row("vpns", _write_readback(
+            _fetch_vpns(client, site.site_id), existing, name="",
+        )
         ),
         fields_changed=["status"],
     )
@@ -185,7 +254,7 @@ def set_vpn_tunnel_status(
         tool_name="set_vpn_tunnel_status",
         target_id=target_id,
         before=before_safe,
-        after=_strip_secret_keys(res["after"]),
+        after=res["after"],
         diff=diff,
         snapshot=res["snapshot"],
         warnings=[],
@@ -226,20 +295,25 @@ def upsert_wireguard_tunnel(
         validated_key = None
 
     existing_rows = _fetch_wireguard_tunnels(client, site.site_id)
-    existing: dict[str, Any] | None = None
+    existing: dict[str, Any] | None
     if tunnelId:
         existing = _resolve_by_id_or_name(existing_rows, tunnelId, kind="WireGuard interface")
     else:
-        for row in existing_rows:
-            if str(row.get("name") or "").strip().lower() == clean_name.lower():
-                existing = dict(row)
-                break
+        existing = _find_unique(existing_rows, lambda row: str(row.get("name") or "").strip().casefold() == clean_name.casefold())
 
     is_create = existing is None
-    target_id = str(existing["id"]) if existing else clean_name
+    existing_key = existing.get("privateKey") if existing else None
+    if existing is not None and validated_key is None:
+        if not isinstance(existing_key, str) or not _WG_KEY_RE.fullmatch(existing_key):
+            raise OmadaError(
+                "the controller did not return a reusable WireGuard private key",
+                hint="supply the existing privateKey explicitly to preserve it, or choose a new key for intentional rotation",
+            )
+        validated_key = existing_key
+    target_id = _upsert_target(existing, clean_name)
     _require_confirm("upsert_wireguard_tunnel", target_id, dryRun, confirm)
 
-    before_safe = _strip_secret_keys(existing) if existing else {}
+    before_safe = _public_row("wireguard", existing) if existing else {}
     preview_after: dict[str, Any] = {
         **(before_safe if existing else {}),
         "name": clean_name,
@@ -247,10 +321,10 @@ def upsert_wireguard_tunnel(
         "mtu": mtu_val,
         "listenPort": port_val,
         "localIp": local_ip,
-        "hasPrivateKey": bool(validated_key or existing),
+        "hasPrivateKey": True,
     }
     diff = _field_diff(before_safe, preview_after)
-    rollback = (
+    rollback: dict[str, Any] | None = (
         {"tool": "delete_wireguard_tunnel", "arguments": {"tunnel": clean_name}}
         if is_create
         else {
@@ -265,12 +339,14 @@ def upsert_wireguard_tunnel(
             },
         }
     )
+    if not is_create and privateKey is not None:
+        rollback = None
     warnings: list[str] = []
     if is_create and validated_key is None:
         warnings.append("privateKey omitted: controller will generate an ephemeral WireGuard keypair on apply")
 
     if dryRun:
-        return _dry_run_result(
+        return _write_result(_dry_run_result(
             tool_name="upsert_wireguard_tunnel",
             target_id=target_id,
             before=before_safe,
@@ -278,15 +354,14 @@ def upsert_wireguard_tunnel(
             diff=diff,
             warnings=warnings,
             rollback=rollback,
-        )
+        ), manual_recovery=True)
 
     effective_key = validated_key
     if effective_key is None:
-        if existing and isinstance(existing.get("privateKey"), str) and _WG_KEY_RE.fullmatch(existing["privateKey"]):
-            effective_key = existing["privateKey"]
-        else:
+        with _credential_safe_errors():
             keypair = client.api_result(f"sites/{site.site_id}/setting/wireguard/key") or {}
-            effective_key = _validate_wg_key(str(keypair.get("privateKey") or ""), "generated privateKey")
+        raw_key = keypair.get("privateKey") if isinstance(keypair, Mapping) else None
+        effective_key = _validate_wg_key(str(raw_key or ""), "generated privateKey")
 
     payload: dict[str, Any] = {
         "name": clean_name,
@@ -297,42 +372,37 @@ def upsert_wireguard_tunnel(
         "privateKey": effective_key,
     }
     if existing:
-        endpoint = f"sites/{site.site_id}/setting/wireguard/{urllib.parse.quote(str(existing['id']))}"
+        endpoint = f"sites/{site.site_id}/setting/wireguard/{urllib.parse.quote(str(existing['id']), safe='')}"
         method = "PUT"
     else:
         endpoint = f"sites/{site.site_id}/setting/wireguard"
         method = "POST"
 
-    res = client.write(
-        endpoint,
+    expected = {key: value for key, value in payload.items() if key != "privateKey"}
+    if privateKey is None and "publicKey" in before_safe:
+        expected["publicKey"] = before_safe["publicKey"]
+    res = _write_with_safe_errors(
+        client, endpoint,
         method,
         data=payload,
-        expect_keys={
-            "name": clean_name,
-            "status": bool(status),
-            "mtu": mtu_val,
-            "listenPort": port_val,
-            "localIp": local_ip,
-        },
+        expect_keys=expected,
         tool_name="upsert_wireguard_tunnel",
         target=target_id,
         before=before_safe,
-        snapshot_payload={"siteId": site.site_id, "created": is_create, "tunnel": before_safe},
-        read_back=lambda: next(
-            (
-                dict(r)
-                for r in _fetch_wireguard_tunnels(client, site.site_id)
-                if (existing and str(r.get("id")) == str(existing["id"]))
-                or str(r.get("name") or "").strip().lower() == clean_name.lower()
-            ),
-            {},
+        snapshot_payload={
+            "siteId": site.site_id, "created": is_create, "tunnel": before_safe,
+            "manualRecoveryRequired": True,
+        },
+        read_back=lambda: _write_readback(
+            _fetch_wireguard_tunnels(client, site.site_id), existing, name=clean_name,
         ),
-        fields_changed=sorted(k for k in payload if k != "privateKey"),
+        fields_changed=sorted(expected),
+        verification_complete=False,
     )
-    after_safe = _strip_secret_keys(res["after"])
+    after_safe = _public_row("wireguard", res["after"])
     if is_create and after_safe.get("id"):
         rollback = {"tool": "delete_wireguard_tunnel", "arguments": {"tunnel": str(after_safe["id"])}}
-    return _committed_result(
+    return _write_result(_committed_result(
         tool_name="upsert_wireguard_tunnel",
         target_id=str(after_safe.get("id") or target_id),
         before=before_safe,
@@ -341,7 +411,7 @@ def upsert_wireguard_tunnel(
         snapshot=res["snapshot"],
         warnings=warnings,
         rollback=rollback,
-    )
+    ), manual_recovery=True, verified=res["verified"])
 
 
 def delete_wireguard_tunnel(
@@ -369,11 +439,11 @@ def delete_wireguard_tunnel(
             hint="remove attached peers with delete_wireguard_peer first",
         )
     _require_confirm("delete_wireguard_tunnel", tid, dryRun, confirm)
-    before_safe = _strip_secret_keys(existing)
+    before_safe = _public_row("wireguard", existing)
     diff = _field_diff(before_safe, {})
-    warnings = ["WireGuard privateKey was redacted from snapshot; auto-recreate requires supplying a new privateKey or regenerating one"]
+    warnings = ["Recreating the WireGuard tunnel requires a private key."]
     if dryRun:
-        return _dry_run_result(
+        return _write_result(_dry_run_result(
             tool_name="delete_wireguard_tunnel",
             target_id=tid,
             before=before_safe,
@@ -381,15 +451,15 @@ def delete_wireguard_tunnel(
             diff=diff,
             warnings=warnings,
             rollback=None,
-        )
+        ), manual_recovery=True)
 
-    res = client.write(
-        f"sites/{site.site_id}/setting/wireguard/{urllib.parse.quote(tid)}",
+    res = _write_with_safe_errors(
+        client, f"sites/{site.site_id}/setting/wireguard/{urllib.parse.quote(tid, safe='')}",
         "DELETE",
         tool_name="delete_wireguard_tunnel",
         target=tid,
         before=before_safe,
-        snapshot_payload={"siteId": site.site_id, "tunnel": before_safe},
+        snapshot_payload={"siteId": site.site_id, "tunnel": before_safe, "manualRecoveryRequired": True},
         read_back=lambda: next(
             (dict(r) for r in _fetch_wireguard_tunnels(client, site.site_id) if str(r.get("id")) == tid),
             {},
@@ -399,7 +469,7 @@ def delete_wireguard_tunnel(
         ),
         fields_changed=["deleted"],
     )
-    return _committed_result(
+    return _write_result(_committed_result(
         tool_name="delete_wireguard_tunnel",
         target_id=tid,
         before=before_safe,
@@ -408,7 +478,7 @@ def delete_wireguard_tunnel(
         snapshot=res["snapshot"],
         warnings=warnings,
         rollback=None,
-    )
+    ), manual_recovery=True, verified=res["verified"])
 
 
 # -- WireGuard peers ---------------------------------------------------------
@@ -460,23 +530,20 @@ def upsert_wireguard_peer(
     iface_id = str(iface_row["id"])
 
     peers = _fetch_wireguard_peers(client, site.site_id)
-    existing: dict[str, Any] | None = None
+    existing: dict[str, Any] | None
     if peerId:
         existing = _resolve_by_id_or_name(peers, peerId, kind="WireGuard peer")
     else:
-        for row in peers:
-            if (
-                str(row.get("name") or "").strip().lower() == clean_name.lower()
-                and str(row.get("interfaceId") or "") == iface_id
-            ):
-                existing = dict(row)
-                break
+        existing = _find_unique(peers, lambda row: (
+            str(row.get("name") or "").strip().casefold() == clean_name.casefold()
+            and str(row.get("interfaceId") or "") == iface_id
+        ))
 
     is_create = existing is None
-    target_id = str(existing["id"]) if existing else clean_name
+    target_id = _upsert_target(existing, clean_name)
     _require_confirm("upsert_wireguard_peer", target_id, dryRun, confirm)
 
-    before_safe = _strip_secret_keys(existing) if existing else {}
+    before_safe = _public_row("wireguardPeers", existing) if existing else {}
     payload: dict[str, Any] = {
         "name": clean_name,
         "status": bool(status),
@@ -493,9 +560,9 @@ def upsert_wireguard_peer(
     if comment is not None and str(comment).strip():
         payload["comment"] = str(comment).strip()
 
-    preview_after = _strip_secret_keys({**before_safe, **payload})
+    preview_after = _public_row("wireguardPeers", {**before_safe, **payload})
     diff = _field_diff(before_safe, preview_after)
-    rollback = (
+    rollback: dict[str, Any] | None = (
         {"tool": "delete_wireguard_peer", "arguments": {"peer": clean_name}}
         if is_create
         else {
@@ -511,9 +578,11 @@ def upsert_wireguard_peer(
             },
         }
     )
+    if not is_create and psk is not None:
+        rollback = None
 
     if dryRun:
-        return _dry_run_result(
+        return _write_result(_dry_run_result(
             tool_name="upsert_wireguard_peer",
             target_id=target_id,
             before=before_safe,
@@ -521,45 +590,39 @@ def upsert_wireguard_peer(
             diff=diff,
             warnings=[],
             rollback=rollback,
-        )
+        ), manual_recovery=psk is not None)
 
     endpoint = (
-        f"sites/{site.site_id}/setting/wireguard/peer/{urllib.parse.quote(str(existing['id']))}"
+        f"sites/{site.site_id}/setting/wireguard/peer/{urllib.parse.quote(str(existing['id']), safe='')}"
         if existing
         else f"sites/{site.site_id}/setting/wireguard/peer"
     )
-    res = client.write(
-        endpoint,
+    expected = {
+        key: preview_after[key] for key in (*payload, "endPoint", "endPointPort", "comment")
+        if key in preview_after
+    }
+    res = _write_with_safe_errors(
+        client, endpoint,
         "PUT" if existing else "POST",
         data=payload,
-        expect_keys={
-            "name": clean_name,
-            "status": bool(status),
-            "interfaceId": iface_id,
-            "publicKey": pub,
-        },
+        expect_keys=expected,
         tool_name="upsert_wireguard_peer",
         target=target_id,
         before=before_safe,
-        snapshot_payload={"siteId": site.site_id, "created": is_create, "peer": before_safe},
-        read_back=lambda: next(
-            (
-                dict(r)
-                for r in _fetch_wireguard_peers(client, site.site_id)
-                if (existing and str(r.get("id")) == str(existing["id"]))
-                or (
-                    str(r.get("name") or "").strip().lower() == clean_name.lower()
-                    and str(r.get("interfaceId") or "") == iface_id
-                )
-            ),
-            {},
+        snapshot_payload={
+            "siteId": site.site_id, "created": is_create, "peer": before_safe,
+            "manualRecoveryRequired": psk is not None,
+        },
+        read_back=lambda: _write_readback(
+            _fetch_wireguard_peers(client, site.site_id), existing, name=clean_name, interface_id=iface_id,
         ),
-        fields_changed=sorted(k for k in payload if k != "presharedKey"),
+        fields_changed=sorted(key for key in payload if key != "presharedKey"),
+        verification_complete=psk is None,
     )
-    after_safe = _strip_secret_keys(res["after"])
+    after_safe = _public_row("wireguardPeers", res["after"])
     if is_create and after_safe.get("id"):
         rollback = {"tool": "delete_wireguard_peer", "arguments": {"peer": str(after_safe["id"])}}
-    return _committed_result(
+    return _write_result(_committed_result(
         tool_name="upsert_wireguard_peer",
         target_id=str(after_safe.get("id") or target_id),
         before=before_safe,
@@ -568,7 +631,7 @@ def upsert_wireguard_peer(
         snapshot=res["snapshot"],
         warnings=[],
         rollback=rollback,
-    )
+    ), manual_recovery=psk is not None, verified=res["verified"])
 
 
 def delete_wireguard_peer(
@@ -586,10 +649,10 @@ def delete_wireguard_peer(
     )
     pid = str(existing["id"])
     _require_confirm("delete_wireguard_peer", pid, dryRun, confirm)
-    before_safe = _strip_secret_keys(existing)
+    before_safe = _public_row("wireguardPeers", existing)
     diff = _field_diff(before_safe, {})
     if dryRun:
-        return _dry_run_result(
+        return _write_result(_dry_run_result(
             tool_name="delete_wireguard_peer",
             target_id=pid,
             before=before_safe,
@@ -597,15 +660,15 @@ def delete_wireguard_peer(
             diff=diff,
             warnings=[],
             rollback=None,
-        )
+        ), manual_recovery=True)
 
-    res = client.write(
-        f"sites/{site.site_id}/setting/wireguard/peer/{urllib.parse.quote(pid)}",
+    res = _write_with_safe_errors(
+        client, f"sites/{site.site_id}/setting/wireguard/peer/{urllib.parse.quote(pid, safe='')}",
         "DELETE",
         tool_name="delete_wireguard_peer",
         target=pid,
         before=before_safe,
-        snapshot_payload={"siteId": site.site_id, "peer": before_safe},
+        snapshot_payload={"siteId": site.site_id, "peer": before_safe, "manualRecoveryRequired": True},
         read_back=lambda: next(
             (dict(r) for r in _fetch_wireguard_peers(client, site.site_id) if str(r.get("id")) == pid),
             {},
@@ -615,7 +678,7 @@ def delete_wireguard_peer(
         ),
         fields_changed=["deleted"],
     )
-    return _committed_result(
+    return _write_result(_committed_result(
         tool_name="delete_wireguard_peer",
         target_id=pid,
         before=before_safe,
@@ -624,7 +687,7 @@ def delete_wireguard_peer(
         snapshot=res["snapshot"],
         warnings=[],
         rollback=None,
-    )
+    ), manual_recovery=True, verified=res["verified"])
 
 
 # -- DDNS CRUD ---------------------------------------------------------------
@@ -685,19 +748,21 @@ def upsert_ddns(
         )
 
     rows = _fetch_ddns_rows(client, site.site_id)
-    existing: dict[str, Any] | None = None
+    existing: dict[str, Any] | None
     if ddnsId:
         existing = _resolve_by_id_or_name(rows, ddnsId, kind="DDNS entry", name_key="domainName")
     else:
-        for r in rows:
-            if str(r.get("domainName") or "").strip().lower() == clean_domain.lower():
-                existing = dict(r)
-                break
+        existing = _find_unique(rows, lambda row: (
+            str(row.get("domainName") or "").strip().casefold() == clean_domain.casefold()
+        ))
 
     if existing and not interface:
         port_uuid = str(existing.get("interfacePortId") or "")
     else:
-        port_uuid = _resolve_wan_port_uuid(client, site, interface)
+        with _credential_safe_errors():
+            port_uuid = _resolve_wan_port_uuid(client, site, interface)
+    if not port_uuid:
+        raise OmadaError("the DDNS entry lacks a WAN interface", hint="specify an adopted WAN interface")
 
     eff_user = str(username if username is not None else (existing.get("username") if existing else "") or "").strip()
     if not existing and not eff_user:
@@ -706,10 +771,10 @@ def upsert_ddns(
         raise OmadaError("password is required when creating a DDNS entry")
 
     is_create = existing is None
-    target_id = str(existing["id"]) if existing else clean_domain
+    target_id = _upsert_target(existing, clean_domain)
     _require_confirm("upsert_ddns", target_id, dryRun, confirm)
 
-    before_safe = _strip_secret_keys(existing) if existing else {}
+    before_safe = _public_row("ddnsEntry", existing) if existing else {}
     payload: dict[str, Any] = {
         "service": svc_code,
         "interfacePortId": port_uuid,
@@ -718,10 +783,11 @@ def upsert_ddns(
         "updateInterval": interval_val,
         "status": bool(status),
     }
-    if password is not None:
+    password_changed = password is not None
+    if password_changed:
         payload["password"] = str(password)
 
-    preview_after = _strip_secret_keys({**before_safe, **payload})
+    preview_after = _public_row("ddnsEntry", {**before_safe, **payload})
     diff = _field_diff(before_safe, preview_after)
     rollback = (
         {"tool": "delete_ddns", "arguments": {"ddns": clean_domain}}
@@ -729,7 +795,7 @@ def upsert_ddns(
         else None
     )
     if dryRun:
-        return _dry_run_result(
+        return _write_result(_dry_run_result(
             tool_name="upsert_ddns",
             target_id=target_id,
             before=before_safe,
@@ -737,42 +803,36 @@ def upsert_ddns(
             diff=diff,
             warnings=[],
             rollback=rollback,
-        )
+        ), manual_recovery=password_changed)
 
     endpoint = (
-        f"sites/{site.site_id}/setting/service/ddns/{urllib.parse.quote(str(existing['id']))}"
+        f"sites/{site.site_id}/setting/service/ddns/{urllib.parse.quote(str(existing['id']), safe='')}"
         if existing
         else f"sites/{site.site_id}/setting/service/ddns"
     )
-    res = client.write(
-        endpoint,
+    expected = {key: value for key, value in payload.items() if key != "password"}
+    res = _write_with_safe_errors(
+        client, endpoint,
         "PUT" if existing else "POST",
         data=payload,
-        expect_keys={
-            "service": svc_code,
-            "domainName": clean_domain,
-            "updateInterval": interval_val,
-            "status": bool(status),
-        },
+        expect_keys=expected,
         tool_name="upsert_ddns",
         target=target_id,
         before=before_safe,
-        snapshot_payload={"siteId": site.site_id, "created": is_create, "ddns": before_safe},
-        read_back=lambda: next(
-            (
-                dict(r)
-                for r in _fetch_ddns_rows(client, site.site_id)
-                if (existing and str(r.get("id")) == str(existing["id"]))
-                or str(r.get("domainName") or "").strip().lower() == clean_domain.lower()
-            ),
-            {},
+        snapshot_payload={
+            "siteId": site.site_id, "created": is_create, "ddns": before_safe,
+            "manualRecoveryRequired": password_changed,
+        },
+        read_back=lambda: _write_readback(
+            _fetch_ddns_rows(client, site.site_id), existing, name=clean_domain, name_key="domainName",
         ),
-        fields_changed=sorted(k for k in payload if k != "password"),
+        fields_changed=sorted(expected),
+        verification_complete=not password_changed,
     )
-    after_safe = _strip_secret_keys(res["after"])
+    after_safe = _public_row("ddnsEntry", res["after"])
     if is_create and after_safe.get("id"):
         rollback = {"tool": "delete_ddns", "arguments": {"ddns": str(after_safe["id"])}}
-    return _committed_result(
+    return _write_result(_committed_result(
         tool_name="upsert_ddns",
         target_id=str(after_safe.get("id") or target_id),
         before=before_safe,
@@ -781,7 +841,7 @@ def upsert_ddns(
         snapshot=res["snapshot"],
         warnings=[],
         rollback=rollback,
-    )
+    ), manual_recovery=password_changed, verified=res["verified"])
 
 
 def delete_ddns(
@@ -800,11 +860,11 @@ def delete_ddns(
     )
     did = str(existing["id"])
     _require_confirm("delete_ddns", did, dryRun, confirm)
-    before_safe = _strip_secret_keys(existing)
+    before_safe = _public_row("ddnsEntry", existing)
     diff = _field_diff(before_safe, {})
-    warnings = ["DDNS password was redacted; rollback cannot restore credentials automatically"]
+    warnings = ["Recreating the DDNS entry requires its password."]
     if dryRun:
-        return _dry_run_result(
+        return _write_result(_dry_run_result(
             tool_name="delete_ddns",
             target_id=did,
             before=before_safe,
@@ -812,15 +872,15 @@ def delete_ddns(
             diff=diff,
             warnings=warnings,
             rollback=None,
-        )
+        ), manual_recovery=True)
 
-    res = client.write(
-        f"sites/{site.site_id}/setting/service/ddns/{urllib.parse.quote(did)}",
+    res = _write_with_safe_errors(
+        client, f"sites/{site.site_id}/setting/service/ddns/{urllib.parse.quote(did, safe='')}",
         "DELETE",
         tool_name="delete_ddns",
         target=did,
         before=before_safe,
-        snapshot_payload={"siteId": site.site_id, "ddns": before_safe},
+        snapshot_payload={"siteId": site.site_id, "ddns": before_safe, "manualRecoveryRequired": True},
         read_back=lambda: next(
             (dict(r) for r in _fetch_ddns_rows(client, site.site_id) if str(r.get("id")) == did),
             {},
@@ -830,7 +890,7 @@ def delete_ddns(
         ),
         fields_changed=["deleted"],
     )
-    return _committed_result(
+    return _write_result(_committed_result(
         tool_name="delete_ddns",
         target_id=did,
         before=before_safe,
@@ -839,4 +899,4 @@ def delete_ddns(
         snapshot=res["snapshot"],
         warnings=warnings,
         rollback=None,
-    )
+    ), manual_recovery=True, verified=res["verified"])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from ..client import OmadaClient, OmadaError
 from ._common import as_int, as_mapping, deep_redact, mask_ipv4_middle, try_api_result
@@ -189,7 +190,7 @@ def _list_traffic_rules(client: OmadaClient) -> dict[str, Any]:
         )
         acl_gw_raw, _ = try_api_result(
             client,
-            f"sites/{site.site_id}/setting/firewall/acls?type=gateway&currentPage=1&currentPageSize=100",
+            f"sites/{site.site_id}/setting/firewall/acls?type=0&currentPage=1&currentPageSize=100",
             warnings,
             label="gateway ACLs",
         )
@@ -313,47 +314,90 @@ def _list_backups(client: OmadaClient) -> dict[str, Any]:
     })
 
 
+_VOUCHER_GROUP_FIELDS: dict[str, set[type]] = {
+    "id": {str, int},
+    "name": {str},
+    "amount": {int},
+    "codeLength": {int},
+    "type": {int},
+    "duration": {int},
+    "durationNum": {int},
+    "durationUnit": {int},
+    "maxUsers": {int},
+    "createTime": {int},
+}
+_VOUCHER_FIELDS: dict[str, set[type]] = {
+    "id": {str, int},
+    "groupId": {str, int},
+    "status": {bool, int},
+    "createTime": {int},
+    "expireTime": {int},
+}
+_VOUCHER_CREDENTIAL_KEYS = ("code", "voucherCode", "activationCode")
+
+
+def _project_hotspot_row(row: dict[str, Any], *, group: bool) -> dict[str, Any]:
+    """Keep only scalar metadata and drop fields that duplicate a credential."""
+    fields = _VOUCHER_GROUP_FIELDS if group else _VOUCHER_FIELDS
+    credentials = [row[key] for key in _VOUCHER_CREDENTIAL_KEYS if row.get(key) is not None]
+    return {
+        key: row[key] for key, types in fields.items()
+        if key in row and type(row[key]) in types
+        and all(str(row[key]) != str(credential) for credential in credentials)
+    }
+
+
+def _hotspot_row_schema(fields: dict[str, set[type]]) -> dict[str, Any]:
+    json_types = {str: "string", int: "integer", bool: "boolean"}
+    return {
+        "type": "object",
+        "properties": {
+            name: {"type": sorted(json_types[field_type] for field_type in types)}
+            for name, types in fields.items()
+        },
+        "additionalProperties": False,
+    }
+
+
 def _list_hotspot_vouchers(
     client: OmadaClient,
     groupId: str | None = None,
     limit: int = 100,
 ) -> dict[str, Any]:
-    """List hotspot voucher groups and individual vouchers for the active site."""
+    """List hotspot voucher group and voucher metadata for the active site."""
     site = _site(client)
-    warnings: list[str] = []
     max_rows = max(1, min(as_int(limit, 100), 1000))
     max_pages = max(1, (max_rows + 99) // 100)
     with client.scoped_cache():
-        groups, meta = client.paginate(
-            f"hotspot/sites/{site.site_id}/voucherGroups",
-            page_size=min(100, max_rows),
-            max_pages=max_pages,
-        )
-        vouchers: list[dict[str, Any]] = []
         vouchers_ep = (
-            f"hotspot/sites/{site.site_id}/voucherGroups/{groupId}"
+            f"hotspot/sites/{site.site_id}/voucherGroups/{quote(groupId, safe='')}"
             if groupId
             else f"hotspot/sites/{site.site_id}/vouchers"
         )
-        v_raw, _ = try_api_result(
-            client,
-            f"{vouchers_ep}?currentPage=1&currentPageSize={min(100, max_rows)}",
-            warnings,
-            label="hotspot vouchers",
-        )
-        if isinstance(v_raw, (dict, list)):
-            vouchers = _rows_from_result(v_raw)
+        try:
+            groups, meta = client.paginate(
+                f"hotspot/sites/{site.site_id}/voucherGroups",
+                page_size=min(100, max_rows),
+                max_pages=max_pages,
+            )
+            v_raw, available = try_api_result(
+                client, f"{vouchers_ep}?currentPage=1&currentPageSize={min(100, max_rows)}",
+                [], label="hotspot vouchers",
+            )
+        except OmadaError as exc:
+            raise OmadaError("could not read hotspot voucher metadata", code=exc.code) from None
+        vouchers = _rows_from_result(v_raw)
 
-    return deep_redact({
+    return {
         "site": site.name,
         "siteId": site.site_id,
         "groupCount": len(groups[:max_rows]),
         "totalGroups": (meta or {}).get("totalRows", len(groups)),
-        "groups": groups[:max_rows],
+        "groups": [_project_hotspot_row(row, group=True) for row in groups[:max_rows]],
         "voucherCount": len(vouchers[:max_rows]),
-        "vouchers": vouchers[:max_rows],
-        "warnings": warnings,
-    })
+        "vouchers": [_project_hotspot_row(row, group=False) for row in vouchers[:max_rows]],
+        "warnings": [] if available else ["Hotspot vouchers are unavailable."],
+    }
 
 
 def _audit_all_sites(client: OmadaClient, maxSites: int = 20) -> dict[str, Any]:
@@ -506,9 +550,9 @@ _HOTSPOT_VOUCHERS_SCHEMA: dict[str, Any] = {
         "siteId": {"type": "string"},
         "groupCount": {"type": "integer", "minimum": 0},
         "totalGroups": {"type": "integer", "minimum": 0},
-        "groups": {"type": "array", "items": {"type": "object"}},
+        "groups": {"type": "array", "items": _hotspot_row_schema(_VOUCHER_GROUP_FIELDS)},
         "voucherCount": {"type": "integer", "minimum": 0},
-        "vouchers": {"type": "array", "items": {"type": "object"}},
+        "vouchers": {"type": "array", "items": _hotspot_row_schema(_VOUCHER_FIELDS)},
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["site", "siteId", "groupCount", "groups", "voucherCount", "vouchers", "warnings"],

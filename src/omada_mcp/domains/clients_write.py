@@ -10,11 +10,12 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..client import OmadaClient, OmadaError, SiteInfo, describe_error
-from ._common import as_int, as_mapping
+from ._common import as_mapping
 from ._write_common import (
     _committed_result,
     _dry_run_result,
     _field_diff,
+    _match_fields,
     _normalize_mac,
     _require_confirm,
     _resolve_by_id_or_name,
@@ -300,10 +301,10 @@ def release_client_fixed_ip(
     def _verify(_before: Any, after_obj: Any) -> tuple[bool, str | None]:
         if not isinstance(after_obj, Mapping):
             return False, "clients/{MAC} read-back did not return an object"
-        ip_cfg = after_obj.get("ipSetting") or {}
-        if bool(ip_cfg.get("useFixedAddr")):
-            return False, "ipSetting.useFixedAddr remained true after release"
-        return True, None
+        ip_cfg = after_obj.get("ipSetting")
+        if not isinstance(ip_cfg, Mapping):
+            return False, "ipSetting missing in read-back"
+        return _match_fields(ip_cfg, {"useFixedAddr": False})
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         fresh = _read_back()
@@ -423,9 +424,7 @@ def set_client_blocked(
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
         if not isinstance(after_now, Mapping):
             return False, "client read-back failed"
-        if "blocked" in after_now and bool(after_now["blocked"]) != desired:
-            return False, f"client blocked expected {desired!r}, got {after_now.get('blocked')!r}"
-        return True, None
+        return _match_fields(after_now, {"blocked": desired})
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         live = _read_back()
@@ -864,15 +863,10 @@ def set_client_rate_limit(
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
         if not isinstance(after_now, Mapping):
             return False, "client rate-limit read-back failed"
-        rl = after_now.get("rateLimit") or {}
-        if bool(rl.get("enable")) != bool(enabled):
-            return False, f"rateLimit.enable expected {enabled!r}, got {rl.get('enable')!r}"
-        if enabled:
-            if "rateLimitId" in rate_payload and str(rl.get("rateLimitId") or "") != rate_payload["rateLimitId"]:
-                return False, f"rateLimitId expected {rate_payload['rateLimitId']!r}"
-            if downLimitKbps is not None and as_int(rl.get("downLimit"), -1) != int(downLimitKbps):
-                return False, f"downLimit expected {downLimitKbps}, got {rl.get('downLimit')}"
-        return True, None
+        rl = after_now.get("rateLimit")
+        if not isinstance(rl, Mapping):
+            return False, "rateLimit missing in read-back"
+        return _match_fields(rl, rate_payload)
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         live = _read_back()

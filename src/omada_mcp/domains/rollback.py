@@ -9,24 +9,27 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from ..client import OmadaClient, OmadaError
+from ..client import OmadaClient, OmadaError, SiteInfo
 from ._common import as_int, as_mapping, deep_redact, resolve_device_detail, resolve_raw_device
+from ._device_helpers import collect_switch_ports_data
 from ._write_common import (
     _NON_REVERSIBLE_SNAPSHOT_TOOLS,
     _committed_result,
     _dry_run_result,
     _field_diff,
+    _match_fields,
     _normalize_mac,
     _require_confirm,
     _site,
-    _unwrap_rows,
 )
 from ._write_fetchers import (
     _ensure_lan_patch_body,
+    _fetch_devices,
     _fetch_dhcp_reservations,
     _fetch_groups,
     _fetch_lan_collection,
     _fetch_lan_dns_rules,
+    _fetch_lan_pair,
     _fetch_lan_profiles,
     _fetch_mdns_rules,
     _fetch_poe_schedules,
@@ -40,9 +43,30 @@ from ._write_fetchers import (
     _omada_mac,
     _strip_client_volatiles,
 )
+from ._write_safety import (
+    _check_dhcp_pools_safety,
+    _check_lan_delete_safety,
+    _check_vlan_isolation_safety,
+)
 from .clients_write import _client_lock_wire_aps, _lookup_client_record
 from .services_write import _resolve_upnp_targets
-from .switch_write import _build_switch_port_patch, _switch_port_summary
+from .switch_l2_write import _assert_ports_safe_for_l2, _fetch_raw_port
+from .switch_write import _build_switch_port_patch, _check_port_safety_guard, _switch_port_summary
+from .wireless_write import _redact_override_list, _verify_ap_wlan_state
+
+_SWITCH_PORT_RESTORE_FIELDS = (
+    "name", "disable", "profileId", "profileOverrideEnable", "poe", "linkSpeed", "duplex",
+    "nativeNetworkId", "tagNetworkIds", "untagNetworkIds", "portIsolationEnable",
+    "lldpMedEnable", "spanningTreeEnable",
+)
+_LAN_UPDATE_FIELDS = ("name", "domain", "igmpSnoopEnable", "icmpPingEnable", "dhcpSettings")
+_DHCP_POOL_FIELDS = ("ipRangePool", "ipaddrStart", "ipaddrEnd", "ipRangeStart", "ipRangeEnd")
+_DHCP_UPDATE_FIELDS = ("enable", "leasetime", "leaseTime", "dhcpns", "dnsMode", "dnsEnable", "priDns", "sndDns", "dns1", "dns2")
+_DELETE_ONLY_SECRET_ROLLBACKS = ("upsert_wireguard_tunnel", "upsert_wireguard_peer", "upsert_ddns")
+
+
+def _override_has_credential(row: Mapping[str, Any]) -> bool:
+    return any(bool(row.get(key)) for key in ("psk", "securityKey", "pskSetting", "ppskSetting", "hasPresharedKey"))
 
 
 def _resolve_snapshot_file(client: OmadaClient, snapshot_id: str) -> Path:
@@ -78,6 +102,7 @@ def _check_rollback_not_superseded(
     snap_timestamp: str,
     *,
     force: bool,
+    scope: Mapping[str, Any],
 ) -> None:
     """Refuse rolling back a snapshot superseded by a newer write on the same target."""
     if force or not orig_target:
@@ -114,6 +139,8 @@ def _check_rollback_not_superseded(
             continue
         if str(row.get("tool") or "") == "rollback_from_snapshot":
             continue
+        if any(row.get(key) is not None and value != row[key] for key, value in scope.items()):
+            continue
         if str(row.get("target") or "") == orig_target:
             newer.append(row)
 
@@ -122,8 +149,37 @@ def _check_rollback_not_superseded(
         raise OmadaError(
             f"stale snapshot {sid!r}: newer committed write {latest.get('snapshot')!r} "
             f"({latest.get('tool')}) modified target {orig_target!r}",
-            hint="roll back the newer snapshot first or set force=true to override",
+            hint="review the newer write and current controller state before setting force=true to override",
         )
+
+
+def _validate_snapshot_scope(
+    client: OmadaClient,
+    site: SiteInfo,
+    snapshot: Mapping[str, Any],
+    snapshot_id: str,
+    dry_run: bool,
+) -> dict[str, str]:
+    version = snapshot.get("version", 1)
+    if type(version) is not int or version not in (1, 2):
+        raise OmadaError(f"snapshot {snapshot_id!r} has an unsupported version")
+    if version == 1:
+        if not dry_run:
+            raise OmadaError(
+                f"legacy snapshot {snapshot_id!r} is preview-only because controller and site provenance are missing",
+                hint="inspect the snapshot and use the corresponding configuration tool to preview a manual restore",
+            )
+        return {}
+
+    if not client.controller_id:
+        raise OmadaError(f"cannot check controller identity for snapshot {snapshot_id!r}")
+    scope = {"controllerId": client.controller_id, "baseUrl": client.config.base_url.rstrip("/"), "siteId": site.site_id}
+    if any(snapshot.get(key) != value for key, value in scope.items()):
+        raise OmadaError(
+            f"snapshot {snapshot_id!r} does not belong to the active controller and site",
+            hint="select the controller and site named in the snapshot before restoring it",
+        )
+    return scope
 
 
 def rollback_from_snapshot(
@@ -136,7 +192,6 @@ def rollback_from_snapshot(
     """Restore pre-mutation state from a saved snapshot in ``OMADA_SNAPSHOT_DIR``."""
     snap_path = _resolve_snapshot_file(client, snapshotId)
     sid = snap_path.name
-    _require_confirm("rollback_from_snapshot", sid, dryRun, confirm)
 
     try:
         envelope = json.loads(snap_path.read_text(encoding="utf-8"))
@@ -149,16 +204,27 @@ def rollback_from_snapshot(
     orig_target = str(envelope.get("target") or "")
     snap_timestamp = str(envelope.get("timestamp") or "")
     snap_data = envelope.get("data")
+    snap_fields = envelope.get("fieldsChanged")
 
     if orig_tool in _NON_REVERSIBLE_SNAPSHOT_TOOLS:
         raise OmadaError(
             f"snapshot {sid!r} was captured by non-reversible action {orig_tool!r} and cannot be rolled back",
         )
 
-    _check_rollback_not_superseded(client, sid, orig_target, snap_timestamp, force=bool(force))
-
     site = _site(client)
+    scope = _validate_snapshot_scope(client, site, envelope, sid, dryRun)
+    inverse_delete = isinstance(snap_data, Mapping) and snap_data.get("created") is True and orig_tool in _DELETE_ONLY_SECRET_ROLLBACKS
+    if isinstance(snap_data, Mapping) and not inverse_delete and (snap_data.get("manualRecoveryRequired") or snap_data.get("secretRestoreRequired")):
+        raise OmadaError(
+            f"snapshot {sid!r} requires manual restoration of credentials",
+            hint="restore the configuration with the intended credentials; snapshots do not retain them",
+        )
+    _check_rollback_not_superseded(client, sid, orig_target, snap_timestamp, force=bool(force), scope=scope)
+    _require_confirm("rollback_from_snapshot", sid, dryRun, confirm)
+
     warnings: list[str] = [f"Rolling back snapshot {sid} created by {orig_tool} (target={orig_target})."]
+    if not scope:
+        warnings.append("Legacy snapshot is preview-only because its original controller and site cannot be established.")
 
     def _run_restore(
         *,
@@ -169,12 +235,12 @@ def rollback_from_snapshot(
         restore_preview: Any,
         read_back_fn: Callable[[], Any],
         verify_fn: Callable[[Any, Any], tuple[bool, str | None]],
+        revalidate: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
-        diff = _field_diff(
-            live_before if isinstance(live_before, Mapping) else {"state": live_before},
-            restore_preview if isinstance(restore_preview, Mapping) else {"state": restore_preview},
-            tuple((restore_preview if isinstance(restore_preview, Mapping) else {"state": None}).keys()),
-        )
+        if isinstance(live_before, Mapping) and isinstance(restore_preview, Mapping):
+            diff = _field_diff(live_before, restore_preview, tuple(restore_preview))
+        else:
+            diff = _field_diff({"state": live_before}, {"state": restore_preview}, ("state",))
         if dryRun:
             return _dry_run_result(
                 tool_name="rollback_from_snapshot",
@@ -187,8 +253,13 @@ def rollback_from_snapshot(
             )
 
         def _reauth_prep() -> tuple[bool, dict[str, Any] | None, Any]:
+            _validate_snapshot_scope(client, _site(client), envelope, sid, dryRun)
             now = read_back_fn()
             ok, _ = verify_fn(live_before, now)
+            if not ok and revalidate is not None:
+                if now != live_before:
+                    raise OmadaError("rollback target changed during session recovery; preview the restore again")
+                revalidate()
             return ok, (payload if method != "POST" else None), now
 
         write_res = client.write(
@@ -310,25 +381,54 @@ def rollback_from_snapshot(
         if len(parts) != 2:
             raise OmadaError(f"cannot parse switch MAC and port from target {orig_target!r}")
         norm_mac, port_str = parts[0], parts[1]
-        port_num = int(port_str)
+        port_num = as_int(port_str, 0)
+        if port_num < 1:
+            raise OmadaError(f"invalid port number in rollback target {orig_target!r}")
         wire_mac = _omada_mac(norm_mac)
         ep = f"sites/{site.site_id}/switches/{wire_mac}/ports/{port_num}"
-        live_rows = _unwrap_rows(client.api_result(f"sites/{site.site_id}/switches/{wire_mac}/ports"))
-        live_port = next((r for r in live_rows if as_int(r.get("port"), 0) == port_num), {})
-        body = _build_switch_port_patch(snap_data)
+        live_port = _fetch_raw_port(client, site.site_id, wire_mac, port_num)
+        selected = snap_fields if isinstance(snap_fields, list) else snap_data
+        fields = [key for key in _SWITCH_PORT_RESTORE_FIELDS if key in selected]
+        intended = {**live_port, **{key: snap_data[key] for key in fields if key in snap_data}}
+        body = _build_switch_port_patch(intended)
+        if any(key in fields for key in ("nativeNetworkId", "tagNetworkIds", "untagNetworkIds")):
+            for key in ("networkTagsSetting", "tagNetworkIds", "untagNetworkIds"):
+                if key in snap_data:
+                    body[key] = copy.deepcopy(snap_data[key])
+        live_summary = _switch_port_summary(live_port)
+        saved_summary = _switch_port_summary(intended)
+        expected = {key: saved_summary[key] for key in fields if key in body or key == "disable"}
+        desired_summary = {**live_summary, **expected}
+
+        def _guard_port_restore() -> None:
+            switch = resolve_raw_device(client, site, wire_mac, expected_type="switch")
+            ports = collect_switch_ports_data(client, site, switch, include_cable_test=False)
+            port = next((p for p in ports.get("ports") or [] if as_int(p.get("port"), 0) == port_num), None)
+            if port is None:
+                raise OmadaError(f"port {port_num} was not found on switch {norm_mac}")
+            _check_port_safety_guard(
+                port,
+                action="restore",
+                norm_mac=norm_mac,
+                port=port_num,
+                allow_uplink_mutation=False,
+                warnings=warnings,
+            )
+
+        guarded = any(key != "name" and value != live_summary[key] for key, value in expected.items())
+        if guarded:
+            _guard_port_restore()
         return _run_restore(
             method="PATCH",
             endpoint=ep,
             payload=body,
-            live_before=_switch_port_summary(live_port),
-            restore_preview=_switch_port_summary(snap_data),
+            live_before=live_summary,
+            restore_preview=desired_summary,
             read_back_fn=lambda: _switch_port_summary(
-                next(r for r in _unwrap_rows(client.api_result(f"sites/{site.site_id}/switches/{wire_mac}/ports")) if as_int(r.get("port"), 0) == port_num)
+                _fetch_raw_port(client, site.site_id, wire_mac, port_num),
             ),
-            verify_fn=lambda _b, a: (
-                str(a.get("profileId")) == str(snap_data.get("profileId") or "") and str(a.get("name")) == str(snap_data.get("name") or ""),
-                "switch port read-back did not match snapshot",
-            ),
+            verify_fn=lambda _b, a: _match_fields(a, expected),
+            revalidate=_guard_port_restore if guarded else None,
         )
 
     if orig_tool == "update_ap_radio" and isinstance(snap_data, Mapping):
@@ -352,41 +452,130 @@ def rollback_from_snapshot(
             ),
         )
 
-    if orig_tool == "assign_ap_wlan_group" and isinstance(snap_data, Mapping):
-        wire_mac = _omada_mac(orig_target)
-        ep = f"sites/{site.site_id}/eaps/{wire_mac}/config/wlans"
-        body = {"wlanId": str(snap_data.get("wlanId") or ""), "ssidOverrides": list(snap_data.get("ssidOverrides") or [])}
-        live_ap = dict(client.api_result(f"sites/{site.site_id}/eaps/{wire_mac}") or {})
-        return _run_restore(
-            method="PUT",
-            endpoint=ep,
-            payload=body,
-            live_before={"wlanId": live_ap.get("wlanId")},
-            restore_preview={"wlanId": body["wlanId"]},
-            read_back_fn=lambda: dict(client.api_result(f"sites/{site.site_id}/eaps/{wire_mac}") or {}),
-            verify_fn=lambda _b, a: (str(a.get("wlanId") or "") == body["wlanId"], "AP wlanId did not match snapshot"),
-        )
+    if orig_tool in ("assign_ap_wlan_group", "set_ap_ssid_overrides") and isinstance(snap_data, Mapping):
+        wire_mac = _omada_mac(str(snap_data.get("mac") or orig_target))
+        wlan_id = str(snap_data.get("wlanId") or "")
+        saved_overrides = [dict(o) for o in (snap_data.get("ssidOverrides") or []) if isinstance(o, Mapping)]
+        if any(_override_has_credential(o) for o in saved_overrides):
+            raise OmadaError(
+                "AP WLAN rollback requires manual restoration of override credentials",
+                hint="use the Omada UI with the intended passphrases; snapshots do not retain them",
+            )
+
+        def _read_ap_wlan() -> dict[str, Any]:
+            ap = resolve_device_detail(client, site, wire_mac, expected_type="ap")
+            overrides = [o for o in (ap.get("ssidOverrides") or []) if isinstance(o, Mapping)]
+            return {
+                "wlanId": str(ap.get("wlanId") or ""),
+                "ssidOverrides": _redact_override_list(overrides),
+                "hasOverrideCredentials": any(_override_has_credential(o) for o in overrides),
+            }
+
+        def _require_no_current_credentials(view: Mapping[str, Any]) -> None:
+            if view.get("hasOverrideCredentials"):
+                raise OmadaError(
+                    "AP WLAN rollback could overwrite current override credentials",
+                    hint="restore the configuration in the Omada UI with the intended passphrases",
+                )
+
+        if wire_mac and wlan_id:
+            live_wlan = _read_ap_wlan()
+            _require_no_current_credentials(live_wlan)
+            body = {"wlanId": wlan_id, "ssidOverrides": saved_overrides}
+            return _run_restore(
+                method="PUT",
+                endpoint=f"sites/{site.site_id}/eaps/{wire_mac}/config/wlans",
+                payload=body,
+                live_before=live_wlan,
+                restore_preview=body,
+                read_back_fn=_read_ap_wlan,
+                verify_fn=lambda _b, a: _verify_ap_wlan_state(body, a),
+                revalidate=lambda: _require_no_current_credentials(_read_ap_wlan()),
+            )
 
     # Collections: LAN networks, ACLs, Port Profiles, Policy Routes, LAN DNS, DHCP, Port Forward, Static Routes, mDNS, IP Groups, Client settings
     if orig_tool in ("update_lan_network", "set_vlan_isolation", "set_vlan_dhcp_pools") and isinstance(snap_data, Mapping):
         lan_obj = as_mapping(snap_data.get("interface")) or snap_data
         nid = str(lan_obj.get("id") or "")
         if nid:
-            body, _ = _ensure_lan_patch_body(lan_obj)
-            live = next((n for n in _fetch_lan_collection(client, site) if str(n.get("id")) == nid), {})
-            if not live:
-                raise OmadaError(
-                    f"cannot roll back {orig_tool}: LAN network {nid!r} no longer exists on controller",
-                    hint="create the network again or inspect current site networks first",
-                )
+            def _read_lan() -> dict[str, Any]:
+                collection, interface = _fetch_lan_pair(client, site, net_id=nid)
+                return {"collection": collection, "interface": interface}
+
+            live = _read_lan()
+            body, _ = _ensure_lan_patch_body(live["interface"])
+            if orig_tool == "set_vlan_isolation":
+                fields = ["isolation"]
+            elif orig_tool == "set_vlan_dhcp_pools":
+                fields = ["dhcpSettings"]
+            else:
+                selected = snap_fields if isinstance(snap_fields, list) else lan_obj
+                fields = [key for key in _LAN_UPDATE_FIELDS if key in selected]
+
+            for key in fields:
+                if key == "dhcpSettings":
+                    dhcp_fields = _DHCP_POOL_FIELDS if orig_tool == "set_vlan_dhcp_pools" else _DHCP_UPDATE_FIELDS
+                    snapshot_dhcp = as_mapping(lan_obj.get(key))
+                    desired_dhcp = dict(as_mapping(body.get(key)))
+                    for field in dhcp_fields:
+                        if field in snapshot_dhcp:
+                            desired_dhcp[field] = copy.deepcopy(snapshot_dhcp[field])
+                        else:
+                            desired_dhcp.pop(field, None)
+                    body[key] = desired_dhcp
+                elif key in lan_obj:
+                    body[key] = copy.deepcopy(lan_obj[key])
+                elif key == "isolation":
+                    body[key] = False
+                else:
+                    raise OmadaError(f"cannot restore LAN field {key!r}: previous value is absent from the snapshot")
+
+            expected = {key: body[key] for key in fields}
+
+            def _check_lan_restore(interface: Mapping[str, Any]) -> None:
+                if "isolation" in expected:
+                    _check_vlan_isolation_safety(client, interface, bool(expected["isolation"]))
+                if "dhcpSettings" in expected:
+                    dhcp = as_mapping(expected["dhcpSettings"])
+                    pools = dhcp.get("ipRangePool") or []
+                    if not pools and dhcp.get("ipaddrStart") and dhcp.get("ipaddrEnd"):
+                        pools = [{"ipaddrStart": dhcp["ipaddrStart"], "ipaddrEnd": dhcp["ipaddrEnd"]}]
+                    if pools and (orig_tool == "set_vlan_dhcp_pools" or dhcp.get("enable")):
+                        _check_dhcp_pools_safety(client, interface, pools, _fetch_devices(client, site))
+
+            def _verify_lan(_before: Any, pair: Any) -> tuple[bool, str | None]:
+                interface = as_mapping(as_mapping(pair).get("interface"))
+                collection = as_mapping(as_mapping(pair).get("collection"))
+                required = dict(expected)
+                if "dhcpSettings" in expected:
+                    intended_dhcp = as_mapping(expected["dhcpSettings"])
+                    observed_dhcp = as_mapping(interface.get("dhcpSettings"))
+                    if orig_tool == "set_vlan_dhcp_pools":
+                        wanted = intended_dhcp.get("ipRangePool") or []
+                        for endpoint_dhcp in (observed_dhcp, as_mapping(collection.get("dhcpSettings"))):
+                            if "ipRangePool" in endpoint_dhcp and (endpoint_dhcp.get("ipRangePool") or []) != wanted:
+                                return False, "LAN DHCP pool did not restore on both controller views"
+                        required["dhcpSettings"] = {key: intended_dhcp[key] for key in ("ipRangePool", "ipaddrStart", "ipaddrEnd") if key in intended_dhcp}
+                    else:
+                        required["dhcpSettings"] = {key: intended_dhcp[key] for key in _DHCP_UPDATE_FIELDS if key in intended_dhcp}
+                        unset_dns = {key for key in ("priDns", "sndDns", "dns1", "dns2") if key not in intended_dhcp}
+                        if any(observed_dhcp.get(key) for key in unset_dns):
+                            return False, "LAN DHCP manual DNS fields did not clear"
+                if "isolation" in collection and "isolation" in expected and bool(collection["isolation"]) != bool(expected["isolation"]):
+                    return False, "LAN isolation did not restore on both controller views"
+                return _match_fields(interface, required)
+
+            _check_lan_restore(live["interface"])
+            collection_preview = {**live["collection"], **{key: body[key] for key in fields if key in live["collection"]}}
             return _run_restore(
                 method="PATCH",
                 endpoint=f"sites/{site.site_id}/setting/lan/networks/{nid}",
                 payload=body,
                 live_before=live,
-                restore_preview=lan_obj,
-                read_back_fn=lambda: next((n for n in _fetch_lan_collection(client, site) if str(n.get("id")) == nid), {}),
-                verify_fn=lambda _b, a: (bool(a) and str(a.get("id")) == nid, f"LAN network {nid} rollback verification failed"),
+                restore_preview={"collection": collection_preview, "interface": body},
+                read_back_fn=_read_lan,
+                verify_fn=_verify_lan,
+                revalidate=lambda: _check_lan_restore(_read_lan()["interface"]),
             )
 
     if orig_tool == "create_lan_network" and isinstance(snap_data, Mapping):
@@ -396,14 +585,30 @@ def rollback_from_snapshot(
         if target is None or not target.get("id"):
             raise OmadaError(f"cannot locate created LAN network {orig_target!r} to delete on rollback")
         nid = str(target["id"])
+
+        def _read_created_lan() -> dict[str, Any] | None:
+            return next((row for row in _fetch_lan_collection(client, site) if str(row.get("id")) == nid), None)
+
+        def _guard_lan_delete() -> None:
+            collection = _read_created_lan()
+            if collection is None:
+                raise OmadaError(f"cannot locate created LAN network {nid!r} to delete on rollback")
+            _check_lan_delete_safety(client, collection)
+            if collection.get("purpose") == "interface":
+                _, interface = _fetch_lan_pair(client, site, net_id=nid)
+                if interface.get("gatewaySubnet") != collection.get("gatewaySubnet"):
+                    _check_lan_delete_safety(client, interface)
+
+        _guard_lan_delete()
         return _run_restore(
             method="DELETE",
             endpoint=f"sites/{site.site_id}/setting/lan/networks/{nid}",
             payload=None,
             live_before=target,
             restore_preview=None,
-            read_back_fn=lambda: _fetch_lan_collection(client, site),
-            verify_fn=lambda _b, a: (all(str(r.get("id")) != nid for r in a), f"LAN network {nid} still present"),
+            read_back_fn=_read_created_lan,
+            verify_fn=lambda _b, a: (a is None, f"LAN network {nid} still present"),
+            revalidate=_guard_lan_delete,
         )
 
     if orig_tool == "delete_lan_network" and isinstance(snap_data, Mapping):
@@ -923,41 +1128,100 @@ def rollback_from_snapshot(
         mport = as_int(snap_data.get("mirroringPort"), 0)
         raw_p = as_mapping(snap_data.get("rawPort")) or {}
         if dev_mac and mport > 0:
-            payload = _build_switch_port_patch(raw_p)
+            def _raw_mirror_port() -> dict[str, Any]:
+                return _fetch_raw_port(client, site.site_id, dev_mac, mport)
+
+            def _mirror_state(port: Mapping[str, Any]) -> dict[str, Any]:
+                return {
+                    "operation": str(port.get("operation") or "switching"),
+                    "mirroredPorts": sorted(as_int(p, 0) for p in (port.get("mirroredPorts") or [])),
+                    "mirroredLags": sorted(as_int(p.get("lagId") if isinstance(p, Mapping) else p, 0) for p in (port.get("mirroredLags") or [])),
+                }
+
+            live_port = _raw_mirror_port()
+            mirror_before = _mirror_state(live_port)
+            payload = _build_switch_port_patch(live_port)
             op = str(raw_p.get("operation") or "switching")
+            expected_mirror = _mirror_state(raw_p)
             payload["operation"] = op
             if op == "mirroring":
-                payload["mirroredPorts"] = list(raw_p.get("mirroredPorts") or [])
+                payload["mirroredPorts"] = expected_mirror["mirroredPorts"]
+                payload["mirroredLags"] = expected_mirror["mirroredLags"]
+            else:
+                expected_mirror = {"operation": op}
+
+            def _guard_mirror_restore() -> None:
+                switch = resolve_raw_device(client, site, dev_mac, expected_type="switch")
+                ports = collect_switch_ports_data(client, site, switch, include_cable_test=False)
+                port = next((p for p in ports.get("ports") or [] if as_int(p.get("port"), 0) == mport), None)
+                if port is None:
+                    raise OmadaError(f"mirror destination port {mport} disappeared")
+                _check_port_safety_guard(
+                    port,
+                    action="restore mirror destination",
+                    norm_mac=_normalize_mac(dev_mac),
+                    port=mport,
+                    allow_uplink_mutation=False,
+                    warnings=warnings,
+                )
+
+            _guard_mirror_restore()
             return _run_restore(
                 method="PATCH",
                 endpoint=f"sites/{site.site_id}/switches/{dev_mac}/ports/{mport}",
                 payload=payload,
-                live_before=None,
-                restore_preview=payload,
-                read_back_fn=lambda: client.api_result(f"sites/{site.site_id}/switches/{dev_mac}/ports/{mport}"),
-                verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("operation") or "switching") == op, "port mirror rollback failed"),
+                live_before=mirror_before,
+                restore_preview=expected_mirror,
+                read_back_fn=lambda: _mirror_state(_raw_mirror_port()),
+                verify_fn=lambda _b, a: _match_fields(a, expected_mirror),
+                revalidate=_guard_mirror_restore,
             )
 
     if orig_tool in ("upsert_switch_lag", "delete_switch_lag") and isinstance(snap_data, Mapping):
         dev_mac = _omada_mac(str(snap_data.get("mac") or ""))
         lid = as_int(snap_data.get("lagId"), 0)
-        if snap_data.get("action") == "create" and dev_mac and lid > 0:
-            live_lag = next((r for r in _fetch_switch_lags(client, site, dev_mac) if as_int(r.get("lagId"), -1) == lid), None)
-            if live_lag is None:
-                raise OmadaError(f"LAG {lid} not found on switch {dev_mac} for rollback delete")
-            return _run_restore(
-                method="DELETE",
-                endpoint=f"sites/{site.site_id}/switches/{dev_mac}/lags/{lid}",
-                payload=None,
-                live_before=live_lag,
-                restore_preview=None,
-                read_back_fn=lambda: _fetch_switch_lags(client, site, dev_mac),
-                verify_fn=lambda _b, a: (all(as_int(r.get("lagId"), -1) != lid for r in a), f"LAG {lid} still present"),
-            )
-        lag_obj = as_mapping(snap_data.get("lag"))
-        if lag_obj and dev_mac and lid > 0:
-            ports_rb = list(lag_obj.get("ports") or [])
-            if ports_rb:
+        if dev_mac and lid > 0:
+            def _read_lag() -> dict[str, Any] | None:
+                return next((row for row in _fetch_switch_lags(client, site, dev_mac) if as_int(row.get("lagId"), -1) == lid), None)
+
+            live_lag = _read_lag()
+            lag_obj = as_mapping(snap_data.get("lag"))
+            ports_rb = [as_int(port, 0) for port in (lag_obj.get("ports") or [])]
+            live_ports = [as_int(port, 0) for port in (as_mapping(live_lag).get("ports") or [])]
+            affected_ports = sorted(set(ports_rb + live_ports))
+
+            def _guard_lag_restore() -> None:
+                if not affected_ports or any(port < 1 for port in affected_ports):
+                    raise OmadaError(f"cannot verify current LAG {lid} member ports for rollback")
+                switch = resolve_raw_device(client, site, dev_mac, expected_type="switch")
+                ports = collect_switch_ports_data(client, site, switch, include_cable_test=False)
+                _assert_ports_safe_for_l2(
+                    _normalize_mac(dev_mac), affected_ports, ports,
+                    action_label=f"restoring LAG {lid}", allow_uplink=False, warnings=warnings,
+                )
+                for port in ports_rb:
+                    current = _fetch_raw_port(client, site.site_id, dev_mac, port)
+                    operation = str(current.get("operation") or "switching")
+                    active_lag = as_int(as_mapping(current.get("lagSetting")).get("lagId", current.get("lagId")), 0)
+                    if operation == "mirroring" or (operation == "aggregating" and active_lag != lid):
+                        raise OmadaError(f"port {port} is now assigned to a different switch operation")
+
+            if snap_data.get("action") == "create":
+                if live_lag is None:
+                    raise OmadaError(f"LAG {lid} not found on switch {dev_mac} for rollback delete")
+                _guard_lag_restore()
+                return _run_restore(
+                    method="DELETE",
+                    endpoint=f"sites/{site.site_id}/switches/{dev_mac}/lags/{lid}",
+                    payload=None,
+                    live_before=live_lag,
+                    restore_preview=None,
+                    read_back_fn=_read_lag,
+                    verify_fn=lambda _b, a: (a is None, f"LAG {lid} still present"),
+                    revalidate=_guard_lag_restore,
+                )
+            if lag_obj and len(set(ports_rb)) >= 2:
+                _guard_lag_restore()
                 body = {
                     "name": lag_obj.get("name") or f"LAG {lid}",
                     "profileId": str(lag_obj.get("profileId") or ""),
@@ -965,14 +1229,23 @@ def rollback_from_snapshot(
                     "operation": "aggregating",
                     "lagSetting": {"lagId": lid, "lagType": lag_obj.get("lagType", 1), "ports": ports_rb},
                 }
+
+                def _verify_lag(_b: Any, after: Any) -> tuple[bool, str | None]:
+                    fields = ("name", "profileId", "lagType")
+                    observed = as_mapping(after)
+                    if sorted(as_int(port, 0) for port in (observed.get("ports") or [])) != sorted(ports_rb):
+                        return False, f"LAG {lid} member ports did not restore"
+                    return _match_fields(observed, {key: lag_obj[key] for key in fields if key in lag_obj})
+
                 return _run_restore(
                     method="PATCH",
                     endpoint=f"sites/{site.site_id}/switches/{dev_mac}/ports/{ports_rb[0]}",
                     payload=body,
-                    live_before=None,
+                    live_before=live_lag,
                     restore_preview=lag_obj,
-                    read_back_fn=lambda: _fetch_switch_lags(client, site, dev_mac),
-                    verify_fn=lambda _b, a: (any(as_int(r.get("lagId"), -1) == lid for r in a), f"LAG {lid} restore failed"),
+                    read_back_fn=_read_lag,
+                    verify_fn=_verify_lag,
+                    revalidate=_guard_lag_restore,
                 )
 
     if orig_tool == "run_wlan_optimization" and isinstance(snap_data, Mapping):
@@ -1023,23 +1296,6 @@ def rollback_from_snapshot(
                 verify_fn=lambda _b, a: (isinstance(a, Mapping), "rfPlanning rollback failed"),
             )
 
-    if orig_tool == "set_ap_ssid_overrides" and isinstance(snap_data, Mapping):
-        dev_mac = _omada_mac(str(snap_data.get("mac") or orig_target))
-        wlan_id = str(snap_data.get("wlanId") or "")
-        overrides = [dict(o) for o in (snap_data.get("ssidOverrides") or []) if isinstance(o, Mapping)]
-        if dev_mac and wlan_id:
-            body = {"wlanId": wlan_id, "ssidOverrides": overrides}
-            live_ap = resolve_device_detail(client, site, dev_mac, expected_type="ap")
-            return _run_restore(
-                method="PUT",
-                endpoint=f"sites/{site.site_id}/eaps/{dev_mac}/config/wlans",
-                payload=body,
-                live_before=deep_redact(live_ap),
-                restore_preview=snap_data,
-                read_back_fn=lambda: deep_redact(resolve_device_detail(client, site, dev_mac, expected_type="ap")),
-                verify_fn=lambda _b, a: (isinstance(a, Mapping) and str(a.get("wlanId") or "") == wlan_id, "AP SSID overrides rollback failed"),
-            )
-
     if orig_tool == "set_vpn_tunnel_status" and isinstance(snap_data, Mapping):
         vpn_obj = as_mapping(snap_data.get("vpn"))
         vid = str(vpn_obj.get("id") or orig_target)
@@ -1063,7 +1319,7 @@ def rollback_from_snapshot(
                 ),
             )
 
-    if orig_tool in ("upsert_wireguard_tunnel", "upsert_wireguard_peer", "upsert_ddns") and isinstance(snap_data, Mapping) and snap_data.get("created"):
+    if orig_tool in _DELETE_ONLY_SECRET_ROLLBACKS and isinstance(snap_data, Mapping) and snap_data.get("created") is True:
             if orig_tool == "upsert_wireguard_tunnel":
                 tunnels, _ = client.paginate(f"sites/{site.site_id}/setting/wireguard")
                 live_row = next(

@@ -13,6 +13,7 @@ from ._write_common import (
     _delete_entity,
     _dry_run_result,
     _field_diff,
+    _match_fields,
     _normalize_mac,
     _require_confirm,
     _resolve_by_id_or_name,
@@ -515,18 +516,18 @@ def upsert_poe_schedule(
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
         if not isinstance(after_now, Mapping):
             return False, f"PoE schedule {poe_name!r} not found after {method}"
-        if str(after_now.get("turnOnTime") or "") != turn_on_id:
-            return False, f"turnOnTime expected {turn_on_id!r}, got {after_now.get('turnOnTime')!r}"
-        if bool(after_now.get("status", True)) != en_val:
-            return False, "PoE schedule enabled status did not persist"
+        expected = {key: value for key, value in body.items() if key != "poePortsMap"}
+        matched, reason = _match_fields(after_now, expected)
+        if not matched:
+            return False, reason
+        if after_now.get("poePortsMap") != ports_map:
+            return False, "PoE schedule port bindings did not persist"
         return True, None
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         live = _read_back()
-        if is_update:
-            ok, _ = _verify(existing, live)
-            return ok, body, live
-        return (live is not None), body, live
+        ok, _ = _verify(existing, live)
+        return ok, body, live
 
     write_res = client.write(
         endpoint,

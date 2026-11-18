@@ -17,7 +17,13 @@ from ._common import (
 )
 from ._device_helpers import collect_switch_ports_data
 from ._tool_model import _site, as_int_or_none, normalize_mac
-from ._write_fetchers import _fetch_devices, _fetch_schedules, _fetch_switch_lags, _omada_mac
+from ._write_fetchers import (
+    _fetch_devices,
+    _fetch_poe_schedules,
+    _fetch_schedules,
+    _fetch_switch_lags,
+    _omada_mac,
+)
 
 STP_MODE_LABELS: dict[int, str] = {
     0: "off",
@@ -409,18 +415,23 @@ def _get_switch_global_features(client: OmadaClient, mac: str) -> dict[str, Any]
     })
 
 
-def _list_poe_schedules(client: OmadaClient) -> list[dict[str, Any]]:
+def _list_poe_schedules(client: OmadaClient, *, strict: bool = False) -> list[dict[str, Any]]:
     """List site PoE schedules with resolved time-range names and switch port bindings."""
     site = _site(client)
     warnings: list[str] = []
-    rows, _, ok = try_paginate(
-        client, f"sites/{site.site_id}/setting/service/poeSchedules", warnings, label="poeSchedules"
-    )
-    if not ok:
-        raise OmadaError(
-            "PoE schedules endpoint (setting/service/poeSchedules) is unavailable on this controller",
-            hint="; ".join(warnings) or "Ensure a PoE-capable switch/controller supports PoE scheduling.",
+    if strict:
+        rows = _fetch_poe_schedules(client, site)
+    else:
+        rows, _, ok = try_paginate(
+            client, f"sites/{site.site_id}/setting/service/poeSchedules", warnings, label="poeSchedules"
         )
+        if not ok:
+            raise OmadaError(
+                "PoE schedules endpoint (setting/service/poeSchedules) is unavailable on this controller",
+                hint="; ".join(warnings) or "Ensure a PoE-capable switch/controller supports PoE scheduling.",
+            )
+    if not rows:
+        return []
 
     sched_names: dict[str, str] = {}
     try:
@@ -429,7 +440,8 @@ def _list_poe_schedules(client: OmadaClient) -> list[dict[str, Any]]:
             if sid_s:
                 sched_names[sid_s] = str(s.get("name") or "")
     except OmadaError:
-        pass
+        if strict:
+            raise
 
     dev_names: dict[str, str] = {}
     try:
@@ -438,7 +450,8 @@ def _list_poe_schedules(client: OmadaClient) -> list[dict[str, Any]]:
             if dmac:
                 dev_names[dmac] = str(d.get("name") or dmac)
     except OmadaError:
-        pass
+        if strict:
+            raise
 
     out: list[dict[str, Any]] = []
     for row in rows:

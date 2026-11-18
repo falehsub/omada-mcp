@@ -29,6 +29,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -169,6 +170,7 @@ class OmadaClient:
         self._negative_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._site_override = threading.local()
         self._request_budget_state = threading.local()
+        self._write_scope = threading.local()
         self.client_cursors = CursorStore(clock=clock)
         self._site_list_cache: list[dict[str, Any]] | None = None
         self.token: str | None = None
@@ -501,6 +503,10 @@ class OmadaClient:
 
         endpoint = endpoint.lstrip("/")
         method_upper = method.upper()
+        if method_upper != "GET":
+            if getattr(self._write_scope, "preview", False):
+                raise OmadaError("controller mutation refused during dry run")
+            self._require_confirmed_scope()
         cache_key = (self.controller_id or "", endpoint)
         if (
             use_cache
@@ -728,60 +734,69 @@ class OmadaClient:
         """Collect all rows across paginated Omada Web API v2 endpoints."""
         collected: list[dict[str, Any]] = []
         last_meta: dict[str, Any] | None = None
-        prev_rows: list[dict[str, Any]] | None = None
+        seen_pages: set[str] = set()
+        seen_identities: set[str] = set()
         sep = "&" if "?" in endpoint else "?"
         pages_fetched = 0
         total_int: int | None = None
-        exhausted_loop = False
-        stopped_duplicate = False
+        reason: str | None = None
 
         for page in range(1, max_pages + 1):
             paged = f"{endpoint}{sep}currentPage={page}&currentPageSize={page_size}"
             result = self.api_result(paged)
             pages_fetched += 1
             if isinstance(result, list):
+                if page != 1 or any(not isinstance(r, Mapping) for r in result):
+                    reason = "controller returned malformed pagination data"
                 collected.extend(dict(r) for r in result if isinstance(r, Mapping))
-                return collected, {
-                    "_pagination": {
-                        "pagesFetched": pages_fetched,
-                        "maxPages": max_pages,
-                        "totalRows": len(collected),
-                        "truncated": False,
-                        "truncationReason": None,
-                    },
-                }
+                break
             if not isinstance(result, Mapping):
+                reason = "controller returned a malformed collection"
                 break
             last_meta = dict(result)
             raw_rows = result.get("data")
-            if not isinstance(raw_rows, list) or not raw_rows:
-                total_val = result.get("totalRows")
-                if total_val is not None:
-                    total_int = int(total_val)
+            if not isinstance(raw_rows, list) or any(not isinstance(r, Mapping) for r in raw_rows):
+                reason = "controller returned malformed collection rows"
+                break
+            raw_total = result.get("totalRows")
+            if raw_total is not None:
+                total_text = str(raw_total)
+                if len(total_text) > 20 or not total_text.isascii() or not total_text.isdigit():
+                    reason = "controller returned an invalid totalRows"
+                    break
+                reported_total = int(total_text)
+                if total_int is not None and reported_total != total_int:
+                    reason = "controller totalRows changed during pagination"
+                    break
+                total_int = reported_total
+            if not raw_rows:
                 break
             rows = [dict(r) for r in raw_rows if isinstance(r, Mapping)]
-            if prev_rows is not None and rows == prev_rows:
-                stopped_duplicate = True
+            identities = [str(row.get("id") or "") for row in rows]
+            has_identities = all(identities)
+            data_for_fingerprint = sorted(identities) if has_identities else rows
+            serialized = json.dumps(data_for_fingerprint, sort_keys=True)
+            fingerprint = hashlib.sha256(serialized.encode()).hexdigest()
+            if fingerprint in seen_pages:
+                reason = "controller repeated a page during pagination"
                 break
-            prev_rows = rows
-            collected.extend(rows)
-            total_val = result.get("totalRows")
-            if total_val is not None:
-                total_int = int(total_val)
-                if len(collected) >= total_int:
+            if has_identities:
+                distinct = set(identities)
+                if len(distinct) != len(identities) or distinct & seen_identities:
+                    reason = "controller returned overlapping rows during pagination"
                     break
-            elif len(rows) < page_size:
+                seen_identities.update(distinct)
+            seen_pages.add(fingerprint)
+            collected.extend(rows)
+            if total_int is not None and len(collected) >= total_int:
+                if len(collected) != total_int:
+                    reason = "controller returned more rows than totalRows"
                 break
-            if page == max_pages:
-                exhausted_loop = True
-
-        truncated = False
-        reason: str | None = None
-        if exhausted_loop and (total_int is None or len(collected) < total_int):
-            truncated = True
+            if total_int is None and len(rows) < page_size:
+                break
+        else:
             reason = f"pagination reached maxPages={max_pages}"
-        elif total_int is not None and len(collected) < total_int and not stopped_duplicate:
-            truncated = True
+        if reason is None and total_int is not None and len(collected) < total_int:
             reason = f"controller returned {len(collected)} of {total_int} totalRows"
 
         if last_meta is None:
@@ -790,8 +805,10 @@ class OmadaClient:
             "pagesFetched": pages_fetched,
             "maxPages": max_pages,
             "totalRows": total_int if total_int is not None else len(collected),
-            "truncated": truncated,
+            "truncated": reason is not None,
             "truncationReason": reason,
+            "complete": reason is None,
+            "status": "partial" if reason is not None else "complete",
         }
         return collected, last_meta
 
@@ -824,7 +841,17 @@ class OmadaClient:
                 os.chmod(directory, 0o700)
         return directory
 
-    def _save_snapshot(self, tool_name: str, target: str, payload: Any) -> str:
+    def _snapshot_scope(self) -> dict[str, Any]:
+        site = getattr(self._site_override, "site", None) or self.site
+        return {
+            "controllerId": self.controller_id,
+            "baseUrl": self.config.base_url.rstrip("/"),
+            "siteId": site.site_id if site is not None else None,
+            "siteName": site.name if site is not None else None,
+        }
+
+    def _save_snapshot(self, tool_name: str, target: str, payload: Any, *,
+                       resource: Mapping[str, str] | None = None, fields_changed: Any = None) -> str:
         directory = self._ensure_snapshot_dir()
         self._snapshot_seq += 1
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -833,6 +860,10 @@ class OmadaClient:
         filename = f"{stamp}-{self._snapshot_seq:04d}-{uuid.uuid4().hex[:12]}-{safe_tool}-{safe_target}.json"
         path = directory / filename
         record = {
+            "version": 2,
+            **self._snapshot_scope(),
+            "resource": dict(resource) if resource is not None else {"kind": tool_name, "id": target},
+            "fieldsChanged": fields_changed,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
             "tool": tool_name,
             "target": target,
@@ -858,10 +889,13 @@ class OmadaClient:
         result: str,
         verified: bool,
         detail: str | None = None,
+        resource: Mapping[str, str] | None = None,
     ) -> None:
         directory = self._ensure_snapshot_dir()
         audit_path = directory / "audit.jsonl"
         entry: dict[str, Any] = {
+            **self._snapshot_scope(),
+            "resource": dict(resource) if resource is not None else {"kind": tool_name, "id": target},
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
             "tool": tool_name,
             "target": target,
@@ -913,6 +947,34 @@ class OmadaClient:
                 endpoint=endpoint,
             )
 
+    @contextlib.contextmanager
+    def write_scope(self, *, preview: bool = False,
+                    expected_scope: tuple[str, str | None, str] | None = None) -> Iterator[list[dict[str, Any]]]:
+        """Track sanitized outcome metadata for one MCP write invocation."""
+        previous = getattr(self._write_scope, "outcomes", None)
+        was_preview = getattr(self._write_scope, "preview", False)
+        previous_scope = getattr(self._write_scope, "expected_scope", None)
+        outcomes: list[dict[str, Any]] = []
+        self._write_scope.outcomes = outcomes
+        self._write_scope.preview = was_preview or preview
+        self._write_scope.expected_scope = expected_scope or previous_scope
+        try:
+            yield outcomes
+        finally:
+            self._write_scope.outcomes = previous
+            self._write_scope.preview = was_preview
+            self._write_scope.expected_scope = previous_scope
+
+    def _require_confirmed_scope(self) -> None:
+        expected = getattr(self._write_scope, "expected_scope", None)
+        if expected is None:
+            return
+        site = getattr(self._site_override, "site", None) or self.site
+        actual = (self.config.base_url, self.controller_id, site.site_id if site is not None else None)
+        if actual != expected:
+            raise OmadaError("controller or site changed since the confirmed preview",
+                             hint="run a new dry run against the intended controller and site")
+
     def write(
         self,
         endpoint: str,
@@ -928,8 +990,11 @@ class OmadaClient:
         verify_fn: Callable[[Any, Any], tuple[bool, str | None]] | None = None,
         reauth_prepare: Callable[[], tuple[bool, dict[str, Any] | None, Any]] | None = None,
         fields_changed: Any = None,
+        verification_complete: bool | Callable[[Any], bool] = True,
     ) -> dict[str, Any]:
         """Single serialised write path: gate -> pace -> snapshot -> call -> verify -> audit."""
+        if getattr(self._write_scope, "preview", False):
+            raise OmadaError("controller mutation refused during dry run")
         method_upper = method.upper()
         if method_upper not in ("POST", "PATCH", "PUT", "DELETE"):
             raise OmadaError(
@@ -937,6 +1002,12 @@ class OmadaClient:
                 endpoint=endpoint,
             )
         self._require_write_allowed(tool_name, endpoint)
+        self.authenticate()
+        self._require_confirmed_scope()
+        path = endpoint.partition("?")[0].lstrip("/").removeprefix("hotspot/")
+        if path.startswith("sites/") and path.split("/")[1] != self.current_site().site_id:
+            raise OmadaError("write endpoint does not match the active site",
+                             hint="resolve the intended site before preparing the mutation")
 
         eff_tool = tool_name or f"write_{method_upper.lower()}"
         eff_target = target or endpoint
@@ -947,7 +1018,7 @@ class OmadaClient:
                 self._cache.clear()
             self._cache_bypass_depth += 1
             try:
-                return self._write_locked(
+                result = self._write_locked(
                     endpoint=endpoint,
                     method_upper=method_upper,
                     data=data,
@@ -960,7 +1031,12 @@ class OmadaClient:
                     read_back=read_back,
                     verify_fn=verify_fn,
                     reauth_prepare=reauth_prepare,
+                    verification_complete=verification_complete,
                 )
+                outcomes = getattr(self._write_scope, "outcomes", None)
+                if outcomes is not None:
+                    outcomes.append({key: result[key] for key in ("verified", "outcome", "auditWarning", "snapshot")})
+                return result
             finally:
                 self._cache_bypass_depth = max(0, self._cache_bypass_depth - 1)
 
@@ -979,128 +1055,121 @@ class OmadaClient:
         read_back: Callable[[], Any] | None,
         verify_fn: Callable[[Any, Any], tuple[bool, str | None]] | None,
         reauth_prepare: Callable[[], tuple[bool, dict[str, Any] | None, Any]] | None,
+        verification_complete: bool | Callable[[Any], bool],
     ) -> dict[str, Any]:
-        with self._lock:
-            snap_data = before if snapshot_payload is None else snapshot_payload
-            snapshot_id = self._save_snapshot(eff_tool, eff_target, snap_data)
+        snap_data = before if snapshot_payload is None else snapshot_payload
+        path = endpoint.partition("?")[0].strip("/")
+        parts = path.split("/")
+        if len(parts) > 2 and parts[0] in ("sites", "hotspot") and "sites" in parts:
+            site_segment = parts.index("sites")
+            parts = parts[:site_segment] + parts[site_segment + 2:]
+        if "networks" in parts and parts[:2] == ["setting", "lan"]:
+            parts = ["setting", "lan", "networks"]
+        elif parts and parts[-1] == eff_target:
+            parts.pop()
+        resource = {"kind": "/".join(parts), "id": eff_target}
+        try:
+            snapshot_id = self._save_snapshot(eff_tool, eff_target, snap_data,
+                                              resource=resource, fields_changed=eff_fields)
+        except OSError as exc:
+            raise OmadaError("could not persist the pre-write snapshot",
+                             hint="check OMADA_SNAPSHOT_DIR permissions and available storage") from exc
 
-            already_applied = False
-            payload: dict[str, Any] | None = None
-            write_data = data
-            self._pace_write()
+        def audit(result: str, verified: bool, detail: str | None = None) -> str | None:
             try:
-                try:
-                    payload = self.api(endpoint, method=method_upper, data=write_data)
-                except OmadaSessionExpiredError:
-                    if reauth_prepare is None:
-                        raise OmadaError(
-                            f"session expired during {method_upper} {endpoint}; write not replayed blindly",
-                            hint=("re-read controller state before retrying, and give write tools a "
-                                  "dedicated Admin account"),
-                            endpoint=endpoint,
-                        ) from None
-                    already_applied, refreshed_data, refreshed_before = reauth_prepare()
-                    if refreshed_before is not None:
-                        before = refreshed_before
-                    if not already_applied:
-                        self._pace_write()
-                        payload = self.api(
-                            endpoint,
-                            method=method_upper,
-                            data=write_data if refreshed_data is None else refreshed_data,
-                            require_auth=False,
-                            _retry=False,
-                        )
-            except OmadaError as exc:
-                self._append_audit(
-                    tool_name=eff_tool,
-                    target=eff_target,
-                    snapshot_id=snapshot_id,
-                    fields_changed=eff_fields,
-                    result="error",
-                    verified=False,
-                    detail=str(exc),
-                )
-                raise
-            finally:
-                self._last_write_at = self._clock()
+                self._append_audit(tool_name=eff_tool, target=eff_target, snapshot_id=snapshot_id,
+                                   fields_changed=eff_fields, result=result, verified=verified,
+                                   detail=detail, resource=resource)
+            except OSError:
+                return f"Could not append the write audit record. Inspect snapshot {snapshot_id}."
+            return None
 
-            if not already_applied and payload is not None:
-                code = payload.get("errorCode")
-                if code not in (0, None):
-                    msg = describe_error(
-                        code,
-                        str(payload.get("msg") or ""),
+        def record_uncertain(exc: OmadaError, status: str, detail: str) -> None:
+            warning = audit(status, False, detail)
+            exc.write_status = {"outcome": "uncertain", "verified": False, "snapshot": snapshot_id,
+                                "warnings": [warning] if warning else []}
+
+        payload: dict[str, Any] | None = None
+        self._pace_write()
+        try:
+            try:
+                payload = self.api(endpoint, method=method_upper, data=data)
+            except OmadaSessionExpiredError:
+                self._require_confirmed_scope()
+                if reauth_prepare is None:
+                    raise OmadaError(
+                        f"session expired during {method_upper} {endpoint}; write not replayed blindly",
+                        hint="re-read controller state before retrying, and use a dedicated Admin account",
                         endpoint=endpoint,
-                        method=method_upper,
+                    ) from None
+                already_applied, refreshed_data, refreshed_before = reauth_prepare()
+                if refreshed_before is not None:
+                    before = refreshed_before
+                if not already_applied:
+                    if method_upper == "POST":
+                        raise OmadaError("session expired and the POST outcome could not be verified",
+                                         hint="inspect current state before issuing a new preview",
+                                         endpoint=endpoint) from None
+                    self._pace_write()
+                    payload = self.api(
+                        endpoint, method=method_upper,
+                        data=data if refreshed_data is None else refreshed_data,
+                        require_auth=False, _retry=False,
                     )
-                    self._append_audit(
-                        tool_name=eff_tool,
-                        target=eff_target,
-                        snapshot_id=snapshot_id,
-                        fields_changed=eff_fields,
-                        result="error",
-                        verified=False,
-                        detail=msg,
-                    )
-                    raise OmadaError(msg, code=code, endpoint=endpoint)
+        except OmadaError as exc:
+            record_uncertain(exc, "error", "request outcome could not be confirmed")
+            raise
+        finally:
+            self._last_write_at = self._clock()
 
-            after: Any = None
-            try:
-                if read_back is not None:
-                    after = read_back()
-                if verify_fn is not None:
-                    verified, reason = verify_fn(before, after)
-                elif expect_keys is not None:
-                    verified, reason = self._verify_expect_keys(expect_keys, after)
-                else:
-                    verified = read_back is None
-                    reason = None
-            except OmadaError as exc:
-                self._append_audit(
-                    tool_name=eff_tool,
-                    target=eff_target,
-                    snapshot_id=snapshot_id,
-                    fields_changed=eff_fields,
-                    result="verification_failed",
-                    verified=False,
-                    detail=str(exc),
-                )
-                raise
+        if payload is not None:
+            code = payload.get("errorCode")
+            status = payload.get("_httpStatus", 200)
+            if code not in (0, None) or not 200 <= status < 300:
+                msg = describe_error(code, endpoint=endpoint,
+                                     method=method_upper) if code else f"controller returned HTTP {status}"
+                rejected = OmadaError(msg, code=code, endpoint=endpoint)
+                record_uncertain(rejected, "error", "controller reported a write failure")
+                raise rejected
 
-            if not verified:
-                detail = reason or "controller accepted write but read-back did not match intent"
-                self._append_audit(
-                    tool_name=eff_tool,
-                    target=eff_target,
-                    snapshot_id=snapshot_id,
-                    fields_changed=eff_fields,
-                    result="verification_failed",
-                    verified=False,
-                    detail=detail,
-                )
+        try:
+            after = read_back() if read_back is not None else None
+            verified = False
+            reason = None
+            if verify_fn is not None:
+                verified, reason = verify_fn(before, after)
+            elif expect_keys is not None:
+                verified, reason = self._verify_expect_keys(expect_keys, after)
+            if (verify_fn is not None or expect_keys is not None) and not verified:
                 raise OmadaError(
-                    f"write verification failed for {eff_tool} ({eff_target}): {detail}",
+                    f"write verification failed for {eff_tool} ({eff_target}): "
+                    f"{reason or 'controller state did not match intent'}",
                     hint=(f"the controller may have silently ignored or altered the write; inspect "
                           f"snapshot {snapshot_id} and re-read state before retrying"),
                     endpoint=endpoint,
                 )
+            if verified:
+                verified = verification_complete(after) if callable(verification_complete) else verification_complete
+        except (OmadaError, OSError, LookupError, ValueError, TypeError) as exc:
+            if isinstance(exc, OmadaError):
+                error = exc
+            else:
+                error = OmadaError("write was acknowledged but read-back failed",
+                                   hint=f"inspect snapshot {snapshot_id} and re-read state before retrying",
+                                   endpoint=endpoint)
+            record_uncertain(error, "verification_failed", "read-back did not verify the intended change")
+            raise error from None
 
-            self._append_audit(
-                tool_name=eff_tool,
-                target=eff_target,
-                snapshot_id=snapshot_id,
-                fields_changed=eff_fields,
-                result="success",
-                verified=True,
-            )
-            return {
-                "result": payload.get("result") if payload is not None else None,
-                "before": before,
-                "after": after,
-                "verified": True,
-                "snapshot": snapshot_id,
-            }
+        outcome = "verified" if verified else "accepted"
+        return {
+            "result": payload.get("result") if payload is not None else None,
+            "before": before,
+            "after": after,
+            "verified": verified,
+            "outcome": outcome,
+            "snapshot": snapshot_id,
+            "auditWarning": audit("success" if verified else "accepted", verified),
+        }
 
     # -- discovery ------------------------------------------------------------
 

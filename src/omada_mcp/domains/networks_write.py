@@ -8,11 +8,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..client import OmadaClient, OmadaError
+from ._common import as_int, as_mapping
 from ._write_common import (
     _committed_result,
     _delete_entity,
     _diff_mappings,
     _dry_run_result,
+    _match_fields,
     _parse_ipv4,
     _require_confirm,
     _site,
@@ -31,10 +33,11 @@ from ._write_fetchers import (
 )
 from ._write_safety import (
     _check_dhcp_pools_safety,
+    _check_lan_delete_safety,
     _check_vlan_isolation_safety,
-    _management_endpoints,
     _network_subnet_and_gw,
 )
+from .networks_read import _extract_dhcp_pools
 
 
 def set_vlan_isolation(
@@ -508,7 +511,7 @@ def create_lan_network(
 
     def _find_created(state: Mapping[str, Any]) -> dict[str, Any] | None:
         for row in state.get("collection") or []:
-            if str(row.get("name", "")).strip() == net_name and row.get("vlan") == vid:
+            if str(row.get("name", "")).strip() == net_name and as_int(row.get("vlan"), -1) == vid:
                 return dict(row)
         return None
 
@@ -518,20 +521,53 @@ def create_lan_network(
         found = _find_created(after_state)
         if found is None:
             return False, f"created LAN network {net_name!r} (vlan={vid}) missing on read-back"
-        if norm_purpose == "interface":
-            iface_match = next(
-                (dict(i) for i in (after_state.get("interfaces") or []) if str(i.get("id")) == str(found.get("id"))),
-                None,
-            )
-            if iface_match is None:
-                return False, f"created interface network {net_name!r} missing from /setting/lan/networks/interface"
-            if bool(iface_match.get("isolation")) != bool(isolation):
-                return False, f"isolation mismatch on created network: expected {isolation!r}"
+        if not found.get("id") or found.get("purpose") != norm_purpose:
+            return False, "created LAN network ID or purpose did not match intent"
+        if norm_purpose == "vlan":
+            return _match_fields(found, {"igmpSnoopEnable": bool(igmpSnoopEnable)})
+
+        iface_match = next(
+            (i for i in after_state.get("interfaces") or [] if str(i.get("id")) == str(found["id"])), None,
+        )
+        if iface_match is None:
+            return False, f"created interface network {net_name!r} missing from /setting/lan/networks/interface"
+        configured = {**found, **iface_match}
+        expected = {key: body[key] for key in ("gatewaySubnet", "isolation", "igmpSnoopEnable", "icmpPingEnable")}
+        ok, reason = _match_fields(configured, expected)
+        if not ok:
+            return False, reason
+        collection_isolation = found.get("isolation")
+        if collection_isolation is not None and bool(collection_isolation) != bool(isolation):
+            return False, "LAN network collection reports different isolation than the interface"
+        observed_ports = configured.get("interfaceIds")
+        if not isinstance(observed_ports, list) or sorted(map(str, observed_ports)) != sorted(body["interfaceIds"]):
+            return False, "LAN interface ports did not match intended configuration"
+        observed_dhcp = as_mapping(configured.get("dhcpSettings"))
+        intended_dhcp = body["dhcpSettings"]
+        ok, reason = _match_fields(observed_dhcp, {"enable": intended_dhcp["enable"]})
+        if not ok:
+            return False, reason
+        if intended_dhcp["enable"]:
+            observed_lease = observed_dhcp.get("leasetime", observed_dhcp.get("leaseTime"))
+            if as_int(observed_lease, -1) != intended_dhcp["leasetime"]:
+                return False, "LAN DHCP lease time did not match intent"
+            expected_pools = _extract_dhcp_pools(intended_dhcp)
+            observed_pools = _extract_dhcp_pools(dict(observed_dhcp))
+            if sorted((p["start"], p["end"]) for p in observed_pools) != sorted((p["start"], p["end"]) for p in expected_pools):
+                return False, "LAN DHCP pools did not match intent"
+        if "domain" in body and (configured.get("domain") or observed_dhcp.get("domain")) != body["domain"]:
+            return False, "LAN domain did not match intent"
         return True, None
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         state_now = _read_back()
-        ok, _ = _verify(None, state_now)
+        ok, reason = _verify(None, state_now)
+        conflicting_network = any(
+            str(row.get("name") or "").strip().casefold() == net_name.casefold()
+            or as_int(row.get("vlan"), -1) == vid for row in state_now["collection"]
+        )
+        if not ok and conflicting_network:
+            raise OmadaError(reason or "a conflicting LAN network appeared during session recovery")
         return ok, None, None
 
     write_res = client.write(
@@ -773,24 +809,7 @@ def delete_lan_network(
     target = _resolve_lan_network(col, vlan=vlan, net_id=netId)
     target_id = str(target["id"])
 
-    if bool(target.get("primary")) or target.get("vlan") == 1:
-        raise OmadaError(
-            f"refusing to delete primary/default LAN network {target.get('name') or target_id!r}",
-            hint="the primary Default network (VLAN 1) cannot be deleted",
-        )
-    subnet, _ = _network_subnet_and_gw(target)
-    controller_ip, mgmt_nets = _management_endpoints(client)
-    if subnet is not None:
-        if controller_ip is not None and controller_ip in subnet:
-            raise OmadaError(
-                f"refusing to delete network {target.get('name') or target_id!r}: controller IP {controller_ip} is inside {subnet}",
-            )
-        for mgmt in mgmt_nets:
-            if mgmt.overlaps(subnet):
-                raise OmadaError(
-                    f"refusing to delete network {target.get('name') or target_id!r}: overlaps management range {mgmt}",
-                )
-
+    _check_lan_delete_safety(client, target)
     warnings: list[str] = []
     reservations = _fetch_dhcp_reservations(client, site)
     linked_res = [r for r in reservations if str(r.get("netId")) == target_id]

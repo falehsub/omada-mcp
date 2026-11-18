@@ -201,7 +201,9 @@ def create_ssid(
     def _read_back() -> list[dict[str, Any]]:
         return _fetch_ssids(client, site, wlan_id)
 
-    expected = {"name": ssid_name, "band": band_mask, "guestNetEnable": bool(guest), "broadcast": bool(broadcast), "security": sec_code}
+    expected = {key: body[key] for key in (
+        "name", "band", "guestNetEnable", "broadcast", "security", "vlanSetting", "pmfMode", "enable11r",
+    )}
 
     def _verify(_before: Any, rows_now: Any) -> tuple[bool, str | None]:
         if not isinstance(rows_now, list):
@@ -225,7 +227,8 @@ def create_ssid(
         snapshot_payload={"wlanGroup": target_wlan.get("name"), "existingSsids": [_redact_ssid(s) for s in existing_ssids]},
         read_back=_read_back,
         verify_fn=_verify,
-        reauth_prepare=_reauth_prepare,
+        reauth_prepare=None if psk_cfg is not None else _reauth_prepare,
+        verification_complete=psk_cfg is None,
         fields_changed=sorted(expected.keys()),
     )
     created_raw = next((s for s in write_res["after"] if str(s.get("name")) == ssid_name), body)
@@ -234,6 +237,8 @@ def create_ssid(
         "tool": "delete_ssid",
         "arguments": {"ssid": str(created_raw.get("id") or ssid_name), "wlanGroup": wlan_id, "dryRun": True},
     }
+    if psk_cfg is not None:
+        warnings.append("Verify the new passphrase independently. Read-back verifies visible SSID settings.")
     return _committed_result(
         tool_name="create_ssid",
         target_id=ssid_name,
@@ -332,16 +337,20 @@ def update_ssid(
 
     before_safe = _redact_ssid(target_raw)
     after_safe = _redact_ssid(patch_body)
+    warnings = ["The passphrase needs independent verification and manual restoration if recovery is needed."] if psk is not None else []
     if dryRun:
-        return _dry_run_result(
+        preview = _dry_run_result(
             tool_name="update_ssid",
             target_id=ssid_id,
             before=before_safe,
             after=after_safe,
             diff=diff,
-            warnings=[],
+            warnings=warnings,
             rollback=None,
         )
+        if psk is not None:
+            preview["manualRecoveryRequired"] = True
+        return preview
 
     endpoint = f"sites/{site.site_id}/setting/wlans/{wlan_id}/ssids/{ssid_id}"
 
@@ -373,8 +382,6 @@ def update_ssid(
         re_body = {k: copy.deepcopy(v) for k, v in live.items() if k not in _SSID_SERVER_ONLY_KEYS}
         for k in expected:
             re_body[k] = copy.deepcopy(patch_body[k])
-        if psk is not None and "pskSetting" in patch_body:
-            re_body["pskSetting"] = copy.deepcopy(patch_body["pskSetting"])
         if clearVlan or vlanId is not None:
             re_body["vlanSetting"] = copy.deepcopy(patch_body["vlanSetting"])
         return False, re_body, _redact_ssid(live)
@@ -386,22 +393,27 @@ def update_ssid(
         tool_name="update_ssid",
         target=ssid_id,
         before=before_safe,
-        snapshot_payload=before_safe,
+        snapshot_payload={**(before_safe or {}), "secretRestoreRequired": psk is not None},
         read_back=_read_back,
         verify_fn=_verify,
-        reauth_prepare=_reauth_prepare,
+        reauth_prepare=None if psk is not None else _reauth_prepare,
+        verification_complete=psk is None,
         fields_changed=sorted(diff.keys()),
     )
-    return _committed_result(
+    result = _committed_result(
         tool_name="update_ssid",
         target_id=ssid_id,
         before=write_res["before"],
         after=_redact_ssid(write_res["after"]),
         diff=diff,
         snapshot=write_res["snapshot"],
-        warnings=[],
+        warnings=warnings,
         rollback=None,
     )
+    if psk is not None:
+        result["manualRecoveryRequired"] = True
+        result["verificationIncomplete"] = True
+    return result
 
 
 def delete_ssid(
@@ -468,7 +480,12 @@ def assign_ap_wlan_group(
     before_wlan_id = str(ap_detail.get("wlanId") or "")
     grp_by_id = {str(g.get("id") or ""): str(g.get("name") or "") for g in groups}
 
-    overrides = copy.deepcopy(list(ap_detail.get("ssidOverrides") or []))
+    current_overrides = ap_detail.get("ssidOverrides") or []
+    if not isinstance(current_overrides, list) or any(not isinstance(row, Mapping) for row in current_overrides):
+        raise OmadaError("AP SSID overrides were unavailable before changing the WLAN group")
+    safe_before = _redact_override_list(current_overrides)
+    credentials_present = any(row["hasPresharedKey"] for row in safe_before)
+    overrides = copy.deepcopy(current_overrides)
     for ov in overrides:
         if isinstance(ov, dict):
             ov.pop("psk", None)
@@ -480,39 +497,48 @@ def assign_ap_wlan_group(
                 ov.setdefault("vlanId", 1)
 
     body = {"wlanId": target_wlan_id, "ssidOverrides": overrides}
-    before_summary = {"mac": norm_mac, "wlanId": before_wlan_id, "wlanGroupName": grp_by_id.get(before_wlan_id, "")}
-    after_summary = {"mac": norm_mac, "wlanId": target_wlan_id, "wlanGroupName": str(target_grp.get("name") or "")}
-    diff = _field_diff(before_summary, after_summary, ("wlanId", "wlanGroupName"))
+    before_summary = {"mac": norm_mac, "wlanId": before_wlan_id, "wlanGroupName": grp_by_id.get(before_wlan_id, ""),
+                      "ssidOverrides": safe_before}
+    after_summary = {"mac": norm_mac, "wlanId": target_wlan_id, "wlanGroupName": str(target_grp.get("name") or ""),
+                     "ssidOverrides": _redact_override_list(overrides)}
+    diff = _field_diff(before_summary, after_summary, ("wlanId", "wlanGroupName", "ssidOverrides"))
+    warnings = ["Check the AP's override credentials after apply. Restoring credentials requires manual recovery."] if credentials_present else []
     rollback = {
         "tool": "assign_ap_wlan_group",
         "arguments": {"deviceMac": norm_mac, "wlanGroup": before_wlan_id or grp_by_id.get(before_wlan_id, "Default"), "dryRun": True},
     }
     if dryRun:
-        return _dry_run_result(
+        preview = _dry_run_result(
             tool_name="assign_ap_wlan_group",
             target_id=norm_mac,
             before=before_summary,
             after=after_summary,
             diff=diff,
-            warnings=[],
-            rollback=rollback,
+            warnings=warnings,
+            rollback=None if credentials_present else rollback,
         )
+        if credentials_present:
+            preview["manualRecoveryRequired"] = True
+        return preview
 
     endpoint = f"sites/{site.site_id}/eaps/{dev_mac}/config/wlans"
 
     def _read_back() -> dict[str, Any]:
         now = _fetch_ap()
         wid = str(now.get("wlanId") or "")
-        return {"mac": norm_mac, "wlanId": wid, "wlanGroupName": grp_by_id.get(wid, "")}
+        rows = now.get("ssidOverrides")
+        safe_rows = _redact_override_list(rows) if isinstance(rows, list) and all(isinstance(r, Mapping) for r in rows) else None
+        return {"mac": norm_mac, "wlanId": wid, "wlanGroupName": grp_by_id.get(wid, ""), "ssidOverrides": safe_rows}
 
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
-        if not isinstance(after_now, Mapping) or str(after_now.get("wlanId")) != target_wlan_id:
-            return False, f"AP wlanId expected {target_wlan_id!r}, got {after_now.get('wlanId')!r}"
-        return True, None
+        return _verify_ap_wlan_state(after_summary, after_now)
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         live = _read_back()
         ok, _ = _verify(before_summary, live)
+        if not ok and not _verify_ap_wlan_state(before_summary, live)[0]:
+            raise OmadaError("AP WLAN assignment changed while recovering the session",
+                             hint="inspect the existing assignment and run a new dry run")
         return ok, body, live
 
     write_res = client.write(
@@ -522,35 +548,68 @@ def assign_ap_wlan_group(
         tool_name="assign_ap_wlan_group",
         target=norm_mac,
         before=before_summary,
-        snapshot_payload=ap_detail,
+        snapshot_payload={**before_summary, "secretRestoreRequired": credentials_present},
         read_back=_read_back,
         verify_fn=_verify,
-        reauth_prepare=_reauth_prepare,
+        reauth_prepare=None if credentials_present else _reauth_prepare,
+        verification_complete=not credentials_present,
         fields_changed=["wlanId"],
     )
-    return _committed_result(
+    result = _committed_result(
         tool_name="assign_ap_wlan_group",
         target_id=norm_mac,
         before=write_res["before"],
         after=write_res["after"],
         diff=diff,
         snapshot=write_res["snapshot"],
-        warnings=[],
-        rollback=rollback,
+        warnings=warnings,
+        rollback=None if credentials_present else rollback,
     )
+    if credentials_present:
+        result["manualRecoveryRequired"] = True
+        result["verificationIncomplete"] = True
+    return result
 
 
 def _redact_override_list(overrides: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     cleaned: list[dict[str, Any]] = []
     for entry in overrides:
-        item = deep_redact({k: copy.deepcopy(v) for k, v in entry.items() if k not in ("psk", "securityKey")})
-        if entry.get("psk") or entry.get("securityKey"):
-            item["psk"] = "***REDACTED***"
-            item["hasPresharedKey"] = True
-        else:
-            item["hasPresharedKey"] = bool(entry.get("hasPresharedKey", False))
+        item = {key: entry[key] for key in (
+            "index", "globalSsid", "ssid", "enable", "ssidEnable", "vlanEnable", "vlanId", "vlanPoolIds",
+        ) if key in entry and isinstance(entry[key], (str, int, bool))}
+        pool_ids = entry.get("vlanPoolIds")
+        if isinstance(pool_ids, list) and all(isinstance(value, (str, int)) for value in pool_ids):
+            item["vlanPoolIds"] = list(pool_ids)
+        item["hasPresharedKey"] = any(entry.get(key) for key in (
+            "psk", "securityKey", "pskSetting", "ppskSetting", "hasPresharedKey",
+        ))
         cleaned.append(item)
     return cleaned
+
+
+def _verify_ap_wlan_state(expected: Mapping[str, Any], actual: Any) -> tuple[bool, str | None]:
+    if not isinstance(actual, Mapping) or str(actual.get("wlanId") or "") != expected.get("wlanId"):
+        return False, "AP WLAN group did not match the intended group"
+
+    def overrides(state: Mapping[str, Any]) -> list[dict[str, Any]] | None:
+        raw = state.get("ssidOverrides")
+        if not isinstance(raw, list) or any(not isinstance(row, Mapping) for row in raw):
+            return None
+        rows = _redact_override_list(raw)
+        for row in rows:
+            row.pop("hasPresharedKey", None)
+            for key in ("index", "vlanId"):
+                if key in row:
+                    row[key] = as_int(row[key], -1)
+            for key in ("enable", "ssidEnable", "vlanEnable"):
+                if key in row:
+                    row[key] = row[key] in (True, "true", "1")
+        return sorted(rows, key=lambda row: (row.get("index", -1), row.get("globalSsid", "")))
+
+    expected_rows = overrides(expected)
+    if expected_rows is None or overrides(actual) != expected_rows:
+        return False, "AP SSID overrides did not match the intended configuration"
+    return True, None
 
 
 def upsert_rate_limit_profile(
@@ -670,20 +729,17 @@ def upsert_rate_limit_profile(
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
         if not isinstance(after_now, Mapping):
             return False, f"rate limit profile {prof_name!r} not found after {method}"
-        if str(after_now.get("name") or "") != prof_name:
-            return False, f"rate limit profile name mismatch: {after_now.get('name')!r}"
-        if bool(after_now.get("downLimitEnable", False)) != dl_en:
-            return False, "downLimitEnable did not persist"
-        if bool(after_now.get("upLimitEnable", False)) != ul_en:
-            return False, "upLimitEnable did not persist"
-        return True, None
+        expected = {key: body[key] for key in ("name", "downLimitEnable", "upLimitEnable")}
+        for direction, enabled in (("down", dl_en), ("up", ul_en)):
+            if enabled:
+                expected[f"{direction}Limit"] = body[f"{direction}Limit"]
+                expected[f"{direction}LimitUnit"] = body[f"{direction}LimitUnit"]
+        return _match_fields(after_now, expected)
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         live = _read_back()
-        if is_update:
-            ok, _ = _verify(existing, live)
-            return ok, body, live
-        return (live is not None), body, live
+        ok, _ = _verify(existing, live)
+        return ok, body, live
 
     write_res = client.write(
         endpoint,
@@ -869,7 +925,7 @@ def set_ap_ssid_overrides(
             target_item["psk"] = psk_val
             touched_psk = True
 
-    before_summary = {
+    before_summary: dict[str, Any] = {
         "mac": norm_mac,
         "wlanId": str(ap.get("wlanId") or ""),
         "ssidOverrides": _redact_override_list(raw_existing),
@@ -881,8 +937,11 @@ def set_ap_ssid_overrides(
     }
     diff = _field_diff(before_summary, after_summary, ["wlanId", "ssidOverrides"])
     warnings: list[str] = []
-    if touched_psk:
-        warnings.append("AP SSID override passphrase updated; PSK values are redacted from tool output and snapshots.")
+    secret_restore_required = touched_psk or any(
+        entry["hasPresharedKey"] for entry in before_summary["ssidOverrides"]
+    )
+    if secret_restore_required:
+        warnings.append("AP SSID override credentials are excluded from snapshots. Restore them manually if recovery is needed.")
 
     rollback_overrides = _redact_override_list(raw_existing)
     for item in rollback_overrides:
@@ -898,15 +957,18 @@ def set_ap_ssid_overrides(
         },
     }
     if dryRun:
-        return _dry_run_result(
+        preview = _dry_run_result(
             tool_name="set_ap_ssid_overrides",
             target_id=norm_mac,
             before=before_summary,
             after=after_summary,
             diff=diff,
             warnings=warnings,
-            rollback=rollback,
+            rollback=None if secret_restore_required else rollback,
         )
+        if secret_restore_required:
+            preview["manualRecoveryRequired"] = True
+        return preview
 
     body = {"wlanId": target_wlan_id, "ssidOverrides": updated_overrides}
     endpoint = f"sites/{site.site_id}/eaps/{dev_mac}/config/wlans"
@@ -921,20 +983,22 @@ def set_ap_ssid_overrides(
         }
 
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
-        if not isinstance(after_now, Mapping):
-            return False, "AP read-back failed"
-        if str(after_now.get("wlanId") or "") != target_wlan_id:
-            return False, f"AP wlanId expected {target_wlan_id!r}, got {after_now.get('wlanId')!r}"
-        return True, None
+        return _verify_ap_wlan_state(after_summary, after_now)
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         live = _read_back()
-        return _verify(before_summary, live)[0], body, live
+        if _verify(before_summary, live)[0]:
+            return True, None, live
+        if not _verify_ap_wlan_state(before_summary, live)[0]:
+            raise OmadaError("AP override state changed while recovering the controller session",
+                             hint="inspect current overrides and run a new dry run")
+        return False, body, live
 
     snap_safe = {
         "mac": norm_mac,
         "wlanId": str(ap.get("wlanId") or ""),
         "ssidOverrides": rollback_overrides,
+        "secretRestoreRequired": secret_restore_required,
     }
     write_res = client.write(
         endpoint,
@@ -946,10 +1010,11 @@ def set_ap_ssid_overrides(
         snapshot_payload=snap_safe,
         read_back=_read_back,
         verify_fn=_verify,
-        reauth_prepare=_reauth_prepare,
+        reauth_prepare=None if touched_psk else _reauth_prepare,
+        verification_complete=not touched_psk,
         fields_changed=sorted(diff.keys()) or ["ssidOverrides"],
     )
-    return _committed_result(
+    result = _committed_result(
         tool_name="set_ap_ssid_overrides",
         target_id=norm_mac,
         before=write_res["before"],
@@ -957,8 +1022,14 @@ def set_ap_ssid_overrides(
         diff=diff,
         snapshot=write_res["snapshot"],
         warnings=warnings,
-        rollback=rollback,
+        rollback=None if secret_restore_required else rollback,
     )
+    if secret_restore_required:
+        result["manualRecoveryRequired"] = True
+    if touched_psk:
+        result["verificationIncomplete"] = True
+        result["warnings"].append("Visible AP override fields were verified. The new passphrase requires independent verification.")
+    return result
 
 
 def run_wlan_optimization(

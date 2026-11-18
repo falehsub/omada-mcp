@@ -337,7 +337,7 @@ not just the label.
   bridge, write automation, and interactive web UI logins causes the
   session-eviction loop described above (each login kills the other session).
 * Writes (when explicitly enabled in `omada-mcp` via `OMADA_READ_ONLY=false` and
-  `OMADA_WRITE_TOOLS`) default to `dryRun=true`, require `confirm="<tool>:<target>"`,
+  `OMADA_WRITE_TOOLS`) default to `dryRun=true`, require the fresh `confirmToken` as `confirm`,
   pace at `>= 1.0 s`, never retry on `-1600`, snapshot before mutation, and re-read
   afterwards to catch silent controller no-ops.
 * Reads are idempotent; nothing in this document should be scheduled faster than

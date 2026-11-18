@@ -9,6 +9,7 @@ from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from ..client import OmadaClient, OmadaError, SiteInfo, redact_secrets
+from ..write_previews import require_confirmation
 from ._common import deep_redact
 
 MAX_IP_GROUP_ENTRIES = 16
@@ -44,6 +45,9 @@ WRITE_ENVELOPE_SCHEMA: dict[str, Any] = {
         "applied": {"type": "boolean"},
         "dryRun": {"type": "boolean"},
         "verified": {"type": "boolean"},
+        "outcome": {"type": "string", "enum": ["accepted", "verified", "uncertain"]},
+        "manualRecoveryRequired": {"type": "boolean"},
+        "verificationIncomplete": {"type": "boolean"},
         "target": {"type": "string"},
         "confirmToken": {"type": "string"},
         "before": {},
@@ -257,17 +261,8 @@ def _unwrap_rows(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _require_confirm(tool_name: str, target_id: str, dry_run: bool, confirm: str | None) -> str:
-    expected = f"{tool_name}:{target_id}"
-    if dry_run:
-        return expected
-    supplied = str(confirm or "").strip()
-    if supplied != expected:
-        raise OmadaError(
-            f"confirmation mismatch for {tool_name}: dryRun=false requires confirm='{tool_name}:<target-id>'",
-            hint="run this tool with dryRun=true first to inspect the diff and obtain confirmToken",
-        )
-    return expected
+def _require_confirm(tool_name: str, target_id: str, dry_run: bool, confirm: str | None) -> None:
+    require_confirmation(tool_name, target_id, dry_run, confirm)
 
 
 def _dry_run_result(
@@ -286,7 +281,6 @@ def _dry_run_result(
         "dryRun": True,
         "verified": False,
         "target": target_id,
-        "confirmToken": f"{tool_name}:{target_id}",
         "before": deep_redact(before),
         "after": deep_redact(after),
         "diff": deep_redact(diff),
@@ -316,7 +310,6 @@ def _committed_result(
         "dryRun": False,
         "verified": True,
         "target": target_id,
-        "confirmToken": f"{tool_name}:{target_id}",
         "before": deep_redact(before),
         "after": deep_redact(after),
         "diff": deep_redact(diff),
@@ -531,7 +524,8 @@ def _match_fields(actual: Mapping[str, Any], expected: Mapping[str, Any]) -> tup
             if not ok:
                 return False, f"{key}.{reason}"
         elif isinstance(exp_val, bool):
-            if bool(act_val) != exp_val:
+            valid = (True, 1, "1", "true") if exp_val else (False, 0, "0", "false")
+            if act_val not in valid:
                 return False, f"field {key!r} expected {exp_val!r}, got {act_val!r}"
         elif act_val != exp_val:
             return False, f"field {key!r} expected {exp_val!r}, got {act_val!r}"

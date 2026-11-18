@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..client import OmadaClient, OmadaError, SiteInfo
-from ._common import ACL_TYPE_LABELS
+from ._common import ACL_TYPE_LABELS, as_int
 from ._write_common import (
     _ACL_DISPATCH_NOTES,
     _SOURCE_DEST_TYPES,
@@ -110,6 +110,52 @@ def _normalize_direction(direction: Mapping[str, Any]) -> dict[str, Any]:
     if not (norm["lanToWan"] or norm["lanToLan"] or norm["wanInIds"] or norm["vpnInIds"]):
         raise OmadaError("direction must enable at least one of lanToWan, lanToLan, wanInIds, or vpnInIds")
     return norm
+
+
+_ACL_INT_FIELDS = frozenset({"type", "policy", "sourceType", "destinationType", "bindingType"})
+_ACL_UNORDERED_FIELDS = frozenset({"sourceIds", "destinationIds", "protocols"})
+
+
+def _verify_rule_fields(actual: Mapping[str, Any], expected: Mapping[str, Any]) -> tuple[bool, str | None]:
+    normalized = dict(actual)
+    for key, value in expected.items():
+        if key not in actual:
+            return False, f"ACL field {key!r} missing on read-back"
+        current = actual[key]
+        if key in _ACL_INT_FIELDS:
+            normalized[key] = as_int(current, -1)
+        elif key in _ACL_UNORDERED_FIELDS:
+            if not isinstance(current, list) or sorted(map(str, current)) != sorted(map(str, value)):
+                return False, f"ACL field {key!r} did not match intent"
+            normalized[key] = value
+        elif key == "direction":
+            if not isinstance(current, Mapping):
+                return False, "ACL direction missing on read-back"
+            normalized[key] = {
+                "lanToWan": current.get("lanToWan", False),
+                "lanToLan": current.get("lanToLan", False),
+                "wanInIds": sorted(map(str, current.get("wanInIds") or [])),
+                "vpnInIds": sorted(map(str, current.get("vpnInIds") or [])),
+            }
+            value = {**value, "wanInIds": sorted(map(str, value["wanInIds"])), "vpnInIds": sorted(map(str, value["vpnInIds"]))}
+        ok, reason = _match_fields(normalized, {key: value})
+        if not ok:
+            return False, reason
+    return True, None
+
+
+def _check_created_rule(rule: Mapping[str, Any], expected: Mapping[str, Any]) -> tuple[bool, str | None]:
+    if not rule.get("id"):
+        return False, "created ACL rule ID missing on read-back"
+    fields = {key: value for key, value in expected.items() if key not in (
+        "stateMode", "ipSec", "customAclDevices", "customAclOsws", "customAclStacks",
+    )}
+    # v6 controllers can omit the legacy field when no bidirectionality was requested.
+    if fields.get("biDirectional") is False and "biDirectional" not in rule:
+        fields.pop("biDirectional")
+    if not fields.get("customAclPorts") and "customAclPorts" not in rule:
+        fields.pop("customAclPorts", None)
+    return _verify_rule_fields(rule, fields)
 
 
 def create_gateway_acl(
@@ -218,30 +264,19 @@ def create_gateway_acl(
         _, rules = _fetch_acls(client, site)
         return rules
 
-    def _matches_rule(rule: Mapping[str, Any]) -> bool:
-        return (
-            str(rule.get("name")) == rule_name
-            and int(rule.get("policy", -1)) == policy_int
-            and bool(rule.get("status")) == bool(status)
-            and int(rule.get("sourceType", -1)) == src_type
-            and [str(x) for x in (rule.get("sourceIds") or [])] == src_ids
-            and int(rule.get("destinationType", -1)) == dst_type
-            and [str(x) for x in (rule.get("destinationIds") or [])] == dst_ids
-        )
-
     def _verify(_before: Any, after_rules: Any) -> tuple[bool, str | None]:
         if not isinstance(after_rules, list):
             return False, "ACL read-back did not return a rule list"
         found = next((r for r in after_rules if str(r.get("name")) == rule_name), None)
         if found is None:
             return False, f"created ACL rule {rule_name!r} missing on read-back"
-        if not _matches_rule(found):
-            return False, f"created ACL rule {rule_name!r} fields on read-back did not match intent"
-        return True, None
+        return _check_created_rule(found, body)
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         rules_now = _read_back()
-        ok, _ = _verify(None, rules_now)
+        ok, reason = _verify(None, rules_now)
+        if not ok and any(str(rule.get("name")) == rule_name for rule in rules_now):
+            raise OmadaError(reason or "an ACL with the same name already exists after session recovery")
         return ok, None, None
 
     write_res = client.write(
@@ -533,10 +568,10 @@ def update_gateway_acl(
     warnings = [_ACL_DISPATCH_NOTES]
     if acl_disable is not None:
         warnings.append(f"observed controller aclDisable={acl_disable!r} (advisory only)")
-    if biDirectional is not None and "biDirectional" not in target_rule:
+    legacy_bidirectional = biDirectional is not None and "biDirectional" not in target_rule
+    if legacy_bidirectional:
         warnings.append(
-            "controller ACL schema does not expose 'biDirectional' on read-back "
-            "(Omada v6.x uses stateful stateMode instead)"
+            "current ACL state omits 'biDirectional'. The change can be verified only if the value appears after apply."
         )
     expected = {k: patch_body[k] for k in dict.fromkeys(changed_keys)}
 
@@ -566,7 +601,7 @@ def update_gateway_acl(
             for k, v in expected.items()
             if k != "biDirectional" or "biDirectional" in after_rule or "biDirectional" in target_rule
         }
-        ok, reason = _match_fields(after_rule, verifiable)
+        ok, reason = _verify_rule_fields(after_rule, verifiable)
         if not ok:
             return False, reason
         ignore = list(expected.keys())
@@ -580,7 +615,9 @@ def update_gateway_acl(
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         fresh = _read_back()
         if fresh is None:
-            return False, None, None
+            raise OmadaError(f"ACL rule {target_id} disappeared during session recovery")
+        if legacy_bidirectional and "biDirectional" not in fresh:
+            raise OmadaError("controller did not expose biDirectional for session recovery verification")
         ok, _ = _verify(target_rule, fresh)
         if ok:
             return True, None, None
@@ -601,6 +638,7 @@ def update_gateway_acl(
         verify_fn=_verify,
         reauth_prepare=_reauth_prepare,
         fields_changed=sorted(expected.keys()),
+        verification_complete=lambda after: biDirectional is None or "biDirectional" in after,
     )
     return _committed_result(
         tool_name="update_gateway_acl",
@@ -802,13 +840,13 @@ def _create_scoped_acl(
         found = next((r for r in after_rules if str(r.get("name")) == rule_name), None)
         if found is None:
             return False, f"created ACL {rule_name!r} missing on read-back"
-        if int(found.get("policy", -1)) != policy_int or bool(found.get("status")) != bool(status):
-            return False, f"created ACL {rule_name!r} read-back did not match policy/status"
-        return True, None
+        return _check_created_rule(found, body)
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         rules_now = _read_back()
-        ok, _ = _verify(None, rules_now)
+        ok, reason = _verify(None, rules_now)
+        if not ok and any(str(rule.get("name")) == rule_name for rule in rules_now):
+            raise OmadaError(reason or "an ACL with the same name already exists after session recovery")
         return ok, None, None
 
     write_res = client.write(

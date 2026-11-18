@@ -7,6 +7,7 @@ import copy
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .._projections import project_controller_row
 from ..client import OmadaClient, OmadaError
 from ._common import DUPLEX_LABELS as PORT_DUPLEX_LABELS
 from ._common import LINK_SPEED_LABELS as PORT_LINK_SPEED_LABELS
@@ -25,11 +26,11 @@ from ._write_common import (
     _require_confirm,
     _resolve_by_id_or_name,
     _site,
-    _unwrap_rows,
 )
 from ._write_fetchers import (
     _fetch_lan_collection,
     _fetch_lan_profiles,
+    _fetch_raw_switch_port,
     _omada_mac,
     _resolve_lan_network,
 )
@@ -52,13 +53,14 @@ def _switch_port_summary(port_obj: Mapping[str, Any], info_obj: Mapping[str, Any
         "nativeNetworkId": port_obj.get("nativeNetworkId"),
         "tagNetworkIds": list(port_obj.get("tagNetworkIds") or []),
         "untagNetworkIds": list(port_obj.get("untagNetworkIds") or []),
+        "networkTagsSetting": port_obj.get("networkTagsSetting"),
         "portIsolationEnable": bool(port_obj.get("portIsolationEnable", False)),
         "lldpMedEnable": bool(port_obj.get("lldpMedEnable", False)),
         "spanningTreeEnable": bool(port_obj.get("spanningTreeEnable", False)),
     }
     if info_obj:
         summary["isUplink"] = bool(info_obj.get("isUplink"))
-        summary["isLagMember"] = bool(info_obj.get("isLagMember"))
+        summary["isLagMember"] = info_obj.get("isLagMember")
         summary["carriesController"] = bool(info_obj.get("carriesController"))
     return summary
 
@@ -186,20 +188,7 @@ def update_switch_port(
     if port_info is None:
         raise OmadaError(f"port {port} was not found on switch {sw_dev.get('name') or norm_mac} ({norm_mac})")
 
-    def _fetch_raw_port() -> dict[str, Any]:
-        try:
-            detail = client.api_result(f"sites/{site.site_id}/switches/{dev_mac}/ports/{port}")
-            if isinstance(detail, Mapping) and detail.get("port") is not None:
-                return dict(detail)
-        except OmadaError:
-            pass
-        rows = _unwrap_rows(client.api_result(f"sites/{site.site_id}/switches/{dev_mac}/ports"))
-        found = next((dict(r) for r in rows if as_int(r.get("port"), 0) == port), None)
-        if found is None:
-            raise OmadaError(f"raw port {port} disappeared from switch {norm_mac}")
-        return found
-
-    raw_port = _fetch_raw_port()
+    raw_port = _fetch_raw_switch_port(client, site.site_id, dev_mac, port)
     profiles = _fetch_lan_profiles(client, site)
     disable_prof = next((p for p in profiles if as_int(p.get("type"), -1) == 1 or str(p.get("name") or "").strip().lower() == "disable"), None)
     all_prof = next((p for p in profiles if as_int(p.get("type"), -1) == 0 or str(p.get("name") or "").strip().lower() == "all"), None)
@@ -249,27 +238,21 @@ def update_switch_port(
         target_profile_id is not None and target_profile_id != str(raw_port.get("profileId") or "")
     ) or any(v is not None for v in (nativeNetworkId, taggedNetworkIds, untaggedNetworkIds, portIsolationEnable))
 
-    is_uplink = bool(port_info.get("isUplink"))
-    is_lag = bool(port_info.get("isLagMember")) or str(raw_port.get("operation") or "").lower() == "aggregating"
-    carries_ctrl = bool(port_info.get("carriesController"))
-
     warnings: list[str] = []
-    guard_reasons: list[str] = []
-    if is_uplink:
-        guard_reasons.append("detected switch uplink port")
-    if is_lag:
-        guard_reasons.append(f"LAG member port (lagId={port_info.get('lagId')})")
-    if carries_ctrl:
-        guard_reasons.append("carries controller/MCP host traffic")
-
-    if (is_disabling or mutating_profile_or_vlan) and guard_reasons:
-        msg = f"Refusing port disable/profile/VLAN change on {norm_mac} port {port}: " + "; ".join(guard_reasons)
-        if not allowUplinkMutation:
-            raise OmadaError(
-                msg,
-                hint="Pass allowUplinkMutation=True only with an out-of-band management path if this change is intentional.",
-            )
-        warnings.append(f"ANTI-STRANDING GUARD BYPASSED (allowUplinkMutation=True): {'; '.join(guard_reasons)}.")
+    if str(raw_port.get("operation") or "").lower() == "aggregating":
+        port_info = {**port_info, "isLagMember": True}
+    needs_port_guard = is_disabling or mutating_profile_or_vlan or poeEnabled is False or any(
+        setting is not None for setting in (profileOverrideEnable, linkSpeed, duplex, spanningTreeEnable)
+    )
+    if needs_port_guard:
+        _check_port_safety_guard(
+            port_info,
+            action="change connectivity settings on",
+            norm_mac=norm_mac,
+            port=port,
+            allow_uplink_mutation=allowUplinkMutation,
+            warnings=warnings,
+        )
 
     override_fields_set = any(v is not None for v in (poeEnabled, portIsolationEnable, lldpMedEnable, spanningTreeEnable))
     effective_override: bool | None
@@ -295,16 +278,10 @@ def update_switch_port(
         for d in downlinks
         if str(d.get("type") or "").lower() in ("ap", "switch")
     ]
-    if poeEnabled is False or is_disabling:
-        if carries_ctrl and not allowUplinkMutation:
-            raise OmadaError(
-                f"Refusing to remove PoE or disable port {port} on {norm_mac}: port carries controller/MCP host traffic",
-                hint="Pass allowUplinkMutation=True if overriding intentionally.",
-            )
-        if powered_downlinks:
-            warnings.append(
-                f"Disabling/removing PoE on port {port} affects connected adopted device(s): {', '.join(powered_downlinks)}."
-            )
+    if powered_downlinks and (poeEnabled is False or is_disabling):
+        warnings.append(
+            f"Disabling/removing PoE on port {port} affects connected adopted device(s): {', '.join(powered_downlinks)}."
+        )
 
     speed_code = _parse_code_map(linkSpeed, _LINK_SPEED_TO_CODE, label="linkSpeed") if linkSpeed is not None else None
     duplex_code = _parse_code_map(duplex, _DUPLEX_TO_CODE, label="duplex") if duplex is not None else None
@@ -385,30 +362,51 @@ def update_switch_port(
 
     endpoint = f"sites/{site.site_id}/switches/{dev_mac}/ports/{port}"
 
+    intended = {
+        "name": name, "profileId": target_profile_id, "profileOverrideEnable": effective_override,
+        "poe": poe_code, "linkSpeed": speed_code, "duplex": duplex_code,
+        "nativeNetworkId": nativeNetworkId, "tagNetworkIds": taggedNetworkIds,
+        "untagNetworkIds": untaggedNetworkIds, "portIsolationEnable": portIsolationEnable,
+        "lldpMedEnable": lldpMedEnable, "spanningTreeEnable": spanningTreeEnable,
+    }
+    checked = {key for key, value in intended.items() if value is not None} | (set(diff) - {"profileName"})
+    if enabled is not None:
+        checked.add("disable")
+
+    def _observed(raw: Mapping[str, Any]) -> dict[str, Any]:
+        view = _switch_port_summary(raw, port_info)
+        for key in checked - raw.keys():
+            view.pop(key, None)
+        return view
+
     def _read_back() -> dict[str, Any]:
-        return _switch_port_summary(_fetch_raw_port(), port_info)
+        return _observed(_fetch_raw_switch_port(client, site.site_id, dev_mac, port))
 
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
-        if not isinstance(after_now, Mapping):
-            return False, "switch port read-back did not return an object"
-        if name is not None and str(after_now.get("name")) != str(name):
-            return False, f"port name expected {name!r}, got {after_now.get('name')!r}"
-        if target_profile_id is not None and str(after_now.get("profileId")) != target_profile_id:
-            return False, f"profileId expected {target_profile_id!r}, got {after_now.get('profileId')!r}"
-        if effective_override is not None and bool(after_now.get("profileOverrideEnable")) != bool(effective_override):
-            return False, f"profileOverrideEnable expected {effective_override!r}"
-        if poe_code is not None and body.get("profileOverrideEnable") and as_int(after_now.get("poe"), -1) != poe_code:
-            return False, f"poe expected {poe_code!r}, got {after_now.get('poe')!r}"
-        if speed_code is not None:
-            exp_s = PORT_LINK_SPEED_LABELS.get(speed_code, str(speed_code))
-            if str(after_now.get("linkSpeed")) != exp_s:
-                return False, f"linkSpeed expected {exp_s!r}, got {after_now.get('linkSpeed')!r}"
-        return True, None
+        return _verify_port_configuration(checked, after_summary, after_now)
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
-        live = _read_back()
+        live_raw = _fetch_raw_switch_port(client, site.site_id, dev_mac, port)
+        live = _observed(live_raw)
         ok, _ = _verify(before_summary, live)
-        return ok, body, live
+        if ok:
+            return True, None, live
+        if any(live_raw.get(key) != raw_port.get(key) for key in body.keys() | checked):
+            raise OmadaError("switch port configuration changed during session recovery; preview the change again")
+        if needs_port_guard:
+            current_ports = collect_switch_ports_data(client, site, sw_dev, include_cable_test=False).get("ports") or []
+            current_info: Mapping[str, Any] = next(
+                (item for item in current_ports if item.get("port") == port), {},
+            )
+            _check_port_safety_guard(
+                current_info,
+                action="retry the connectivity change on",
+                norm_mac=norm_mac,
+                port=port,
+                allow_uplink_mutation=allowUplinkMutation,
+                warnings=[],
+            )
+        return False, body, live
 
     write_res = client.write(
         endpoint,
@@ -435,6 +433,22 @@ def update_switch_port(
     )
 
 
+def _verify_port_configuration(
+    checked: set[str], expected: Mapping[str, Any], observed: Any,
+) -> tuple[bool, str | None]:
+    if not isinstance(observed, Mapping):
+        return False, "port configuration was not available on read-back"
+    for key in sorted(checked):
+        if key not in observed:
+            return False, f"{key} was unavailable on port configuration read-back"
+        have, want = observed[key], expected[key]
+        if key in ("tagNetworkIds", "untagNetworkIds"):
+            have, want = sorted(map(str, have)), sorted(map(str, want))
+        if have != want:
+            return False, f"{key} did not match the requested port configuration"
+    return True, None
+
+
 def _check_port_safety_guard(
     port_info: Mapping[str, Any],
     *,
@@ -444,6 +458,11 @@ def _check_port_safety_guard(
     allow_uplink_mutation: bool,
     warnings: list[str],
 ) -> None:
+    if port_info.get("safetyEvidenceComplete") is not True:
+        raise OmadaError(
+            f"Refusing to {action} port {port} on {norm_mac}: port, LAG, or topology inventory is incomplete",
+            hint="retry when switch ports, link aggregation, and port roles can be verified",
+        )
     guard_reasons: list[str] = []
     if port_info.get("carriesController"):
         guard_reasons.append("carries controller/MCP host traffic")
@@ -706,27 +725,43 @@ def upsert_port_profile(
     method = "PATCH" if existing is not None else "POST"
     endpoint = f"sites/{site.site_id}/setting/lan/profiles/{existing['id']}" if existing is not None else f"sites/{site.site_id}/setting/lan/profiles"
 
-    def _read_back() -> dict[str, Any] | None:
+    requested = {
+        "name": prof_name, "poe": poe_code, "nativeNetworkId": resolved_native_id,
+        "tagNetworkIds": taggedNetworkIds, "untagNetworkIds": untaggedNetworkIds,
+        "portIsolationEnable": portIsolationEnable, "lldpMedEnable": lldpMedEnable,
+        "spanningTreeEnable": spanningTreeEnable, "loopbackDetectEnable": loopbackDetectEnable,
+        "flowControlEnable": flowControlEnable, "eeeEnable": eeeEnable, "dot1x": dot1x,
+    }
+    checked = {key for key, value in requested.items() if value is not None}
+    if existing is not None:
+        checked.update(diff)
+
+    def _fetch_current() -> dict[str, Any] | None:
         rows = _fetch_lan_profiles(client, site)
-        found = None
         if existing is not None:
-            found = next((r for r in rows if str(r.get("id")) == str(existing["id"])), None)
-        if found is None:
-            found = next((r for r in rows if str(r.get("name")) == prof_name), None)
-        return _summarize_prof(found) if found else None
+            return next((r for r in rows if str(r.get("id")) == str(existing["id"])), None)
+        return next((r for r in rows if str(r.get("name")) == prof_name), None)
+
+    def _observed(raw: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        if raw is None:
+            return None
+        view = _summarize_prof(raw)
+        for key in checked - raw.keys():
+            view.pop(key, None)
+        return view
+
+    def _read_back() -> dict[str, Any] | None:
+        return _observed(_fetch_current())
 
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
-        if not isinstance(after_now, Mapping):
-            return False, f"port profile {prof_name!r} missing on read-back"
-        if str(after_now.get("name")) != prof_name:
-            return False, f"profile name expected {prof_name!r}, got {after_now.get('name')!r}"
-        if poe_code is not None and as_int(after_now.get("poe"), -1) != poe_code:
-            return False, f"profile poe expected {poe_code!r}, got {after_now.get('poe')!r}"
-        return True, None
+        return _verify_port_configuration(checked, after_preview, after_now)
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
-        live = _read_back()
+        live_raw = _fetch_current()
+        live = _observed(live_raw)
         ok, _ = _verify(before_summary, live)
+        if not ok and live_raw != existing:
+            raise OmadaError("port profile configuration changed during session recovery; preview the change again")
         return ok, (wire_body if existing is not None else None), live
 
     snapshot_payload = (
@@ -868,9 +903,11 @@ def start_cable_test(
         snapshot_payload={"switch": sw_dev, "ports": selected_infos},
         fields_changed=["cableTest"],
     )
-    diag_results: Any = None
+    diag_results: dict[str, Any] | None = None
     with contextlib.suppress(OmadaError):
-        diag_results = client.api_result(f"sites/{site.site_id}/cable-test/switches/{dev_mac}/full-results")
+        raw_results = client.api_result(f"sites/{site.site_id}/cable-test/switches/{dev_mac}/full-results")
+        if isinstance(raw_results, Mapping):
+            diag_results = project_controller_row("switchCableResults", raw_results)
     return _committed_result(
         tool_name="start_cable_test",
         target_id=target_id,

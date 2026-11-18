@@ -50,7 +50,9 @@ _MDNS = {
     'osg': {'profileIds': [None], 'serviceNetworks': [None], 'clientNetworks': [None]},
     'ap': {**_fields('serviceVlan'), 'profileIds': [None], 'clientVlan': [None]},
 }
-_DDNS = _fields('id', 'name', 'domain', 'provider', 'service', 'status', 'enable', 'updateTime')
+_DDNS = _fields('id', 'name', 'domain', 'domainName', 'provider', 'service', 'status', 'enable',
+                'interfacePortId', 'updateInterval', 'updateTime')
+_CABLE_TEST = _fields('port', 'status', 'cableState', 'cableLength', 'cableStatus')
 _SHAPES = {
     'networks': {**_NETWORK, 'collection': _NETWORK, 'interface': _NETWORK},
     'groups': _GROUP,
@@ -60,6 +62,20 @@ _SHAPES = {
     'upnp': {**_fields('enable', 'resource'), 'wanPortIds': [None], 'networkIds': [None]},
     'dnsProxy': _fields('enable', 'supportDnsOverride', 'dnsOverride', 'dnssec', 'cacheEnable'),
     'ddns': {**_DDNS, 'totalRows': None, 'data': [_DDNS]},
+    'ddnsEntry': _DDNS,
+    'vpns': {
+        **_fields('id', 'name', 'type', 'status', 'purpose', 'enabled', 'interfaceId',
+                  'remoteGateway', 'localGateway', 'vpnType', 'ipsecType', 'tunnelMode'),
+        'localNetworkIds': [None], 'remoteSubnets': [None], 'localSubnets': [None],
+    },
+    'wireguard': _fields('id', 'name', 'status', 'mtu', 'listenPort', 'localIp', 'publicKey'),
+    'wireguardPeers': {
+        **_fields('id', 'name', 'status', 'interfaceId', 'publicKey', 'keepAlive',
+                  'endPoint', 'endPointPort', 'comment'),
+        'allowAddress': [None],
+    },
+    'switchCableTest': _CABLE_TEST,
+    'switchCableResults': {'status': None, 'data': [_CABLE_TEST]},
     'policyRoutes': {
         **_fields('id', 'name', 'status', 'sourceType', 'destinationType',
                   'backupInterface', 'interfaceType', 'interfaceId'),

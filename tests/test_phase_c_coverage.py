@@ -17,7 +17,7 @@ for p in (str(SRC), str(TESTS)):
         sys.path.insert(0, p)
 
 from mock_controller import MockController  # noqa: E402
-from write_harness import call_tool, make_write_config, make_write_env, unwrap_ok  # noqa: E402
+from write_harness import call_confirmed, call_tool, make_write_config, make_write_env, unwrap_ok  # noqa: E402
 
 from omada_mcp.client import OmadaClient, OmadaError  # noqa: E402
 from omada_mcp.config import _READ_ONLY_TOOL_NAMES, WRITE_TOOL_NAMES, load_config  # noqa: E402
@@ -162,10 +162,8 @@ class PhaseCWriteCrudAndRollbackTests(unittest.TestCase):
             }))
             self.assertTrue(ctrl.vpn_configs[0]["status"])
 
-            rb_vpn = unwrap_ok(call_tool(server, "rollback_from_snapshot", {
+            rb_vpn = unwrap_ok(call_confirmed(server, "rollback_from_snapshot", {
                 "snapshotId": Path(commit_vpn["snapshot"]).name,
-                "dryRun": False,
-                "confirm": f"rollback_from_snapshot:{Path(commit_vpn['snapshot']).name}",
             }))
             self.assertTrue(rb_vpn["applied"])
             self.assertFalse(ctrl.vpn_configs[0]["status"])
@@ -254,10 +252,8 @@ class PhaseCWriteCrudAndRollbackTests(unittest.TestCase):
                 "confirm": dry_upd["confirmToken"],
             }))
             self.assertEqual(ctrl.wireguard_peers[0]["keepAlive"], 45)
-            unwrap_ok(call_tool(server, "rollback_from_snapshot", {
+            unwrap_ok(call_confirmed(server, "rollback_from_snapshot", {
                 "snapshotId": Path(commit_upd["snapshot"]).name,
-                "dryRun": False,
-                "confirm": f"rollback_from_snapshot:{Path(commit_upd['snapshot']).name}",
             }))
             self.assertEqual(ctrl.wireguard_peers[0]["keepAlive"], 25)
             self.assertEqual(ctrl.wireguard_peers[0]["name"], "laptop")
@@ -283,10 +279,8 @@ class PhaseCWriteCrudAndRollbackTests(unittest.TestCase):
             self.assertTrue(rb_del_peer["result"]["isError"])
 
             # Rollback initial tunnel create removes the interface cleanly
-            unwrap_ok(call_tool(server, "rollback_from_snapshot", {
+            unwrap_ok(call_confirmed(server, "rollback_from_snapshot", {
                 "snapshotId": Path(commit_wg["snapshot"]).name,
-                "dryRun": False,
-                "confirm": f"rollback_from_snapshot:{Path(commit_wg['snapshot']).name}",
             }))
             self.assertEqual(ctrl.wireguard_configs, [])
 

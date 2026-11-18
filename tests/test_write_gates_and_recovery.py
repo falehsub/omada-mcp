@@ -19,7 +19,7 @@ for p in (str(SRC), str(TESTS)):
         sys.path.insert(0, p)
 
 from mock_controller import MockController, MockControllerHTTPServer  # noqa: E402
-from write_harness import call_tool, make_write_config, make_write_env, unwrap_ok  # noqa: E402
+from write_harness import call_confirmed, call_tool, make_write_config, make_write_env, unwrap_ok  # noqa: E402
 
 from omada_mcp import config as config_mod  # noqa: E402
 from omada_mcp.client import (  # noqa: E402
@@ -357,20 +357,16 @@ class WriteClientAndRecoveryTests(unittest.TestCase):
                 )
 
             # Apply two sequential writes and verify pacing + snapshots + audit.jsonl
-            r1 = unwrap_ok(call_tool(server, "set_client_fixed_ip", {
+            r1 = unwrap_ok(call_confirmed(server, "set_client_fixed_ip", {
                 "mac": "AA-BB-CC-11-11-01",
                 "ip": "192.168.20.55",
-                "dryRun": False,
-                "confirm": "set_client_fixed_ip:aa:bb:cc:11:11:01",
             }))
             self.assertTrue(r1["applied"])
             snap1 = Path(tmp) / r1["snapshot"]
             self.assertTrue(snap1.exists())
 
-            r2 = unwrap_ok(call_tool(server, "release_client_fixed_ip", {
+            r2 = unwrap_ok(call_confirmed(server, "release_client_fixed_ip", {
                 "mac": "AA-BB-CC-11-11-01",
-                "dryRun": False,
-                "confirm": "release_client_fixed_ip:aa:bb:cc:11:11:01",
             }))
             self.assertTrue(r2["applied"])
             self.assertIn(1.25, sleeps)
@@ -408,11 +404,9 @@ class WriteClientAndRecoveryTests(unittest.TestCase):
                 return orig_request(method, url, headers=headers, data=data, timeout=timeout)
 
             _client._transport = type("_T", (), {"request": staticmethod(wrapped_request), "cookie_jar": ctrl.cookie_jar})()
-            res = unwrap_ok(call_tool(server, "set_client_fixed_ip", {
+            res = unwrap_ok(call_confirmed(server, "set_client_fixed_ip", {
                 "mac": "AA-BB-CC-11-11-01",
                 "ip": "192.168.20.57",
-                "dryRun": False,
-                "confirm": "set_client_fixed_ip:aa:bb:cc:11:11:01",
             }))
             self.assertTrue(res["applied"])
             # Only ONE PATCH hit the controller because reauth_prepare saw desired ipSetting already active
@@ -423,11 +417,9 @@ class WriteClientAndRecoveryTests(unittest.TestCase):
             server, _client, ctrl, _ = make_write_env(tmp)
             # Simulate session expiry right on PATCH clients/
             ctrl.html_once_for.add(("PATCH", "clients/"))
-            res = unwrap_ok(call_tool(server, "set_client_fixed_ip", {
+            res = unwrap_ok(call_confirmed(server, "set_client_fixed_ip", {
                 "mac": "AA-BB-CC-11-11-01",
                 "ip": "192.168.20.55",
-                "dryRun": False,
-                "confirm": "set_client_fixed_ip:aa:bb:cc:11:11:01",
             }))
             self.assertTrue(res["applied"])
             self.assertGreaterEqual(ctrl.logins, 2)
@@ -436,11 +428,9 @@ class WriteClientAndRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, ctrl, _ = make_write_env(tmp)
             ctrl.burst_once_for.add(("PATCH", "clients/"))
-            resp = call_tool(server, "set_client_fixed_ip", {
+            resp = call_confirmed(server, "set_client_fixed_ip", {
                 "mac": "AA-BB-CC-11-11-01",
                 "ip": "192.168.20.55",
-                "dryRun": False,
-                "confirm": "set_client_fixed_ip:aa:bb:cc:11:11:01",
             })
             self.assertTrue(resp["result"]["isError"])
             self.assertIn("-1600", resp["result"]["content"][0]["text"])
@@ -534,11 +524,9 @@ class SnapshotAndDoctorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             server, _client, ctrl, _ = make_write_env(tmp)
             ctrl.role = "Viewer"
-            resp = call_tool(server, "create_ip_group", {
+            resp = call_confirmed(server, "create_ip_group", {
                 "name": "viewer-denied",
                 "cidrs": ["192.168.20.200/32"],
-                "dryRun": False,
-                "confirm": "create_ip_group:viewer-denied",
             })
             self.assertTrue(resp["result"]["isError"])
             self.assertIn("-1007", resp["result"]["content"][0]["text"])
@@ -557,20 +545,16 @@ class SnapshotAndDoctorTests(unittest.TestCase):
             self.assertIn("-33601", bad["result"]["content"][0]["text"])
             self.assertEqual(ctrl.write_request_count, 0)
 
-            created_grp = unwrap_ok(call_tool(server, "create_ip_group", {
+            created_grp = unwrap_ok(call_confirmed(server, "create_ip_group", {
                 "name": "v62-group-id-only",
                 "cidrs": ["192.168.20.210/32"],
-                "dryRun": False,
-                "confirm": "create_ip_group:v62-group-id-only",
             }))
             gid = created_grp["after"]["groupId"]
             self.assertEqual(created_grp["after"]["id"], gid)
 
-            toggled = unwrap_ok(call_tool(server, "set_acl_rule_status", {
+            toggled = unwrap_ok(call_confirmed(server, "set_acl_rule_status", {
                 "rule": "acl-002",
                 "status": False,
-                "dryRun": False,
-                "confirm": "set_acl_rule_status:acl-002",
             }))
             self.assertTrue(toggled["applied"])
             self.assertIs(toggled["after"]["status"], False)
@@ -587,11 +571,9 @@ class SnapshotAndDoctorTests(unittest.TestCase):
                 write_tools=("set_client_fixed_ip",),
             )
             server = Server(cfg)
-            res = unwrap_ok(call_tool(server, "set_client_fixed_ip", {
+            res = unwrap_ok(call_confirmed(server, "set_client_fixed_ip", {
                 "mac": "AA-BB-CC-11-11-01",
                 "ip": "192.168.20.56",
-                "dryRun": False,
-                "confirm": "set_client_fixed_ip:aa:bb:cc:11:11:01",
             }))
             self.assertTrue(res["applied"])
             self.assertEqual(res["after"]["ip"], "192.168.20.56")

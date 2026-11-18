@@ -8,8 +8,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..client import OmadaClient, OmadaError, SiteInfo
-from ._common import ACL_TYPE_LABELS, ACL_TYPE_MAP
-from ._write_common import CLIENT_VOLATILE_KEYS, _normalize_mac, _unwrap_rows
+from ._common import (
+    ACL_TYPE_LABELS,
+    ACL_TYPE_MAP,
+    IncompleteCollectionError,
+    as_int,
+    require_complete_collection,
+)
+from ._write_common import CLIENT_VOLATILE_KEYS, _normalize_mac
 from ._write_safety import _network_subnet_and_gw
 
 
@@ -25,14 +31,14 @@ def _omada_mac(value: str) -> str:
 
 
 def _fetch_devices(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/devices")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/devices")
     return rows
 
 
 def _fetch_insight_clients(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
     collected: list[dict[str, Any]] = []
     seen = set()
-    rows, _ = client.paginate(f"sites/{site.site_id}/insight/clients", max_pages=20)
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/insight/clients", max_pages=20)
     for row in rows:
         mac = _normalize_mac(row.get("mac", ""))
         if mac and mac in seen:
@@ -45,8 +51,8 @@ def _fetch_insight_clients(client: OmadaClient, site: SiteInfo) -> list[dict[str
 
 def _fetch_clients_filtered(client: OmadaClient, site: SiteInfo, *, active: bool | None) -> list[dict[str, Any]]:
     if active is None:
-        rows_active, _ = client.paginate(f"sites/{site.site_id}/clients?filters.active=true", max_pages=20)
-        rows_inactive, _ = client.paginate(f"sites/{site.site_id}/clients?filters.active=false", max_pages=20)
+        rows_active, _ = require_complete_collection(client, f"sites/{site.site_id}/clients?filters.active=true", max_pages=20)
+        rows_inactive, _ = require_complete_collection(client, f"sites/{site.site_id}/clients?filters.active=false", max_pages=20)
         by_mac: dict[str, dict[str, Any]] = {}
         for row in rows_inactive + rows_active:
             mac = _normalize_mac(row.get("mac", ""))
@@ -54,22 +60,22 @@ def _fetch_clients_filtered(client: OmadaClient, site: SiteInfo, *, active: bool
                 by_mac[mac] = row
         return list(by_mac.values())
     flag = "true" if active else "false"
-    rows, _ = client.paginate(f"sites/{site.site_id}/clients?filters.active={flag}", max_pages=20)
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/clients?filters.active={flag}", max_pages=20)
     return rows
 
 
 def _fetch_lan_collection(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/lan/networks")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/lan/networks")
     return rows
 
 
 def _fetch_lan_interfaces(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/lan/networks/interface")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/lan/networks/interface")
     return rows
 
 
 def _fetch_groups(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/profiles/groups")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/profiles/groups")
     return rows
 
 
@@ -94,7 +100,7 @@ def _fetch_typed_acls_with_meta(
     site: SiteInfo,
     acl_type: int,
 ) -> tuple[bool | None, list[dict[str, Any]]]:
-    rows, meta = client.paginate(f"sites/{site.site_id}/setting/firewall/acls?type={int(acl_type)}")
+    rows, meta = require_complete_collection(client, f"sites/{site.site_id}/setting/firewall/acls?type={int(acl_type)}")
     if isinstance(meta, Mapping):
         acl_disable = meta.get("aclDisable")
         return (bool(acl_disable) if acl_disable is not None else None), rows
@@ -183,37 +189,37 @@ def _fetch_wan_networks(client: OmadaClient, site: SiteInfo) -> dict[str, Any]:
 
 
 def _fetch_dhcp_reservations(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/service/dhcp")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/service/dhcp")
     return rows
 
 
 def _fetch_port_forwards(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/transmission/portForwardings")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/transmission/portForwardings")
     return rows
 
 
 def _fetch_static_routes(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/transmission/staticRoutings")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/transmission/staticRoutings")
     return rows
 
 
 def _fetch_mdns_rules(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/service/mdns")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/service/mdns")
     return rows
 
 
 def _fetch_mdns_profiles(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/profiles/mdns")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/profiles/mdns")
     return rows
 
 
 def _fetch_wlan_groups(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/wlans")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/wlans")
     return rows
 
 
 def _fetch_ssids(client: OmadaClient, site: SiteInfo, wlan_id: str) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/wlans/{wlan_id}/ssids")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/wlans/{wlan_id}/ssids")
     return rows
 
 
@@ -354,18 +360,33 @@ def _fetch_lan_pair(
 
 
 def _fetch_lan_profiles(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/lan/profiles")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/lan/profiles")
     return rows
 
 
+def _fetch_raw_switch_port(client: OmadaClient, site_id: str, dev_mac: str, port: int) -> dict[str, Any]:
+    endpoint = f"sites/{site_id}/switches/{dev_mac}/ports"
+    try:
+        detail = client.api_result(f"{endpoint}/{port}")
+        if isinstance(detail, Mapping) and as_int(detail.get("port"), 0) == port:
+            return dict(detail)
+    except OmadaError:
+        pass
+    rows, _ = require_complete_collection(client, endpoint)
+    found = next((row for row in rows if as_int(row.get("port"), 0) == port), None)
+    if found is None:
+        raise OmadaError(f"port {port} was not found on switch {dev_mac}")
+    return found
+
+
 def _fetch_policy_routes(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/transmission/policyRoutings")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/transmission/policyRoutings")
     return rows
 
 
 def _fetch_lan_dns_rules(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
     try:
-        rows, _ = client.paginate(f"sites/{site.site_id}/setting/lan/dns")
+        rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/lan/dns")
         return rows
     except OmadaError as exc:
         if exc.code in (-41011, -1600, -1007) or "HTTP 404" in str(exc):
@@ -383,18 +404,19 @@ def _fetch_typed_acls(client: OmadaClient, site: SiteInfo, acl_type: int) -> lis
 
 
 def _fetch_rate_limit_profiles(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
-    return _unwrap_rows(client.api_result(f"sites/{site.site_id}/setting/profiles/rateLimits"))
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/profiles/rateLimits")
+    return rows
 
 
 def _fetch_schedules(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
     """Fetch time-range / schedule profiles (``setting/profiles/timeranges``)."""
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/profiles/timeranges")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/profiles/timeranges")
     return rows
 
 
 def _fetch_poe_schedules(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
     """Fetch PoE schedule entries (``setting/service/poeSchedules``)."""
-    rows, _ = client.paginate(f"sites/{site.site_id}/setting/service/poeSchedules")
+    rows, _ = require_complete_collection(client, f"sites/{site.site_id}/setting/service/poeSchedules")
     return rows
 
 
@@ -409,15 +431,16 @@ def _fetch_switch_lags(
     """Fetch switch LAG/LACP groups via ``switches/{MAC}/lags`` with device detail fallback."""
     omada_mac = _omada_mac(switch_mac)
     try:
-        res = client.api_result(f"sites/{site.site_id}/switches/{omada_mac}/lags")
-        rows = _unwrap_rows(res)
-        if rows or res is not None:
-            return rows
+        return require_complete_collection(client, f"sites/{site.site_id}/switches/{omada_mac}/lags")[0]
     except OmadaError as exc:
-        if warnings is not None:
-            warnings.append(f"switches/{omada_mac}/lags unavailable ({exc.message})")
-    if sw_detail and isinstance(sw_detail.get("lags"), list):
-        return [dict(r) for r in sw_detail["lags"] if isinstance(r, Mapping)]
+        fallback = sw_detail.get("lags") if sw_detail else None
+        if not isinstance(exc, IncompleteCollectionError) and isinstance(fallback, list) and all(
+            isinstance(row, Mapping) for row in fallback
+        ):
+            return [dict(row) for row in fallback]
+        if warnings is None:
+            raise
+        warnings.append(f"switch LAG inventory unavailable ({exc.message})")
     return []
 
 

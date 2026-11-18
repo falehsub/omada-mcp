@@ -111,12 +111,12 @@ def _extract_dhcp_pools(dhcp: Any) -> list[dict[str, str]]:
     return pools
 
 
-def _merge_lan_networks(client: OmadaClient, site: SiteInfo) -> list[dict[str, Any]]:
+def _merge_lan_networks(client: OmadaClient, site: SiteInfo, *, strict: bool = False) -> list[dict[str, Any]]:
     collection = _fetch_lan_collection(client, site)
     try:
         interfaces = _fetch_lan_interfaces(client, site)
     except OmadaError as exc:
-        if exc.code == -1600:
+        if exc.code == -1600 and not strict:
             interfaces = []
         else:
             raise
@@ -245,6 +245,8 @@ def _list_lan_networks(client: OmadaClient) -> list[dict[str, Any]]:
 def _list_dhcp_reservations(
     client: OmadaClient,
     vlan: Any | None = None,
+    *,
+    strict: bool = False,
 ) -> list[dict[str, Any]]:
     site = _site(client)
     rows = _fetch_dhcp_reservations(client, site)
@@ -254,6 +256,8 @@ def _list_dhcp_reservations(
             if net.get("id") is not None:
                 net_by_id[str(net["id"])] = net
     except OmadaError:
+        if strict:
+            raise
         net_by_id = {}
     projected = [_project_dhcp_reservation(row, net_by_id) for row in rows]
     if vlan is not None and str(vlan).strip() != "":

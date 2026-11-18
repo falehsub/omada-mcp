@@ -403,7 +403,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
                 "set_client_fixed_ip": {"mac": "AA-BB-CC-11-11-01", "ip": "192.168.20.55", "vlan": 20},
                 "set_client_lock_to_ap": {"clientMac": "AA-BB-CC-11-11-01", "enabled": True, "apMacs": ["AA-BB-CC-00-00-03"]},
                 "set_client_rate_limit": {"clientMac": "AA-BB-CC-11-11-01", "enabled": True, "rateLimitProfileId": "rl-prof-1"},
-                "set_switch_port_mirror": {"mac": "AA-BB-CC-00-00-02", "mirroringPort": 2, "mirroredPorts": [1]},
+                "set_switch_port_mirror": {"mac": "AA-BB-CC-00-00-02", "mirroringPort": 4, "mirroredPorts": [1]},
                 "set_upnp": {"enable": True},
                 "set_vlan_dhcp_pools": {"vlan": 20, "pools": [{"start": "192.168.20.100", "end": "192.168.20.200"}]},
                 "set_vlan_isolation": {"vlan": 20, "isolation": False},
@@ -532,7 +532,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
             ctrl.lan_collection = [n for n in saved_nets if n.get("id") != "net-iot-20"]
             missing_target = call_tool(server, "rollback_from_snapshot", {"snapshotId": snap1, "force": True})
             self.assertTrue(missing_target["result"]["isError"])
-            self.assertIn("no longer exists", missing_target["result"]["content"][0]["text"].lower())
+            self.assertIn("no lan network matches", missing_target["result"]["content"][0]["text"].lower())
             ctrl.lan_collection = saved_nets
 
             # Partial-failure fault injection during rollback preserves snapshot and records audit error
@@ -556,6 +556,7 @@ class Phase3WriteMatrixRedactionAndRollbackTests(unittest.TestCase):
 
             # Clean retry succeeds and restores isolation=False
             ctrl.next_fault_hook = None
+            rb_dry = unwrap_ok(call_tool(server, "rollback_from_snapshot", {"snapshotId": snap1, "force": True}))
             rb_ok = unwrap_ok(call_tool(server, "rollback_from_snapshot", {
                 "snapshotId": snap1,
                 "force": True,

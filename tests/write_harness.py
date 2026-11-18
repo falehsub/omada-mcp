@@ -95,6 +95,16 @@ def call_tool(server: Server, name: str, arguments: dict | None = None, req_id: 
     })
 
 
+def call_confirmed(server: Server, name: str, arguments: dict) -> dict:
+    """Exercise the same preview-and-apply flow used by an MCP host."""
+    preview = call_tool(server, name, arguments)
+    result = preview.get("result", {})
+    if "error" in preview or result.get("isError"):
+        return preview
+    token = result["structuredContent"]["confirmToken"]
+    return call_tool(server, name, {**arguments, "dryRun": False, "confirm": token})
+
+
 def unwrap_ok(resp: dict) -> dict:
     assert "error" not in resp, f"unexpected RPC error: {resp.get('error')}"
     res = resp["result"]

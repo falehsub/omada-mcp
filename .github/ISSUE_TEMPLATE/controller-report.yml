@@ -1,5 +1,5 @@
 name: Controller Compatibility Report
-description: Submit an `omada-mcp --doctor --json` report to verify a new Omada controller model or firmware version.
+description: Submit a share-safe doctor report to verify a new Omada controller model or firmware version.
 title: "[Controller Report]: <model> (<firmware>)"
 labels: ["compatibility"]
 body:
@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thanks for helping grow the [`docs/compatibility.md`](https://github.com/falehsub/omada-mcp/blob/main/docs/compatibility.md) matrix!
-        `omada-mcp --doctor --json` redacts your password, session token, and local `.env` filesystem paths, while keeping the `controller` and `phases` metadata needed for triage.
+        Run `omada-mcp --doctor --json --share-safe` for a public report with firmware, controller family, and phase status.
 
   - type: dropdown
     id: controller_type
@@ -28,7 +28,7 @@ body:
     id: controller_version
     attributes:
       label: Firmware & controller version
-      description: Look for controllerVer in `--doctor --json` (or Controller Settings -> Maintenance).
+      description: Look for controllerVer in the share-safe report or Controller Settings → Maintenance.
       placeholder: "e.g. 5.14.32.2 (OC200 v1)"
     validations:
       required: true
@@ -36,8 +36,8 @@ body:
   - type: textarea
     id: doctor_json
     attributes:
-      label: "`omada-mcp --doctor --json` output"
-      description: Paste the full JSON output below. Double-check that you have not added any credentials.
+      label: "`omada-mcp --doctor --json --share-safe` output"
+      description: 'Paste the JSON with `"shareSafe": true`.'
       render: json
     validations:
       required: true
@@ -46,7 +46,7 @@ body:
     id: tool_checks
     attributes:
       label: Tool results & notes
-      description: Optional notes on `list_devices`, `list_clients`, `list_wlans`, `network_audit`, or any unexpected field shapes / error codes.
+      description: Optional summary of checks and controller error codes. Use anonymized examples for unexpected field shapes.
       placeholder: "All 10 tools worked / list_wlans returned ..."
     validations:
       required: false

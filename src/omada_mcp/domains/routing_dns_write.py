@@ -479,11 +479,7 @@ def upsert_policy_route(
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
         if not isinstance(after_now, Mapping):
             return False, f"policy route {rule_name!r} missing on read-back"
-        if str(after_now.get("name")) != rule_name:
-            return False, f"policy route name expected {rule_name!r}, got {after_now.get('name')!r}"
-        if bool(after_now.get("status")) != bool(status):
-            return False, f"policy route status expected {status!r}"
-        return True, None
+        return _match_fields(after_now, body)
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         live = _read_back()
@@ -669,11 +665,7 @@ def upsert_lan_dns_rule(
     def _verify(_before: Any, after_now: Any) -> tuple[bool, str | None]:
         if not isinstance(after_now, Mapping):
             return False, f"LAN DNS rule {rule_name!r} missing on read-back"
-        if str(after_now.get("name")) != rule_name or str(after_now.get("domain")) != dom:
-            return False, f"LAN DNS rule {rule_name!r} fields did not match intent on read-back"
-        if bool(after_now.get("enable")) != bool(enable):
-            return False, f"LAN DNS enable expected {enable!r}, got {after_now.get('enable')!r}"
-        return True, None
+        return _match_fields(after_now, body)
 
     def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
         live = _read_back()
