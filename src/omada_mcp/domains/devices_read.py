@@ -126,6 +126,63 @@ def _list_wlans(client: OmadaClient, *, strict: bool = False) -> list[dict[str, 
     return projected
 
 
+def _project_ssid_detail(
+    raw_ssid: dict[str, Any],
+    *,
+    wlan_id: str = "",
+    grp_name: str = "",
+) -> dict[str, Any]:
+    """Project one raw SSID object into the canonical secret-free detail shape."""
+    summary = project_wlan(raw_ssid, group_name=grp_name or None)
+    safe_full = project_controller_row("ssid", raw_ssid)
+    out = {**safe_full, **summary}
+    out["wlanId"] = wlan_id
+    out.setdefault("id", str(raw_ssid.get("id") or ""))
+    out.setdefault("name", str(raw_ssid.get("name") or raw_ssid.get("ssid") or ""))
+    pmf = as_int_or_none(out.get("pmfMode"))
+    if pmf is not None and pmf in PMF_MODE_LABELS:
+        out["pmfModeLabel"] = PMF_MODE_LABELS[pmf]
+    if "bandSteeringForMultiBand" in safe_full:
+        bs_obj = safe_full["bandSteeringForMultiBand"]
+        bs_mode = bs_obj.get("mode") if isinstance(bs_obj, dict) else None
+        bs_label = decode_band_steering_mode(bs_mode)
+        if bs_mode is not None:
+            out["bandSteeringMode"] = bs_mode
+        if bs_label is not None:
+            out["bandSteering"] = bs_label
+    return out
+
+
+def _list_ssids_detail(client: OmadaClient, *, strict: bool = False) -> list[dict[str, Any]]:
+    """Collect full non-secret SSID objects across all WLAN groups for snapshots and drift diffs."""
+    site = _site(client)
+    groups = _fetch_wlan_groups(client, site)
+    out: list[dict[str, Any]] = []
+    for row in groups:
+        if any(k in row for k in ("ssid", "band", "security", "securityKey", "pskSetting")):
+            out.append(
+                _project_ssid_detail(
+                    row,
+                    wlan_id=str(row.get("wlanId") or row.get("id") or ""),
+                    grp_name=str(row.get("wlanGroup") or ""),
+                )
+            )
+            continue
+        group_id = str(row.get("id") or "")
+        if not group_id:
+            continue
+        try:
+            s_rows = _fetch_ssids(client, site, group_id)
+        except OmadaError:
+            if strict:
+                raise
+            s_rows = []
+        grp_name = str(row.get("name") or "")
+        for s_row in s_rows:
+            out.append(_project_ssid_detail(s_row, wlan_id=group_id, grp_name=grp_name))
+    return out
+
+
 def _get_ssid(
     client: OmadaClient,
     ssid: str,
@@ -185,24 +242,11 @@ def _get_ssid(
         raise OmadaError(f"no SSID matches {ssid!r}", hint="run list_wlans to inspect configured SSIDs and WLAN groups")
 
     grp, raw_ssid = matches[0]
-    grp_name = str(grp.get("name") or "")
-    summary = project_wlan(raw_ssid, group_name=grp_name or None)
-    safe_full = project_controller_row("ssid", raw_ssid)
-    out = {**safe_full, **summary}
-    out["wlanId"] = str(grp.get("id") or "")
-    out.setdefault("id", str(raw_ssid.get("id") or ""))
-    out.setdefault("name", str(raw_ssid.get("name") or raw_ssid.get("ssid") or ""))
-    pmf = as_int_or_none(out.get("pmfMode"))
-    if pmf is not None and pmf in PMF_MODE_LABELS:
-        out["pmfModeLabel"] = PMF_MODE_LABELS[pmf]
-    if "bandSteeringForMultiBand" in safe_full:
-        bs_mode = safe_full["bandSteeringForMultiBand"].get("mode") if isinstance(safe_full["bandSteeringForMultiBand"], dict) else None
-        bs_label = decode_band_steering_mode(bs_mode)
-        if bs_mode is not None:
-            out["bandSteeringMode"] = bs_mode
-        if bs_label is not None:
-            out["bandSteering"] = bs_label
-    return out
+    return _project_ssid_detail(
+        raw_ssid,
+        wlan_id=str(grp.get("id") or ""),
+        grp_name=str(grp.get("name") or ""),
+    )
 
 
 def _get_switch_ports(

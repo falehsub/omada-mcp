@@ -285,10 +285,10 @@ READ_TOOLS: list[Tool] = [
                     "type": "array",
                     "items": {"type": "string", "enum": list(_SNAPSHOT_ALL_OBJECTS)},
                     "description": (
-                        "Optional subset of sections to fetch: networks, acls, groups, schedules, wlans, "
-                        "devices, clients, dhcpReservations, portForwards, staticRoutes, "
-                        "mdnsRules, services, rateLimitProfiles, poeSchedules, wirelessFeature, "
-                        "rfPlanning (defaults to networks, acls, groups, wlans, devices)"
+                        "Optional subset of sections: networks, acls, groups, schedules, wlans, ssids, "
+                        "devices, clients, dhcpReservations, portForwards, staticRoutes, mdnsRules, "
+                        "services, rateLimitProfiles, poeSchedules, wirelessFeature, rfPlanning "
+                        "(defaults to networks, acls, groups, wlans, devices)"
                     ),
                 },
             },
@@ -300,8 +300,8 @@ READ_TOOLS: list[Tool] = [
         name="diff_config_snapshots",
         title="Diff site configuration snapshots",
         description=(
-            "Compare observed configuration in two snapshots or against the live site. "
-            "Report additions, removals, and changes on comparable sections, plus sectionsSkipped."
+            "Compare two snapshots or a baseline against the live site (including UI edits on ssids/wirelessFeature). "
+            "Reports additions, removals, changes, materializedDefaults, and sectionsSkipped."
         ),
         input_schema={
             "type": "object",

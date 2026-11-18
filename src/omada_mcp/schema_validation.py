@@ -27,6 +27,15 @@ _ROOT_ENUM_ALIASES: dict[str, set[str]] = {
     "category": {"alert", "event", "audits"},
 }
 
+#: Legacy/alias root argument mappings applied before schema validation.
+#: Each entry maps ``tool_name -> {canonical_param: (legacy_alias, ...)}``.
+_ARGUMENT_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
+    "delete_ip_group": {"group": ("id", "groupId")},
+    "delete_port_group": {"group": ("id", "groupId")},
+    "delete_mac_group": {"group": ("id", "groupId")},
+    "replace_ip_group": {"group": ("id", "groupId")},
+}
+
 
 class SchemaValidationError(Exception):
     """Raised when tool arguments fail JSON Schema or write-confirmation checks."""
@@ -306,6 +315,26 @@ def _validate_node(
 
 def validate_tool_arguments(spec: Tool, arguments: dict[str, Any]) -> None:
     """Validate *arguments* recursively against *spec.input_schema*."""
+    alias_map = _ARGUMENT_ALIASES.get(spec.name)
+    if alias_map:
+        for canonical, aliases in alias_map.items():
+            for alias in aliases:
+                if alias not in arguments:
+                    continue
+                alias_val = arguments.pop(alias)
+                existing = arguments.get(canonical)
+                if (
+                    existing not in (None, "")
+                    and alias_val not in (None, "")
+                    and existing != alias_val
+                ):
+                    raise SchemaValidationError(
+                        f"{spec.name}: conflicting arguments {alias!r} and {canonical!r}",
+                        hint=f"pass only {canonical!r} (legacy alias {alias!r} maps to {canonical!r})",
+                    )
+                if existing in (None, "") and alias_val is not None:
+                    arguments[canonical] = alias_val
+
     schema = spec.input_schema or {}
     props = schema.get("properties") or {}
     if not spec.read_only and "dryRun" in props and "dryRun" not in arguments:

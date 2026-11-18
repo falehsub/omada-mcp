@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`get_ssid` read tool:** Fetch detailed non-secret settings for an SSID in a WLAN group, decoding `bandSteering` (`disable`/`prefer_5g`/`balanced`/`site`), `pmfModeLabel`, rate limits, schedules, MAC filters, and `hasPresharedKey` without ever exposing PSK material.
+- **`set_wifi_radio_features` write tool:** Configure site-wide Wi-Fi roaming (`802.11r`/`802.11k`, non-stick/AI/non-ping-pong roaming, force disassociation), band steering thresholds/multi-band mode, airtime fairness (`2g`/`5g`/`6g`), mesh failover policy, beacon control, multicast rate limits, advanced features, and LLDP via `setting/wireless/feature` with sibling preservation and read-back verification.
+- **`survey_wifi` impact-aware RF survey write tool:** Previews per-band connected client disconnect counts (`affectedClientsByBand`, `impactKnown=false` when Viewer telemetry omits radio/AP bindings) before triggering `POST cmd/eaps/{MAC}/tools/rfScan`, with optional bounded polling (`wait`, `timeoutSeconds`, `pollIntervalSeconds`).
+- **`ssids` config snapshot section & materialized-default drift detection:** `get_config_snapshot(objects=["ssids"])` captures full projected SSID configuration (rate limits, schedules, MAC filters, band steering, VLAN settings) plus `capturedAt` UTC timestamps; `diff_config_snapshots` tracks `ssids`, exposes `baselineCapturedAt`/`currentCapturedAt`, and highlights UI-materialized default keys (`materializedDefaults` / `materializedKeys`).
+
+### Changed
+
+- **Expanded `update_ssid` & `list_wlans`:** Added `bandSteering`, `loadBalance`, `wifiCalling`, `condBroadcast`, `macFilterEnable`, `rateLimitProfile` / bandwidth limits, `schedule`, and `mloEnable` support to `update_ssid`, surfaced these flags in `list_wlans`, and fixed verification to read back full SSID fields instead of only `wlanId`.
+- **Fixed `get_rf_scan` band parsing & polling:** Decodes controller `channel2g`/`5g`/`5g1`/`5g2`/`6g`, `status*`, and `time*` fields alongside generic keys, maps RF scan status codes (`0`–`3`), and supports bounded `wait`/`timeoutSeconds`/`pollIntervalSeconds` polling bypassing session read caches (`use_cache=False`).
+- **Backwards-compatible group parameter aliases:** `delete_ip_group`, `replace_ip_group`, `delete_port_group`, and `delete_mac_group` now accept legacy `id` / `groupId` aliases alongside canonical `group`, and `tests/test_schema_compat.py` guards against future accidental tool/parameter removals or renames.
+
 ## [2.4.1] - 2026-11-18
 
 Write-safety hardening, diagnostic evidence accuracy, Viewer contract fixes, and live Docker compatibility verification across Omada `5.15.24.19` and `6.2.14.11` (**370 passing tests**, **54 read-only + 78 opt-in write = 132 tools**, zero runtime dependencies).
