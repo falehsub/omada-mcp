@@ -238,7 +238,7 @@ def init_lab(
                 },
                 "deviceAccountSetting": {
                     "username": "labdev",
-                    "password": _default_lab_password("LabDev"),
+                    "password": _default_lab_password("Dvc"),
                 },
             },
         ]
@@ -357,9 +357,15 @@ def init_lab(
 
 
 def _default_lab_password(prefix: str) -> str:
-    # Omada v5.x wizardConfig rejects passwords longer than 16 characters; keep
-    # generated passwords at 15 chars with uppercase, lowercase, digits, and '!'.
-    return f"{prefix}!{secrets.randbelow(9000) + 1000}{secrets.token_hex(2)}"
+    # Omada v5.x wizardConfig rejects passwords >16 chars, repeated/sequential runs,
+    # or username substrings; alternate non-adjacent digits and lowercase letters.
+    digits = "24683579"
+    lowers = "kmnpqrstwxyz"
+    while True:
+        tail = "".join(secrets.choice(digits if i % 2 == 0 else lowers) for i in range(8))
+        cand = f"{prefix}!{tail}"
+        if 10 <= len(cand) <= 16 and not any(cand[i] == cand[i + 1] for i in range(len(cand) - 1)):
+            return cand
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -368,8 +374,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--site-name", default="DockerLab")
     parser.add_argument("--admin-user", default="omada_lab_admin")
     parser.add_argument("--viewer-user", default="omada_lab_viewer")
-    parser.add_argument("--admin-password", default=os.environ.get("LAB_ADMIN_PASSWORD") or _default_lab_password("LabAdm"))
-    parser.add_argument("--viewer-password", default=os.environ.get("LAB_VIEWER_PASSWORD") or _default_lab_password("LabVwr"))
+    parser.add_argument("--admin-password", default=os.environ.get("LAB_ADMIN_PASSWORD") or _default_lab_password("Adm"))
+    parser.add_argument("--viewer-password", default=os.environ.get("LAB_VIEWER_PASSWORD") or _default_lab_password("Vwr"))
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--timeout", type=float, default=240.0)
     args = parser.parse_args(argv)
