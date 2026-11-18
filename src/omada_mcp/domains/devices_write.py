@@ -16,7 +16,13 @@ from ._common import (
     as_mapping,
     resolve_raw_device,
 )
-from ._device_helpers import validate_ap_radio_change
+from ._device_helpers import (
+    _RADIO_ID_TO_BAND,
+    collect_rf_scan_data,
+    count_ap_clients_by_band,
+    parse_rf_scan_payload,
+    validate_ap_radio_change,
+)
 from ._write_common import (
     _BAND_TO_RADIO_ID,
     _DEV_ENDPOINT_PREFIX,
@@ -31,6 +37,7 @@ from ._write_common import (
     _site,
 )
 from ._write_fetchers import _fetch_devices, _omada_mac, _require_gateway
+from .clients_read import _fetch_client_rows
 
 
 def update_device(
@@ -422,19 +429,110 @@ def update_ap_radio(
     )
 
 
-def start_rf_scan(
+def _compute_ap_survey_impact(
     client: OmadaClient,
-    deviceMac: str,
-    bands: list[str] | None = None,
-    dryRun: bool = True,
-    confirm: str | None = None,
+    site: Any,
+    norm_mac: str,
+    ap_name: str,
+    target_bands: list[str],
+    ap_map: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Estimate per-radio wireless client disconnect impact before triggering an RF scan."""
+    warnings: list[str] = []
+    mesh_risk = bool(ap_map.get("wirelessLinked"))
+    if mesh_risk:
+        warnings.append("WARNING: AP has a wireless mesh uplink; RF scanning can drop downstream mesh hops.")
+
+    client_rows: list[dict[str, Any]] | None = None
+    try:
+        rows = _fetch_client_rows(client, site)
+        wireless_rows = [r for r in rows if r.get("wireless")]
+        if not wireless_rows or any(
+            r.get("radioId") is not None and (r.get("apMac") or r.get("apName"))
+            for r in wireless_rows
+        ):
+            client_rows = rows
+    except OmadaError:
+        client_rows = None
+
+    if client_rows is None:
+        warnings.append(
+            "WARNING: Client band/AP telemetry is unavailable with this account; per-radio disconnect impact is unknown."
+        )
+        return {
+            "impactKnown": False,
+            "targetBands": target_bands,
+            "affectedClientsByBand": {},
+            "totalAffectedClients": None,
+            "affectedClients": [],
+            "meshDownlinkRisk": mesh_risk,
+        }, warnings
+
+    all_counts = count_ap_clients_by_band(norm_mac, ap_name, client_rows)
+    affected_by_band = {band: all_counts.get(band, 0) for band in target_bands}
+    affected_clients: list[dict[str, Any]] = []
+    target_set = set(target_bands)
+    ap_name_lower = ap_name.strip().lower()
+    for row in client_rows:
+        if not row.get("wireless"):
+            continue
+        row_mac = _normalize_mac(str(row.get("apMac") or ""))
+        row_ap_name = str(row.get("apName") or "").strip().lower()
+        if row_mac:
+            if row_mac != norm_mac:
+                continue
+        elif ap_name_lower and row_ap_name:
+            if row_ap_name != ap_name_lower:
+                continue
+        else:
+            continue
+        band = _RADIO_ID_TO_BAND.get(as_int(row.get("radioId"), -1))
+        if band and band in target_set:
+            affected_clients.append({
+                "mac": _normalize_mac(str(row.get("mac") or "")),
+                "name": str(row.get("name") or row.get("hostName") or ""),
+                "ip": str(row.get("ip") or ""),
+                "ssid": str(row.get("ssid") or ""),
+                "band": band,
+            })
+
+    total_affected = sum(affected_by_band.values())
+    for band in target_bands:
+        cnt = affected_by_band[band]
+        rid = _BAND_TO_RADIO_ID.get(band)
+        if cnt > 0:
+            warnings.append(
+                f"IMPACT: {cnt} client(s) on {band} (radio {rid}) would disconnect for ~15-60 s during scan."
+            )
+    if total_affected == 0:
+        warnings.append(
+            f"IMPACT: 0 connected clients currently observed on target band(s) ({', '.join(target_bands)})."
+        )
+    else:
+        warnings.insert(
+            0,
+            f"WARNING: RF scan will temporarily disconnect {total_affected} client(s) across {', '.join(target_bands)} for ~15-60 seconds.",
+        )
+
+    return {
+        "impactKnown": True,
+        "targetBands": target_bands,
+        "affectedClientsByBand": affected_by_band,
+        "totalAffectedClients": total_affected,
+        "affectedClients": affected_clients,
+        "meshDownlinkRisk": mesh_risk,
+    }, warnings
+
+
+def _prepare_rf_scan_plan(
+    client: OmadaClient,
+    site: Any,
+    device_mac: str,
+    bands: list[str] | None,
 ) -> dict[str, Any]:
-    """Start an AP RF interference scan (``POST cmd/eaps/{MAC}/tools/rfScan``)."""
-    site = _site(client)
-    ap_stub = resolve_raw_device(client, site, deviceMac, expected_type="ap")
-    norm_mac = _normalize_mac(str(ap_stub.get("mac") or deviceMac))
+    ap_stub = resolve_raw_device(client, site, device_mac, expected_type="ap")
+    norm_mac = _normalize_mac(str(ap_stub.get("mac") or device_mac))
     dev_mac = _omada_mac(norm_mac)
-    _require_confirm("start_rf_scan", norm_mac, dryRun, confirm)
 
     ap_detail = client.api_result(f"sites/{site.site_id}/eaps/{dev_mac}")
     ap_map = dict(ap_detail) if isinstance(ap_detail, Mapping) else dict(ap_stub)
@@ -444,6 +542,7 @@ def start_rf_scan(
         )
 
     radio_ids: list[int] | None = None
+    target_bands: list[str] = []
     if bands is not None:
         radio_ids = []
         for b in bands:
@@ -451,21 +550,29 @@ def start_rf_scan(
             if bn not in _BAND_TO_RADIO_ID:
                 raise OmadaError(f"invalid band {b!r}", hint="valid bands: 2g, 5g, 5g2, 6g")
             rid = _BAND_TO_RADIO_ID[bn]
+            norm_b = _RADIO_ID_TO_BAND.get(rid, bn)
             if rid not in radio_ids:
                 radio_ids.append(rid)
-
-    warnings = [
-        "WARNING: Starting an RF scan temporarily disconnects Wi-Fi clients on scanned radio(s) for ~15-60 seconds."
-    ]
-    if bool(ap_map.get("wirelessLinked")):
-        warnings.append("WARNING: AP has a wireless mesh uplink; RF scanning can drop downstream mesh hops.")
+            if norm_b not in target_bands:
+                target_bands.append(norm_b)
+    else:
+        for b, keys in (
+            ("2g", ("radioSetting2g", "wp2g")),
+            ("5g", ("radioSetting5g", "radioSetting5g1", "wp5g", "wp5g1")),
+            ("5g2", ("radioSetting5g2", "wp5g2")),
+            ("6g", ("radioSetting6g", "wp6g")),
+        ):
+            if any(k in ap_map for k in keys):
+                target_bands.append(b)
+        if not target_bands:
+            target_bands = ["2g", "5g"]
 
     dev_cap = as_mapping(ap_map.get("devCap"))
     payload: dict[str, Any] = {}
     if radio_ids is not None and dev_cap.get("supportSingleBandRFScan", True):
         payload["radioIdList"] = radio_ids
 
-    before_rf = {}
+    before_rf: dict[str, Any] = {}
     try:
         rf_raw = client.api_result(f"sites/{site.site_id}/eaps/{dev_mac}/tools/rfScan")
         if isinstance(rf_raw, Mapping):
@@ -473,27 +580,70 @@ def start_rf_scan(
     except OmadaError:
         pass
 
-    before = {"mac": norm_mac, "name": ap_map.get("name"), "status": before_rf.get("status"), "time": before_rf.get("time")}
+    ap_name = str(ap_map.get("name") or norm_mac)
+    impact, impact_warnings = _compute_ap_survey_impact(
+        client, site, norm_mac, ap_name, target_bands, ap_map,
+    )
+    parsed_before = parse_rf_scan_payload(before_rf)
+    baseline_times = {**parsed_before["bandTimes"], "_top": parsed_before["scanTime"]}
+    return {
+        "apStub": ap_stub,
+        "apMap": ap_map,
+        "normMac": norm_mac,
+        "devMac": dev_mac,
+        "apName": ap_name,
+        "payload": payload,
+        "radioIds": radio_ids,
+        "targetBands": target_bands,
+        "beforeRf": before_rf,
+        "baselineTimes": baseline_times,
+        "impact": impact,
+        "warnings": impact_warnings,
+    }
+
+
+def start_rf_scan(
+    client: OmadaClient,
+    deviceMac: str,
+    bands: list[str] | None = None,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Start an AP RF interference scan (``POST cmd/eaps/{MAC}/tools/rfScan``)."""
+    site = _site(client)
+    plan = _prepare_rf_scan_plan(client, site, deviceMac, bands)
+    norm_mac = plan["normMac"]
+    dev_mac = plan["devMac"]
+    _require_confirm("start_rf_scan", norm_mac, dryRun, confirm)
+
+    before_rf = plan["beforeRf"]
+    before = {
+        "mac": norm_mac,
+        "name": plan["apName"],
+        "status": before_rf.get("status"),
+        "time": before_rf.get("time"),
+        "impact": plan["impact"],
+    }
     diff = {"rfScanTriggered": {"before": False, "after": True}}
     if dryRun:
         return _dry_run_result(
             tool_name="start_rf_scan",
             target_id=norm_mac,
             before=before,
-            after={**before, "rfScanTriggered": True, "radioIdList": payload.get("radioIdList")},
+            after={**before, "rfScanTriggered": True, "radioIdList": plan["payload"].get("radioIdList")},
             diff=diff,
-            warnings=warnings,
+            warnings=plan["warnings"],
             rollback=None,
         )
 
     write_res = client.write(
         f"sites/{site.site_id}/cmd/eaps/{dev_mac}/tools/rfScan",
         method="POST",
-        data=payload,
+        data=plan["payload"],
         tool_name="start_rf_scan",
         target=norm_mac,
         before=before,
-        snapshot_payload={"ap": ap_map, "rfScan": before_rf},
+        snapshot_payload={"ap": plan["apMap"], "rfScan": before_rf},
         fields_changed=["rfScan"],
     )
     return _committed_result(
@@ -503,7 +653,88 @@ def start_rf_scan(
         after={**before, "rfScanTriggered": True},
         diff=diff,
         snapshot=write_res["snapshot"],
-        warnings=warnings,
+        warnings=plan["warnings"],
+        rollback=None,
+    )
+
+
+def survey_wifi(
+    client: OmadaClient,
+    deviceMac: str,
+    bands: list[str] | None = None,
+    wait: bool = True,
+    timeoutSeconds: int = 90,
+    pollIntervalSeconds: int = 5,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Impact-aware AP RF survey: previews per-radio client disconnects, triggers scan, and optionally polls results."""
+    site = _site(client)
+    plan = _prepare_rf_scan_plan(client, site, deviceMac, bands)
+    norm_mac = plan["normMac"]
+    dev_mac = plan["devMac"]
+    _require_confirm("survey_wifi", norm_mac, dryRun, confirm)
+
+    before_rf = plan["beforeRf"]
+    before = {
+        "mac": norm_mac,
+        "name": plan["apName"],
+        "status": before_rf.get("status"),
+        "time": before_rf.get("time"),
+        "impact": plan["impact"],
+    }
+    diff = {"rfSurveyTriggered": {"before": False, "after": True}}
+    if dryRun:
+        return _dry_run_result(
+            tool_name="survey_wifi",
+            target_id=norm_mac,
+            before=before,
+            after={
+                **before,
+                "rfSurveyTriggered": True,
+                "radioIdList": plan["payload"].get("radioIdList"),
+                "wait": bool(wait),
+            },
+            diff=diff,
+            warnings=plan["warnings"],
+            rollback=None,
+        )
+
+    write_res = client.write(
+        f"sites/{site.site_id}/cmd/eaps/{dev_mac}/tools/rfScan",
+        method="POST",
+        data=plan["payload"],
+        tool_name="survey_wifi",
+        target=norm_mac,
+        before=before,
+        snapshot_payload={"ap": plan["apMap"], "rfScan": before_rf},
+        fields_changed=["rfScan"],
+    )
+    survey = collect_rf_scan_data(
+        client,
+        site,
+        plan["apStub"],
+        wait=bool(wait),
+        timeout_seconds=as_int(timeoutSeconds, 90),
+        poll_interval_seconds=as_int(pollIntervalSeconds, 5),
+        target_bands=plan["targetBands"],
+        baseline_times=plan["baselineTimes"],
+    )
+    warnings = [*plan["warnings"], *survey.get("warnings", [])]
+    return _committed_result(
+        tool_name="survey_wifi",
+        target_id=norm_mac,
+        before=write_res["before"],
+        after={
+            "mac": norm_mac,
+            "name": plan["apName"],
+            "impact": plan["impact"],
+            "rfSurveyTriggered": True,
+            "rfScan": survey,
+        },
+        diff=diff,
+        snapshot=write_res["snapshot"],
+        warnings=list(dict.fromkeys(warnings)),
         rollback=None,
     )
 

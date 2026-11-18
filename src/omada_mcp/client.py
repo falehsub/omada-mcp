@@ -626,9 +626,10 @@ class OmadaClient:
         return payload
 
     def api_result(self, endpoint: str, method: str = "GET",
-                   data: dict[str, Any] | None = None) -> Any:
+                   data: dict[str, Any] | None = None,
+                   *, use_cache: bool = True) -> Any:
         """Like :meth:`api` but raises :class:`OmadaError` on a non-zero ``errorCode``."""
-        payload = self.api(endpoint, method, data)
+        payload = self.api(endpoint, method, data, use_cache=use_cache)
         code = payload.get("errorCode")
         if code not in (0, None):
             raise OmadaError(

@@ -275,7 +275,7 @@ uvx --from git+https://github.com/falehsub/omada-mcp omada-mcp --doctor
 ## Tools
 
 Fifty-five read-only tools are always registered;
-79 optional write tools stay hidden and disabled until both `OMADA_READ_ONLY=false`
+80 optional write tools stay hidden and disabled until both `OMADA_READ_ONLY=false`
 and `OMADA_WRITE_TOOLS` allowlist them explicitly. All site-scoped tools also accept
 an optional per-call `site` name or ID (strictly pinned when `OMADA_SITE_NAME`/
 `OMADA_SITE_ID` is set unless `OMADA_ALLOW_CROSS_SITE=true`). `list_clients` windowing
@@ -283,7 +283,7 @@ is bounded by `limit` (default 500, max 5000) and de-duplicated by MAC.
 
 ### Read-only tools (always available)
 
-Full generated parameter & safety reference across all 134 tools: [`docs/tools-reference.md`](docs/tools-reference.md).
+Full generated parameter & safety reference across all 135 tools: [`docs/tools-reference.md`](docs/tools-reference.md).
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -324,7 +324,7 @@ Full generated parameter & safety reference across all 134 tools: [`docs/tools-r
 | `get_wifi_radio_features` | — | Site Wi-Fi radio & roaming features (`802.11r`/`802.11k`, band steering, airtime fairness, mesh policy, beacon & multicast rate limits) |
 | `get_mesh_status` | `mac?` | Site mesh policy plus per-AP wireless mesh uplink/downlink tree and candidate parents (`candiParents`) |
 | `get_wlan_optimization_status` | — | AI RF Planning config, schedule, latest optimization scan state, and experience index history |
-| `get_rf_scan` | `mac` | Latest RF scan status and per-band interference summary for an AP |
+| `get_rf_scan` | `mac`, `wait?`, `timeoutSeconds?`, `pollIntervalSeconds?` | Latest RF scan status, decoded per-band channel survey (`channel2g`/`5g`/`5g2`/`6g`), and optional bounded polling |
 | `get_wan_status` | `maskWanIp?`, `includeSpeedtest?` | Live WAN link/internet state, failover/load-balance mode, gateway/DNS, latency/loss, and latest speedtest |
 | `get_wan_ip_details` | `maskWanIp?` | Detailed WAN IPv4/IPv6 configs, DNS resolvers, WAN port config, and redacted DDNS bindings |
 | `get_ipv6_status` | `maskWanIp?` | Site-wide WAN and LAN/VLAN IPv6 posture summary |
@@ -351,7 +351,7 @@ Every write tool defaults to `dryRun=true`. Pass its fresh `confirmToken` as `co
 |---|---|---|
 | Snapshot rollback | `rollback_from_snapshot` | Loads snapshot strictly inside `OMADA_SNAPSHOT_DIR`, previews drift on `dryRun=true`, and restores pre-mutation config on `dryRun=false` |
 | Switch ports & L2 features | `update_switch_port`, `cycle_poe_port`, `start_cable_test`, `upsert_port_profile`, `delete_port_profile`, `upsert_switch_lag`, `delete_switch_lag`, `update_switch_global_features`, `set_switch_port_mirror`, `upsert_poe_schedule`, `bind_poe_schedule`, `delete_poe_schedule` | Port enable/PoE mode/profile updates, static/LACP LAG CRUD, STP/RSTP/MSTP & loopback/jumbo L2 config, port mirroring, PoE power-saving schedules & port bindings, custom port profile CRUD, PoE power cycling, and switch TDR cable diagnostics (`start_cable_test`); refuses built-in profile deletion or stranding uplink, controller-hosting, or LAG member ports unless `allowUplinkMutation=true` |
-| AP radios, RF scan & WLAN groups | `update_ap_radio`, `start_rf_scan`, `assign_ap_wlan_group`, `set_ap_ssid_overrides`, `set_wifi_radio_features`, `run_wlan_optimization`, `upsert_rate_limit_profile`, `delete_rate_limit_profile` | Preserves sibling band configs during `config/radios` PUT, pre-validates channel & width against `availableChannels`, sets redacted per-AP SSID overrides, updates site Wi-Fi roaming/band-steering/ATF/mesh features, configures/triggers/cancels AI WLAN RF optimization, and manages site rate-limit profiles (`Default` protected & in-use checked) |
+| AP radios, RF scan & WLAN groups | `update_ap_radio`, `start_rf_scan`, `survey_wifi`, `assign_ap_wlan_group`, `set_ap_ssid_overrides`, `set_wifi_radio_features`, `run_wlan_optimization`, `upsert_rate_limit_profile`, `delete_rate_limit_profile` | Preserves sibling band configs during `config/radios` PUT, pre-validates channel & width against `availableChannels`, surfaces per-band client disconnect impact before RF scans (`survey_wifi` can poll to completion), sets redacted per-AP SSID overrides, updates site Wi-Fi roaming/band-steering/ATF/mesh features, configures/triggers/cancels AI WLAN RF optimization, and manages site rate-limit profiles (`Default` protected & in-use checked) |
 | Live client controls & fixed IP | `set_client_fixed_ip`, `release_client_fixed_ip`, `set_client_blocked`, `reconnect_client`, `update_client`, `set_client_lock_to_ap`, `set_client_rate_limit` | Full-object stripped client PATCH (`netId` preserved, 20 volatile keys stripped), Lock-to-AP (`clientLockToApSetting`), and rate limits |
 | Offline DHCP reservations | `upsert_dhcp_reservation`, `delete_dhcp_reservation` | Create/update/delete reservations in `setting/service/dhcp` with subnet & IP-overlap validation |
 | LAN & VLAN management | `create_lan_network`, `update_lan_network`, `delete_lan_network`, `set_vlan_dhcp_pools`, `set_vlan_isolation` | Two-endpoint LAN RMW, normalizes `lanNetworkIpv6Config` + `dhcpGuard`/`dhcpv6Guard`, uses `priDns`/`sndDns`, checks `ipRangePool`, refuses management/primary VLAN deletion |

@@ -456,8 +456,8 @@ class PhaseCWriteCrudAndRollbackTests(unittest.TestCase):
 class PhaseCRegistryCountSanityTests(unittest.TestCase):
     def test_exact_tool_inventory_counts(self):
         self.assertEqual(len(_READ_ONLY_TOOL_NAMES), 55)
-        self.assertEqual(len(WRITE_TOOL_NAMES), 79)
-        self.assertEqual(len(_READ_ONLY_TOOL_NAMES | set(WRITE_TOOL_NAMES)), 134)
+        self.assertEqual(len(WRITE_TOOL_NAMES), 80)
+        self.assertEqual(len(_READ_ONLY_TOOL_NAMES | set(WRITE_TOOL_NAMES)), 135)
 
 
 if __name__ == "__main__":

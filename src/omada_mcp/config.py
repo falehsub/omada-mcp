@@ -96,6 +96,7 @@ WRITE_TOOL_NAMES: tuple[str, ...] = (
     "delete_port_profile",
     "update_ap_radio",
     "start_rf_scan",
+    "survey_wifi",
     "assign_ap_wlan_group",
     "upsert_policy_route",
     "delete_policy_route",

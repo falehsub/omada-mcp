@@ -572,6 +572,165 @@ def _channel_info_by_band(channel_info_raw: Any) -> dict[str, list[dict[str, Any
 
 
 _RADIO_ID_TO_BAND: dict[int, str] = {0: "2g", 1: "5g", 2: "5g2", 3: "6g"}
+RF_SCAN_STATUS_LABELS: dict[int, str] = {
+    0: "idle",
+    1: "completed",
+    2: "scanning",
+    3: "failed",
+}
+_RF_BAND_KEYS: tuple[tuple[str, str], ...] = (
+    ("2g", "2g"),
+    ("5g", "5g"),
+    ("5g1", "5g"),
+    ("5g2", "5g2"),
+    ("6g", "6g"),
+)
+
+
+def decode_rf_scan_status(code: Any) -> str | None:
+    """Decode numeric Omada RF scan status code to a readable label."""
+    if code is None or isinstance(code, bool):
+        return None
+    val = as_int(code, -999)
+    if val == -999:
+        return str(code)
+    return RF_SCAN_STATUS_LABELS.get(val, f"unknown ({val})")
+
+
+def parse_rf_scan_payload(rf: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Normalize per-band and generic Omada ``tools/rfScan`` response keys."""
+    raw = rf or {}
+    channels: list[dict[str, Any]] = []
+    channels_by_band: dict[str, list[dict[str, Any]]] = {}
+
+    for suffix, norm_band in _RF_BAND_KEYS:
+        rows = raw.get(f"channel{suffix}")
+        if isinstance(rows, list):
+            bucket = channels_by_band.setdefault(norm_band, [])
+            for item in rows:
+                if not isinstance(item, Mapping):
+                    continue
+                entry = deep_redact(dict(item))
+                entry.setdefault("band", norm_band)
+                bucket.append(entry)
+                channels.append(entry)
+
+    if not channels:
+        for key in ("channels", "channelList", "data", "scanResult", "list"):
+            rows = raw.get(key)
+            if isinstance(rows, list):
+                for item in rows:
+                    if not isinstance(item, Mapping):
+                        continue
+                    entry = deep_redact(dict(item))
+                    channels.append(entry)
+                    band_tag = str(entry.get("band") or "").strip().lower()
+                    if band_tag:
+                        channels_by_band.setdefault(band_tag, []).append(entry)
+                break
+
+    band_statuses: dict[str, Any] = {}
+    band_status_labels: dict[str, str] = {}
+    band_times: dict[str, Any] = {}
+    for suffix, norm_band in _RF_BAND_KEYS:
+        sk = f"status{suffix}"
+        if sk in raw and norm_band not in band_statuses:
+            sval = raw.get(sk)
+            band_statuses[norm_band] = sval
+            slabel = decode_rf_scan_status(sval)
+            if slabel is not None:
+                band_status_labels[norm_band] = slabel
+        tk = f"time{suffix}"
+        if tk in raw and raw.get(tk) is not None and norm_band not in band_times:
+            band_times[norm_band] = raw.get(tk)
+
+    top_status = raw.get("status")
+    top_time = raw.get("time")
+    if top_time is None and band_times:
+        numeric_times = [t for t in band_times.values() if isinstance(t, (int, float)) and not isinstance(t, bool)]
+        if numeric_times:
+            top_time = max(numeric_times)
+
+    scanning = (as_int(top_status, -1) == 2) or any(as_int(v, -1) == 2 for v in band_statuses.values())
+    status_label = decode_rf_scan_status(top_status)
+    if status_label is None and band_statuses:
+        codes = {as_int(v, -1) for v in band_statuses.values()}
+        if 2 in codes:
+            status_label = "scanning"
+        elif 3 in codes:
+            status_label = "failed"
+        elif 1 in codes:
+            status_label = "completed"
+        elif 0 in codes:
+            status_label = "idle"
+    return {
+        "scanTime": top_time,
+        "status": top_status,
+        "statusLabel": status_label,
+        "bandStatuses": band_statuses,
+        "bandStatusLabels": band_status_labels,
+        "bandTimes": band_times,
+        "channels": channels,
+        "channelsByBand": channels_by_band,
+        "scanning": scanning,
+    }
+
+
+def _rf_scan_is_terminal(
+    parsed: Mapping[str, Any],
+    *,
+    target_bands: Sequence[str] | None,
+    baseline_times: Mapping[str, Any] | None,
+) -> bool:
+    band_statuses = parsed.get("bandStatuses") or {}
+    if target_bands:
+        relevant = [band_statuses[b] for b in target_bands if b in band_statuses]
+        if relevant:
+            if any(as_int(v, -1) == 2 for v in relevant):
+                return False
+            if baseline_times:
+                band_times = parsed.get("bandTimes") or {}
+                top_time = parsed.get("scanTime")
+                if any(
+                    band_times.get(b) != baseline_times.get(b)
+                    for b in target_bands
+                    if b in band_times or b in baseline_times
+                ) or (top_time is not None and top_time != baseline_times.get("_top")):
+                    return True
+                return not any(as_int(v, -1) in (0, 2) for v in relevant)
+            return True
+    return not bool(parsed.get("scanning"))
+
+
+def poll_rf_scan_payload(
+    client: OmadaClient,
+    site: SiteInfo,
+    mac_wire: str,
+    *,
+    timeout_seconds: int = 90,
+    poll_interval_seconds: int = 5,
+    target_bands: Sequence[str] | None = None,
+    baseline_times: Mapping[str, Any] | None = None,
+    initial_raw: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """Poll ``eaps/{MAC}/tools/rfScan`` until terminal status or timeout."""
+    timeout = max(1, min(int(timeout_seconds), 180))
+    interval = max(1, min(int(poll_interval_seconds), 30))
+    deadline = client._clock() + timeout
+    latest_raw = dict(initial_raw) if isinstance(initial_raw, Mapping) else {}
+    endpoint = f"sites/{site.site_id}/eaps/{mac_wire}/tools/rfScan"
+
+    while True:
+        parsed = parse_rf_scan_payload(latest_raw)
+        if _rf_scan_is_terminal(parsed, target_bands=target_bands, baseline_times=baseline_times):
+            return latest_raw, False
+        now = client._clock()
+        remaining = deadline - now
+        if remaining <= 0:
+            return latest_raw, True
+        client._sleep(min(float(interval), remaining))
+        fetched = client.api_result(endpoint, use_cache=False)
+        latest_raw = dict(fetched) if isinstance(fetched, Mapping) else {}
 
 
 def count_ap_clients_by_band(
@@ -736,31 +895,49 @@ def collect_rf_scan_data(
     client: OmadaClient,
     site: SiteInfo,
     ap_dev: Mapping[str, Any],
+    *,
+    wait: bool = False,
+    timeout_seconds: int = 90,
+    poll_interval_seconds: int = 5,
+    target_bands: Sequence[str] | None = None,
+    baseline_times: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect latest RF scan status/results paired with current AP interference telemetry."""
     radio_data = collect_ap_radios_data(
         client, site, ap_dev, include_rf_scan=True, include_available_channels=True,
     )
     rf = radio_data.get("rfScan") or {}
-    channels: list[dict[str, Any]] = []
-    for key in ("channels", "channelList", "data", "scanResult", "list"):
-        rows = rf.get(key)
-        if isinstance(rows, list):
-            channels = [deep_redact(dict(r)) for r in rows if isinstance(r, Mapping)]
-            break
-    band_statuses = {
-        k: rf.get(f"status{k}")
-        for k in ("2g", "5g", "5g2", "6g")
-        if f"status{k}" in rf
-    }
+    timed_out = False
+    warnings = list(radio_data["warnings"])
+    if wait:
+        mac_wire = omada_mac(radio_data["mac"])
+        rf_polled, timed_out = poll_rf_scan_payload(
+            client,
+            site,
+            mac_wire,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            target_bands=target_bands,
+            baseline_times=baseline_times,
+            initial_raw=rf,
+        )
+        rf = rf_polled
+        if timed_out:
+            warnings.append(f"RF scan remained in progress after {max(1, min(int(timeout_seconds), 180))}s timeout.")
+
+    parsed = parse_rf_scan_payload(rf)
     return {
         "mac": radio_data["mac"],
         "name": radio_data["name"],
         "model": radio_data["model"],
         "supportRfScan": radio_data["supportRfScan"],
-        "scanTime": rf.get("time"),
-        "status": rf.get("status"),
-        "bandStatuses": band_statuses,
+        "scanTime": parsed["scanTime"],
+        "status": parsed["status"],
+        "statusLabel": parsed["statusLabel"],
+        "bandStatuses": parsed["bandStatuses"],
+        "bandStatusLabels": parsed["bandStatusLabels"],
+        "bandTimes": parsed["bandTimes"],
+        "timedOut": timed_out,
         "radioUtilization": [
             {
                 "band": r["band"],
@@ -773,8 +950,9 @@ def collect_rf_scan_data(
             }
             for r in radio_data["radios"]
         ],
-        "channels": channels,
-        "warnings": radio_data["warnings"],
+        "channels": parsed["channels"],
+        "channelsByBand": parsed["channelsByBand"],
+        "warnings": warnings,
     }
 
 

@@ -105,7 +105,7 @@ from .domains.clients_write import (
     set_client_rate_limit,
     update_client,
 )
-from .domains.devices_write import reboot_device, start_rf_scan, update_ap_radio, update_device
+from .domains.devices_write import reboot_device, start_rf_scan, survey_wifi, update_ap_radio, update_device
 from .domains.networks_write import (
     create_lan_network,
     delete_lan_network,
@@ -249,6 +249,7 @@ __all__ = [
     "set_vpn_tunnel_status",
     "set_wifi_radio_features",
     "start_rf_scan",
+    "survey_wifi",
     "update_ap_radio",
     "update_client",
     "update_device",

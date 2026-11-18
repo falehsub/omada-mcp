@@ -32,8 +32,8 @@
     ],
     "readOnly": false,
     "required": [
-      "poeSchedule",
       "mac",
+      "poeSchedule",
       "ports"
     ]
   },
@@ -52,10 +52,10 @@
     ],
     "readOnly": false,
     "required": [
+      "destination",
       "name",
       "policy",
-      "source",
-      "destination"
+      "source"
     ]
   },
   "create_gateway_acl": {
@@ -75,11 +75,11 @@
     ],
     "readOnly": false,
     "required": [
+      "destination",
+      "direction",
       "name",
       "policy",
-      "source",
-      "destination",
-      "direction"
+      "source"
     ]
   },
   "create_hotspot_vouchers": {
@@ -182,10 +182,10 @@
     ],
     "readOnly": false,
     "required": [
+      "destination",
       "name",
       "policy",
-      "source",
-      "destination"
+      "source"
     ]
   },
   "cycle_poe_port": {
@@ -419,8 +419,8 @@
     ],
     "readOnly": false,
     "required": [
-      "mac",
-      "lagId"
+      "lagId",
+      "mac"
     ]
   },
   "delete_wireguard_peer": {
@@ -584,7 +584,10 @@
   "get_rf_scan": {
     "properties": [
       "mac",
-      "site"
+      "pollIntervalSeconds",
+      "site",
+      "timeoutSeconds",
+      "wait"
     ],
     "readOnly": true,
     "required": [
@@ -1098,8 +1101,8 @@
     ],
     "readOnly": false,
     "required": [
-      "mac",
-      "blocked"
+      "blocked",
+      "mac"
     ]
   },
   "set_client_fixed_ip": {
@@ -1114,8 +1117,8 @@
     ],
     "readOnly": false,
     "required": [
-      "mac",
-      "ip"
+      "ip",
+      "mac"
     ]
   },
   "set_client_lock_to_ap": {
@@ -1165,8 +1168,8 @@
     "readOnly": false,
     "required": [
       "mac",
-      "mirroringPort",
-      "mirroredPorts"
+      "mirroredPorts",
+      "mirroringPort"
     ]
   },
   "set_upnp": {
@@ -1221,8 +1224,8 @@
     ],
     "readOnly": false,
     "required": [
-      "vpn",
-      "enabled"
+      "enabled",
+      "vpn"
     ]
   },
   "set_wifi_radio_features": {
@@ -1291,6 +1294,22 @@
     "readOnly": false,
     "required": []
   },
+  "survey_wifi": {
+    "properties": [
+      "bands",
+      "confirm",
+      "deviceMac",
+      "dryRun",
+      "pollIntervalSeconds",
+      "site",
+      "timeoutSeconds",
+      "wait"
+    ],
+    "readOnly": false,
+    "required": [
+      "deviceMac"
+    ]
+  },
   "update_ap_radio": {
     "properties": [
       "band",
@@ -1306,8 +1325,8 @@
     ],
     "readOnly": false,
     "required": [
-      "deviceMac",
-      "band"
+      "band",
+      "deviceMac"
     ]
   },
   "update_client": {
@@ -1497,8 +1516,8 @@
     ],
     "readOnly": false,
     "required": [
-      "mac",
-      "ip"
+      "ip",
+      "mac"
     ]
   },
   "upsert_lan_dns_rule": {
@@ -1522,8 +1541,8 @@
     ],
     "readOnly": false,
     "required": [
-      "name",
-      "domain"
+      "domain",
+      "name"
     ]
   },
   "upsert_mac_group": {
@@ -1537,8 +1556,8 @@
     ],
     "readOnly": false,
     "required": [
-      "name",
-      "entries"
+      "entries",
+      "name"
     ]
   },
   "upsert_mdns_rule": {
@@ -1556,10 +1575,10 @@
     ],
     "readOnly": false,
     "required": [
+      "clientNetworks",
       "name",
       "profiles",
-      "serviceNetworks",
-      "clientNetworks"
+      "serviceNetworks"
     ]
   },
   "upsert_poe_schedule": {
@@ -1617,10 +1636,10 @@
     ],
     "readOnly": false,
     "required": [
-      "name",
       "externalPort",
       "forwardIp",
-      "forwardPort"
+      "forwardPort",
+      "name"
     ]
   },
   "upsert_port_group": {
@@ -1714,8 +1733,8 @@
     ],
     "readOnly": false,
     "required": [
-      "name",
       "destination",
+      "name",
       "nextHop"
     ]
   },
@@ -1735,8 +1754,8 @@
     ],
     "readOnly": false,
     "required": [
-      "mac",
       "lagId",
+      "mac",
       "ports"
     ]
   },
@@ -1759,10 +1778,10 @@
     ],
     "readOnly": false,
     "required": [
-      "name",
+      "allowAddress",
       "interface",
-      "publicKey",
-      "allowAddress"
+      "name",
+      "publicKey"
     ]
   },
   "upsert_wireguard_tunnel": {
@@ -1780,8 +1799,8 @@
     ],
     "readOnly": false,
     "required": [
-      "name",
-      "localIp"
+      "localIp",
+      "name"
     ]
   }
 }
