@@ -14,7 +14,7 @@ from ._common import (
     deep_redact,
     require_complete_collection,
 )
-from ._network_helpers import dhcp_pool_capacity, extra_network_audit_findings
+from ._network_helpers import dhcp_pool_capacity, extra_network_audit_findings, read_audit_source
 from ._tool_model import _site, normalize_mac
 from ._write_common import _ACL_DISPATCH_NOTES
 from ._write_fetchers import (
@@ -46,6 +46,7 @@ _ISOLATED_VLAN_KEYWORDS = ("iot", "guest", "kids", "camera", "security", "untrus
 
 
 _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
+_NETWORK_AUDIT_REQUEST_LIMIT = 64
 
 
 def _findings_healthy(findings: list[dict[str, Any]]) -> bool:
@@ -64,28 +65,43 @@ def _dhcp_pool_capacity(dhcp: dict[str, Any]) -> int:
     return dhcp_pool_capacity(dhcp)
 
 
-def _network_audit(client: OmadaClient) -> dict[str, Any]:
+def _network_audit(client: OmadaClient) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Composite, idempotent read-only health audit of the resolved Omada site."""
     site = _site(client)
 
-    site_res = client.api(f"sites/{site.site_id}")
-    site_detail = site_res.get("result") if site_res.get("errorCode") == 0 else {}
+    coverage: dict[str, str] = {}
+    warnings: list[str] = []
+    site_detail = read_audit_source(
+        lambda: client.api_result(f"sites/{site.site_id}"),
+        "site", "Site connectivity", coverage, warnings,
+    )
     site_detail = site_detail if isinstance(site_detail, dict) else {}
 
-    raw_devices: list[dict[str, Any]] = _fetch_devices(client, site)
+    def connectivity(key: str) -> bool | None:
+        value = site_detail.get(key)
+        return bool(value) if value in (True, False) else None
 
-    clients = _fetch_clients(client, limit=0)
-    wlans = _list_wlans(client)
+    wan_up, lan_up, wlan_up = (connectivity(key) for key in ("wan", "lan", "wlan"))
+    if coverage["site"] == "complete" and None in (wan_up, lan_up, wlan_up):
+        coverage["site"] = "partial"
+        warnings.append("Site connectivity: some states were not reported.")
 
-    lan_networks: list[dict[str, Any]] = []
-    try:
-        lan_networks = _fetch_lan_collection(client, site)
-    except OmadaError:
-        lan_networks = []
+    raw_devices = read_audit_source(
+        lambda: _fetch_devices(client, site), "devices", "Devices", coverage, warnings,
+    ) or []
+    lan_networks = read_audit_source(
+        lambda: _fetch_lan_collection(client, site), "lanNetworks", "LAN networks", coverage, warnings,
+    ) or []
+    wlans = read_audit_source(
+        lambda: _list_wlans(client, strict=True), "wlans", "WLANs", coverage, warnings,
+    ) or []
+    clients: list[dict[str, Any]] = read_audit_source(
+        lambda: _fetch_clients(client, limit=0), "clients", "Active clients", coverage, warnings,
+    ) or []
 
     findings: list[dict[str, str]] = []
 
-    if "wan" in site_detail and not bool(site_detail.get("wan")):
+    if wan_up is False:
         findings.append({
             "code": "WAN_DISCONNECTED",
             "severity": "critical",
@@ -169,23 +185,24 @@ def _network_audit(client: OmadaClient) -> dict[str, Any]:
         dhcp = net.get("dhcpSettings") or {}
         if isinstance(dhcp, dict) and dhcp.get("enable"):
             capacity = _dhcp_pool_capacity(dhcp)
-            observed = clients_by_vlan.get(vlan, 0)
-            util_pct = round(100.0 * observed / capacity, 1) if capacity > 0 else 0.0
+            observed = clients_by_vlan.get(vlan, 0) if coverage["clients"] != "unavailable" else None
+            observed_ratio = round(100.0 * observed / capacity, 1) if capacity > 0 and observed is not None else None
             dhcp_pools.append({
                 "network": net_name,
                 "vlan": vlan,
                 "subnet": net.get("gatewaySubnet") or "",
                 "poolSize": capacity,
                 "observedClients": observed,
-                "utilizationPct": util_pct,
+                "observedClientToPoolPct": observed_ratio,
+                "clientCoverage": coverage["clients"],
             })
-            if capacity > 0 and util_pct >= 80.0:
+            if observed_ratio is not None and observed_ratio >= 80:
                 findings.append({
-                    "code": "DHCP_POOL_NEAR_EXHAUSTION",
-                    "severity": "critical" if util_pct >= 95.0 else "warning",
+                    "code": "DHCP_CLIENT_COUNT_HIGH_RELATIVE_TO_POOL",
+                    "severity": "info",
                     "target": net_name,
-                    "detail": (f"VLAN {vlan} DHCP pool utilization is {util_pct}% "
-                               f"({observed}/{capacity} addresses)."),
+                    "detail": (f"VLAN {vlan} has {observed} observed active clients and {capacity} configured "
+                               "DHCP pool addresses. Check the gateway's lease table to measure occupancy."),
                 })
 
     findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f["severity"], 9), f["code"], f["target"]))
@@ -201,9 +218,9 @@ def _network_audit(client: OmadaClient) -> dict[str, Any]:
         "site": {
             "id": site.site_id,
             "name": site.name,
-            "wanConnected": bool(site_detail.get("wan", False)),
-            "lanConnected": bool(site_detail.get("lan", False)),
-            "wlanConnected": bool(site_detail.get("wlan", False)),
+            "wanConnected": wan_up,
+            "lanConnected": lan_up,
+            "wlanConnected": wlan_up,
         },
         "counts": {
             "devices": len(raw_devices),
@@ -218,44 +235,49 @@ def _network_audit(client: OmadaClient) -> dict[str, Any]:
         },
         "dhcpPools": dhcp_pools,
         "findings": findings,
-    }
+        "coverage": coverage,
+        "warnings": warnings,
+    }, raw_devices
 
 
 def _network_audit_enriched(client: OmadaClient) -> dict[str, Any]:
     """Run core network_audit plus non-fatal switch/AP/WAN telemetry findings."""
-    with client.scoped_cache():
-        audit = _network_audit(client)
-        site = _site(client)
-        try:
-            raw_devices = _fetch_devices(client, site)
-        except OmadaError:
-            raw_devices = []
-        extra = extra_network_audit_findings(client, site, raw_devices)
-    if not extra:
-        return audit
+    with client.request_budget(_NETWORK_AUDIT_REQUEST_LIMIT) as budget, client.scoped_cache():
+        audit, raw_devices = _network_audit(client)
+        supplemental_warnings: list[str] = []
+        extra = extra_network_audit_findings(
+            client, _site(client), raw_devices, budget=budget, warnings=supplemental_warnings,
+        )
+    if budget.used >= budget.limit:
+        supplemental_warnings.append("The request budget limited supplemental network checks.")
+    audit["warnings"].extend(supplemental_warnings)
+    audit["coverage"]["supplemental"] = (
+        "unavailable" if audit["coverage"]["devices"] != "complete"
+        else "partial" if supplemental_warnings else "complete"
+    )
+    complete = all(status == "complete" for status in audit["coverage"].values())
 
-    findings = list(audit.get("findings") or [])
-    findings.extend(extra)
-    findings.sort(key=lambda item: _SEVERITY_ORDER.get(item["severity"], 99))
+    findings = audit["findings"] + extra
+    findings.sort(key=lambda item: (_SEVERITY_ORDER[item["severity"]], item["code"], item["target"]))
 
     critical = sum(1 for f in findings if f["severity"] == "critical")
     warning = sum(1 for f in findings if f["severity"] == "warning")
     info = sum(1 for f in findings if f["severity"] == "info")
-    counts = dict(audit.get("counts") or {})
-    counts.update({
+    audit["counts"].update({
         "findings": len(findings),
         "critical": critical,
         "warnings": warning,
         "info": info,
     })
-    return {
-        "healthy": _findings_healthy(findings),
-        "controller": audit.get("controller"),
-        "site": audit.get("site"),
-        "counts": counts,
-        "dhcpPools": audit.get("dhcpPools") or [],
+    healthy = _findings_healthy(findings)
+    audit.update({
+        "healthy": healthy if complete or not healthy else None,
+        "complete": complete,
+        "controllerRequests": budget.used,
+        "requestLimit": budget.limit,
         "findings": findings,
-    }
+    })
+    return audit
 
 
 _SNAPSHOT_DEFAULT_OBJECTS: tuple[str, ...] = ("networks", "acls", "groups", "wlans", "devices")
@@ -423,7 +445,15 @@ def _get_config_snapshot_impl(
 _NETWORK_AUDIT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "healthy": {"type": "boolean"},
+        "healthy": {"type": ["boolean", "null"]},
+        "complete": {"type": "boolean"},
+        "controllerRequests": {"type": "integer", "minimum": 0},
+        "requestLimit": {"type": "integer", "minimum": 1},
+        "coverage": {
+            "type": "object",
+            "additionalProperties": {"enum": ["complete", "partial", "unavailable"]},
+        },
+        "warnings": {"type": "array", "items": {"type": "string"}},
         "controller": {
             "type": "object",
             "properties": {
@@ -438,9 +468,9 @@ _NETWORK_AUDIT_SCHEMA: dict[str, Any] = {
             "properties": {
                 "id": {"type": "string"},
                 "name": {"type": "string"},
-                "wanConnected": {"type": "boolean"},
-                "lanConnected": {"type": "boolean"},
-                "wlanConnected": {"type": "boolean"},
+                "wanConnected": {"type": ["boolean", "null"]},
+                "lanConnected": {"type": ["boolean", "null"]},
+                "wlanConnected": {"type": ["boolean", "null"]},
             },
             "required": ["id", "name", "wanConnected", "lanConnected", "wlanConnected"],
         },
@@ -472,12 +502,13 @@ _NETWORK_AUDIT_SCHEMA: dict[str, Any] = {
                     "vlan": {"type": "integer"},
                     "subnet": {"type": "string"},
                     "poolSize": {"type": "integer"},
-                    "observedClients": {"type": "integer"},
-                    "utilizationPct": {"type": "number"},
+                    "observedClients": {"type": ["integer", "null"]},
+                    "observedClientToPoolPct": {"type": ["number", "null"]},
+                    "clientCoverage": {"enum": ["complete", "partial", "unavailable"]},
                 },
                 "required": [
                     "network", "vlan", "subnet", "poolSize",
-                    "observedClients", "utilizationPct",
+                    "observedClients", "observedClientToPoolPct", "clientCoverage",
                 ],
             },
         },
@@ -495,7 +526,10 @@ _NETWORK_AUDIT_SCHEMA: dict[str, Any] = {
             },
         },
     },
-    "required": ["healthy", "controller", "site", "counts", "dhcpPools", "findings"],
+    "required": [
+        "healthy", "complete", "controllerRequests", "requestLimit", "coverage", "warnings",
+        "controller", "site", "counts", "dhcpPools", "findings",
+    ],
 }
 
 

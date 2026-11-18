@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import ipaddress
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, TypeVar
 
-from ..client import OmadaClient, OmadaError, SiteInfo
+from ..client import OmadaClient, OmadaError, RequestBudget, RequestBudgetExceeded, SiteInfo
 from ._common import (
+    IncompleteCollectionError,
+    PaginatedList,
     as_float,
     as_int,
     as_mapping,
@@ -27,6 +29,36 @@ from ._device_helpers import (
     collect_switch_ports_data,
 )
 
+_T = TypeVar("_T")
+
+
+def read_audit_source(
+    read: Callable[[], _T],
+    key: str,
+    label: str,
+    coverage: dict[str, str],
+    warnings: list[str],
+) -> _T | None:
+    """Record coverage separately from the data observed by an audit."""
+    try:
+        value = read()
+    except OmadaError as exc:
+        coverage[key] = "partial" if isinstance(exc, IncompleteCollectionError) else "unavailable"
+        reason = (
+            "request budget exhausted" if isinstance(exc, RequestBudgetExceeded)
+            else f"controller error {exc.code}" if exc.code is not None
+            else "controller data could not be collected"
+        )
+        warnings.append(f"{label}: {coverage[key]} ({reason}).")
+        return None
+    incomplete = isinstance(value, PaginatedList) and (
+        value.truncated or value.pagination.get("complete") is False
+    )
+    coverage[key] = "partial" if incomplete else "complete"
+    if incomplete:
+        warnings.append(f"{label}: partial (bounded collection).")
+    return value
+
 
 def collect_wan_status_data(
     client: OmadaClient,
@@ -38,15 +70,25 @@ def collect_wan_status_data(
 ) -> dict[str, Any]:
     """Gather gateway WAN link status, DNS/gateway IPs, latency/loss, failover, and speedtest."""
     warnings: list[str] = []
-    devs = list(devices) if devices is not None else unwrap_rows(
-        try_api_result(client, f"sites/{site.site_id}/devices", warnings, label="devices")[0]
-    )
+    devs: Sequence[Mapping[str, Any]]
+    if devices is None:
+        raw_devices, ok_devices = try_api_result(client, f"sites/{site.site_id}/devices", warnings, label="devices")
+        devs = unwrap_rows(raw_devices)
+        reported_devices = as_mapping(raw_devices).get("totalRows")
+        inventory_known = ok_devices and (
+            isinstance(raw_devices, list)
+            or isinstance(raw_devices, Mapping) and isinstance(raw_devices.get("data"), list)
+        ) and (reported_devices is None or as_int(reported_devices, -1) == len(devs))
+    else:
+        devs, inventory_known = devices, True
     gateways = [d for d in devs if str(d.get("type") or "").lower() == "gateway"]
 
     wan_ls_raw, ok_wls = try_api_result(
         client, f"sites/{site.site_id}/setting/wanlanstatus", warnings, label="WAN/LAN status",
     )
-    has_gw_flag = bool(gateways) or bool(ok_wls and isinstance(wan_ls_raw, Mapping) and wan_ls_raw.get("hasGateway"))
+    reported_gateway = as_mapping(wan_ls_raw).get("hasGateway") if ok_wls else None
+    has_gw_flag = bool(gateways) or reported_gateway is True or reported_gateway == 1
+    gateway_known = has_gw_flag or inventory_known or isinstance(reported_gateway, bool)
     if has_gw_flag:
         wan_cfg_raw, ok_wcfg = try_api_result(
             client, f"sites/{site.site_id}/setting/wan/networks", warnings, label="WAN settings",
@@ -72,7 +114,7 @@ def collect_wan_status_data(
         )
         if ok_gd and isinstance(gd, Mapping):
             gw_detail = dict(gd)
-    else:
+    elif gateway_known and not has_gw_flag:
         warnings.append("No adopted gateway present on site; live WAN telemetry unavailable.")
 
     speedtest_obj: dict[str, Any] | None = None
@@ -130,14 +172,18 @@ def collect_wan_status_data(
             raw_ip = mask_ipv4_middle(raw_ip)
             raw_gw = mask_ipv4_middle(raw_gw)
 
-        link_up = bool(ps.get("status") == 1)
-        inet_up = bool(ps.get("internetState") == 1)
+        link_status = as_int(ps.get("status"), -1)
+        internet_status = as_int(ps.get("internetState"), -1)
+        link_up = link_status == 1
+        inet_up = internet_status == 1
         wan_ports.append({
             "port": pno,
             "name": pname or f"WAN{pno}",
             "enabled": bool(pc.get("status", 1)),
             "linkUp": link_up,
+            "linkStatusKnown": link_status in (0, 1),
             "internetUp": inet_up,
+            "internetStatusKnown": internet_status in (0, 1),
             "onlineDetection": bool(ps.get("onlineDetection") == 1),
             "proto": str(ps.get("proto") or ""),
             "ip": raw_ip,
@@ -147,7 +193,7 @@ def collect_wan_status_data(
             "secondaryDns": snd_dns if snd_dns not in ("0.0.0.0", "") else "",
             "ipv6Enabled": bool(ipv6_cfg.get("enable")),
             "ipv6Address": mask_ipv4_middle(str(ipv6_cfg.get("addr") or "")) if mask_wan_ip else str(ipv6_cfg.get("addr") or ""),
-            "speed": _speed_label(ps.get("speed")) if link_up else "down",
+            "speed": _speed_label(ps.get("speed")) if link_up else "down" if link_status == 0 else "unknown",
             "duplex": _duplex_label(ps.get("duplex")),
             "maxBandwidthMbps": as_int(pi.get("maxBandwidth"), 0) or None,
             "rxRateBps": as_int(ps.get("rxRate") if ps.get("rxRate") is not None else pi.get("rxRate"), 0),
@@ -168,8 +214,10 @@ def collect_wan_status_data(
                 "port": pno,
                 "name": str(pi.get("portName") or f"WAN{pno}"),
                 "enabled": True,
-                "linkUp": ip_val not in ("", "0.0.0.0"),
-                "internetUp": ip_val not in ("", "0.0.0.0"),
+                "linkUp": False,
+                "linkStatusKnown": False,
+                "internetUp": False,
+                "internetStatusKnown": False,
                 "onlineDetection": False,
                 "proto": "",
                 "ip": mask_ipv4_middle(ip_val) if mask_wan_ip else ip_val,
@@ -208,7 +256,8 @@ def collect_wan_status_data(
     )
 
     return {
-        "hasGateway": bool(gateways) or bool(wan_ls_raw and wan_ls_raw.get("hasGateway")),
+        "hasGateway": has_gw_flag,
+        "gatewayInventoryKnown": gateway_known,
         "gatewayMac": gw_mac_norm,
         "gatewayName": gw_name,
         "gatewayModel": gw_model,
@@ -487,6 +536,9 @@ def extra_network_audit_findings(
     client: OmadaClient,
     site: SiteInfo,
     raw_devices: Sequence[Mapping[str, Any]],
+    *,
+    budget: RequestBudget | None = None,
+    warnings: list[str] | None = None,
 ) -> list[dict[str, str]]:
     """Collect optional PoE, uplink speed, AP retry/interference, and WAN audit findings."""
     findings: list[dict[str, str]] = []
@@ -494,6 +546,8 @@ def extra_network_audit_findings(
         if not is_device_online(dev):
             continue
         dtype = str(dev.get("type") or "").lower()
+        if dtype in ("switch", "ap") and budget is not None and budget.used >= budget.limit:
+            return findings
         target = str(dev.get("name") or dev.get("mac") or "unknown")
         if dtype == "switch":
             try:
@@ -502,8 +556,12 @@ def extra_network_audit_findings(
                     include_counters=False, include_cable_test=False, include_topology=False,
                 )
             except OmadaError:
+                if warnings is not None:
+                    warnings.append(f"Switch telemetry unavailable for {target}.")
                 continue
             poe = sw_data.get("poe") or {}
+            if not sw_data.get("ports") and sw_data.get("warnings") and warnings is not None:
+                warnings.append(f"Switch telemetry incomplete for {target}.")
             used_pct = poe.get("usedPercent")
             if poe.get("supported") and used_pct is not None and used_pct >= 85.0:
                 findings.append({
@@ -537,7 +595,11 @@ def extra_network_audit_findings(
                     include_rf_scan=False, include_available_channels=False,
                 )
             except OmadaError:
+                if warnings is not None:
+                    warnings.append(f"AP telemetry unavailable for {target}.")
                 continue
+            if not ap_data.get("radios") and ap_data.get("warnings") and warnings is not None:
+                warnings.append(f"AP telemetry incomplete for {target}.")
             for radio in ap_data.get("radios") or []:
                 band = radio["band"]
                 tx_pkts = radio.get("txPkts") or 0
@@ -565,6 +627,8 @@ def extra_network_audit_findings(
                         "detail": f"Radio {band} channel interference is {inter}%.",
                     })
 
+    if budget is not None and budget.used >= budget.limit:
+        return findings
     if any(str(d.get("type") or "").lower() == "gateway" for d in raw_devices):
         try:
             wan = collect_wan_status_data(
@@ -572,23 +636,22 @@ def extra_network_audit_findings(
             )
             ports = wan.get("ports") or []
             if wan.get("hasGateway") and ports:
-                up_inet = wan.get("internetUpCount", 0)
-                if up_inet == 0:
+                enabled_ports = [p for p in ports if p.get("enabled", True)]
+                down_names = [p["name"] for p in enabled_ports if p["internetStatusKnown"] and not p["internetUp"]]
+                if enabled_ports and len(down_names) == len(enabled_ports):
                     findings.append({
                         "code": "WAN_ALL_PORTS_DOWN",
                         "severity": "critical",
                         "target": wan.get("gatewayName") or site.name,
                         "detail": "All configured WAN ports report internet offline.",
                     })
-                elif wan.get("failoverConfigured") and up_inet < len(ports):
-                    down_names = [p["name"] for p in ports if not p["internetUp"] and p.get("enabled", True)]
-                    if down_names:
-                        findings.append({
-                            "code": "WAN_LINK_DEGRADED",
-                            "severity": "warning",
-                            "target": wan.get("gatewayName") or site.name,
-                            "detail": f"WAN link down / failover condition on: {', '.join(down_names)}.",
-                        })
+                elif wan.get("failoverConfigured") and down_names:
+                    findings.append({
+                        "code": "WAN_LINK_DEGRADED",
+                        "severity": "warning",
+                        "target": wan.get("gatewayName") or site.name,
+                        "detail": f"WAN link down / failover condition on: {', '.join(down_names)}.",
+                    })
                 for p in ports:
                     loss = p.get("lossPct")
                     if p.get("internetUp") and loss is not None and loss > 1.0:
@@ -598,8 +661,11 @@ def extra_network_audit_findings(
                             "target": f"{wan.get('gatewayName') or 'gateway'} {p['name']}",
                             "detail": f"{p['name']} reports {loss}% packet loss (latency={p.get('latencyMs')}ms).",
                         })
+            if (not ports or any(not p["internetStatusKnown"] for p in ports)) and warnings is not None:
+                warnings.append("Gateway WAN reachability evidence is incomplete.")
         except OmadaError:
-            pass
+            if warnings is not None:
+                warnings.append("Gateway WAN telemetry is unavailable.")
     return findings
 
 

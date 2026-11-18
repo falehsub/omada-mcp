@@ -5,9 +5,17 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from ..client import OmadaClient, OmadaError
-from ._common import as_int, as_mapping, deep_redact, mask_ipv4_middle, try_api_result
-from ._network_helpers import collect_wan_status_data
+from ..client import OmadaClient, OmadaError, SiteInfo
+from ._common import (
+    as_int,
+    as_mapping,
+    deep_redact,
+    is_device_online,
+    mask_ipv4_middle,
+    pagination_status,
+    try_api_result,
+)
+from ._network_helpers import collect_wan_status_data, read_audit_source
 from ._tool_model import _site
 from ._write_fetchers import _fetch_devices, _fetch_lan_interfaces
 from .networks_read import _extract_lan_ipv6
@@ -18,6 +26,9 @@ _DDNS_SERVICE_NAMES: dict[int, str] = {
     2: "Peanuthull",
     3: "Comexe",
 }
+
+_FLEET_AUDIT_REQUEST_LIMIT = 128
+_FLEET_SITE_REQUEST_LIMIT = 8
 
 
 def _rows_from_result(raw: Any) -> list[dict[str, Any]]:
@@ -408,60 +419,84 @@ def _audit_all_sites(client: OmadaClient, maxSites: int = 20) -> dict[str, Any]:
             hint="set OMADA_ALLOW_CROSS_SITE=true to allow multi-site fleet operations",
         )
     limit = max(1, min(as_int(maxSites, 20), 100))
-    all_sites = client.get_cached_sites(refresh=True)
+    coverage: dict[str, str] = {}
+    warnings: list[str] = []
     site_summaries: list[dict[str, Any]] = []
-    total_devices = 0
-    total_offline = 0
-    total_upgrades = 0
-    unhealthy_sites = 0
+    with client.request_budget(_FLEET_AUDIT_REQUEST_LIMIT) as budget:
+        collected = read_audit_source(
+            lambda: client.paginate("sites", max_pages=5, page_size=50),
+            "siteDirectory", "Site directory", coverage, warnings,
+        )
+        all_sites, meta = collected if collected is not None else ([], None)
+        if collected is not None and pagination_status(meta) != "complete":
+            coverage["siteDirectory"] = "partial"
+            warnings.append("Site directory: partial (bounded collection).")
 
-    for row in all_sites[:limit]:
-        sid = str(row.get("id") or "")
-        sname = str(row.get("name") or sid)
-        if not sid:
-            continue
-        with client.use_site(sid) as target_site:
-            assert target_site is not None
-            site_res = client.api(f"sites/{sid}")
-            detail = as_mapping(site_res.get("result")) if site_res.get("errorCode") == 0 else {}
-            devices = _fetch_devices(client, target_site)
-            offline = 0
-            upgrades = 0
-            for dev in devices:
-                status_cat = dev.get("statusCategory")
-                status_val = dev.get("status")
-                is_online = (status_cat == 1) or (status_cat is None and status_val in (1, 14))
-                if not is_online:
-                    offline += 1
-                if bool(dev.get("needUpgrade")):
-                    upgrades += 1
-            wan_up = bool(detail.get("wan", True)) if "wan" in detail else None
-            healthy = (offline == 0) and (upgrades == 0) and (wan_up is not False)
-            if not healthy:
-                unhealthy_sites += 1
-            total_devices += len(devices)
-            total_offline += offline
-            total_upgrades += upgrades
-            site_summaries.append({
-                "id": sid,
-                "name": sname,
-                "deviceCount": len(devices),
-                "offlineDevices": offline,
-                "upgradePendingDevices": upgrades,
-                "wanConnected": wan_up,
-                "healthy": healthy,
-            })
+        for row in all_sites[:limit]:
+            sid = str(row.get("id") or "")
+            if not sid:
+                coverage["siteDirectory"] = "partial"
+                continue
+            if budget.used >= budget.limit:
+                warnings.append("The fleet request budget limited the number of sites checked.")
+                break
+            site = SiteInfo(sid, str(row.get("name") or sid))
+            site_summaries.append(_audit_fleet_site(client, site))
 
-    return deep_redact({
+    audited = sum(s["status"] == "complete" for s in site_summaries)
+    truncated = coverage["siteDirectory"] != "complete" or len(all_sites) > len(site_summaries)
+    return {
         "totalSites": len(all_sites),
         "auditedSites": len(site_summaries),
-        "truncated": len(all_sites) > len(site_summaries),
-        "unhealthySites": unhealthy_sites,
-        "totalDevices": total_devices,
-        "totalOfflineDevices": total_offline,
-        "totalUpgradePending": total_upgrades,
+        "completeSites": audited,
+        "partialSites": len(site_summaries) - audited,
+        "truncated": truncated,
+        "complete": not truncated and audited == len(site_summaries),
+        "controllerRequests": budget.used,
+        "requestLimit": budget.limit,
+        "siteDirectoryStatus": coverage["siteDirectory"],
+        "unhealthySites": sum(s["healthy"] is False for s in site_summaries),
+        "totalDevices": sum(s["deviceCount"] or 0 for s in site_summaries),
+        "totalOfflineDevices": sum(s["offlineDevices"] or 0 for s in site_summaries),
+        "totalUpgradePending": sum(s["upgradePendingDevices"] or 0 for s in site_summaries),
+        "warnings": warnings,
         "sites": site_summaries,
-    })
+    }
+
+
+def _audit_fleet_site(client: OmadaClient, site: SiteInfo) -> dict[str, Any]:
+    coverage: dict[str, str] = {}
+    warnings: list[str] = []
+    with client.request_budget(_FLEET_SITE_REQUEST_LIMIT) as budget:
+        raw_detail = read_audit_source(
+            lambda: client.api_result(f"sites/{site.site_id}"),
+            "site", "Site connectivity", coverage, warnings,
+        )
+        raw_wan = as_mapping(raw_detail).get("wan")
+        wan_up = bool(raw_wan) if raw_wan in (True, False) else None
+        if coverage["site"] == "complete" and wan_up is None:
+            coverage["site"] = "partial"
+            warnings.append("Site connectivity: WAN state was not reported.")
+        devices = read_audit_source(
+            lambda: _fetch_devices(client, site), "devices", "Devices", coverage, warnings,
+        )
+    offline = sum(not is_device_online(d) for d in devices) if devices is not None else None
+    upgrades = sum(bool(d.get("needUpgrade")) for d in devices) if devices is not None else None
+    complete = all(state == "complete" for state in coverage.values())
+    known_unhealthy = bool(offline or upgrades or wan_up is False)
+    return {
+        "id": site.site_id,
+        "name": site.name,
+        "deviceCount": len(devices) if devices is not None else None,
+        "offlineDevices": offline,
+        "upgradePendingDevices": upgrades,
+        "wanConnected": wan_up,
+        "healthy": not known_unhealthy if complete or known_unhealthy else None,
+        "status": "complete" if complete else "partial",
+        "controllerRequests": budget.used,
+        "coverage": coverage,
+        "warnings": warnings,
+    }
 
 
 _WAN_IP_DETAILS_SCHEMA: dict[str, Any] = {
@@ -563,15 +598,42 @@ _FLEET_AUDIT_SCHEMA: dict[str, Any] = {
     "properties": {
         "totalSites": {"type": "integer", "minimum": 0},
         "auditedSites": {"type": "integer", "minimum": 0},
+        "completeSites": {"type": "integer", "minimum": 0},
+        "partialSites": {"type": "integer", "minimum": 0},
         "truncated": {"type": "boolean"},
+        "complete": {"type": "boolean"},
+        "controllerRequests": {"type": "integer", "minimum": 0},
+        "requestLimit": {"type": "integer", "minimum": 1},
+        "siteDirectoryStatus": {"enum": ["complete", "partial", "unavailable"]},
+        "warnings": {"type": "array", "items": {"type": "string"}},
         "unhealthySites": {"type": "integer", "minimum": 0},
         "totalDevices": {"type": "integer", "minimum": 0},
         "totalOfflineDevices": {"type": "integer", "minimum": 0},
         "totalUpgradePending": {"type": "integer", "minimum": 0},
-        "sites": {"type": "array", "items": {"type": "object"}},
+        "sites": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "deviceCount": {"type": ["integer", "null"]},
+                    "offlineDevices": {"type": ["integer", "null"]},
+                    "upgradePendingDevices": {"type": ["integer", "null"]},
+                    "wanConnected": {"type": ["boolean", "null"]},
+                    "healthy": {"type": ["boolean", "null"]},
+                    "status": {"enum": ["complete", "partial"]},
+                    "controllerRequests": {"type": "integer", "minimum": 0},
+                    "coverage": {"type": "object"},
+                    "warnings": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["id", "name", "status", "coverage", "warnings"],
+            },
+        },
     },
     "required": [
-        "totalSites", "auditedSites", "truncated", "unhealthySites",
+        "totalSites", "auditedSites", "completeSites", "partialSites", "truncated", "complete", "unhealthySites",
+        "controllerRequests", "requestLimit", "siteDirectoryStatus", "warnings",
         "totalDevices", "totalOfflineDevices", "totalUpgradePending", "sites",
     ],
 }

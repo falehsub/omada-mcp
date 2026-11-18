@@ -455,6 +455,7 @@ _WAN_STATUS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "hasGateway": {"type": "boolean"},
+        "gatewayInventoryKnown": {"type": "boolean"},
         "gatewayMac": {"type": "string"},
         "gatewayName": {"type": "string"},
         "gatewayModel": {"type": "string"},

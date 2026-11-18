@@ -54,6 +54,11 @@ _DDNS = _fields('id', 'name', 'domain', 'domainName', 'provider', 'service', 'st
                 'interfacePortId', 'updateInterval', 'updateTime')
 _CABLE_TEST = _fields('port', 'status', 'cableState', 'cableLength', 'cableStatus')
 _SHAPES = {
+    'ssid': {
+        **_fields('id', 'name', 'band', 'guestNetEnable', 'security', 'broadcast',
+                  'pmfMode', 'enable11r', 'wlanScheduleEnable', 'mloEnable'),
+        'vlanSetting': {**_fields('mode', 'currentVlanId'), 'customConfig': _fields('bridgeVlan')},
+    },
     'networks': {**_NETWORK, 'collection': _NETWORK, 'interface': _NETWORK},
     'groups': _GROUP,
     'acls': _ACL,

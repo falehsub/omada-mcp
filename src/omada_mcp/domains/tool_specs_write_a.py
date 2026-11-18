@@ -181,8 +181,9 @@ WRITE_TOOLS_A: list[Tool] = [
         name="replace_ip_group",
         title="Replace IPv4 IP group",
         description=(
-            "Replace an IPv4 IP group via delete+recreate, automatically running the 6-step "
-            "temporary-group swap when ACL rules reference the group (-33717). "
+            "Replace an IPv4 IP group via delete+recreate with a checkpointed temporary-group "
+            "swap when ACL rules reference the group (-33717). "
+            "Use recoveryId and the original group selector to preview a checkpointed resume."
         ),
         input_schema={
             "type": "object",
@@ -195,6 +196,11 @@ WRITE_TOOLS_A: list[Tool] = [
                 "ipRange": {
                     "type": "string",
                     "description": "Replacement comma-separated IPv4 ranges/CIDRs",
+                },
+                "recoveryId": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{32}-[a-f0-9]{32}$",
+                    "description": "Resume the original replacement without cidrs or ipRange",
                 },
                 **_WRITE_CONTROL_PROPS,
             },

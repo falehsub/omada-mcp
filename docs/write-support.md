@@ -159,8 +159,17 @@ DELETE /sites/{S}/setting/profiles/groups/{type}/{groupId}
 - **A group referenced by an ACL rule cannot be deleted** (`-33717`). Changing such a group
   requires the tmp-group swap: create a temp group, re-point the rule at it, delete the old
   group, recreate it with the new contents, re-point the rule back, delete the temp group.
-  Every step is a write; a failure in the middle leaves the network in a state you must be
-  able to describe. Snapshot all of it and verify the rule's `sourceIds` after each step.
+   Each mutation has a durable checkpoint and verified read-back. Preview and apply within
+   one MCP session as usual. If an apply is interrupted, the error includes a `recoveryId`.
+   After a process exit, find the `operationId` in the matching unfinished JSON checkpoint
+   under `OMADA_SNAPSHOT_DIR/ip-group-recovery`. Preview `replace_ip_group` with that ID
+   as `recoveryId` and the original `group` name or ID. Omit `cidrs` and `ipRange`. Review
+   the remaining steps, then apply with a fresh preview token on the original controller and site.
+   Resume completes the original swap forward. If a mutation was in flight, complete live
+   inventories must match the checkpoint state before or after that step. In the latter case
+   the server records the observed result and proceeds without repeating the mutation.
+   Any other live state requires manual inspection. Verified rollback of a newer snapshot
+   clears its block on earlier snapshots of the same scoped resource.
 - DELETE without the `{type}` segment returns `-1600 Unsupported request path`.
 
 ### 3.3 Gateway ACLs

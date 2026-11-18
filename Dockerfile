@@ -5,6 +5,7 @@ LABEL org.opencontainers.image.title="omada-mcp" \
       org.opencontainers.image.description="Read-only-first Model Context Protocol server for TP-Link Omada SDN controllers (Web API v2, zero dependencies)" \
       org.opencontainers.image.url="https://github.com/falehsub/omada-mcp" \
       org.opencontainers.image.source="https://github.com/falehsub/omada-mcp" \
+      io.modelcontextprotocol.server.name="io.github.falehsub/omada-mcp" \
       org.opencontainers.image.licenses="MIT"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
