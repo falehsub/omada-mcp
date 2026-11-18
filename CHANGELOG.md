@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-11-18
+
+Write-safety hardening, diagnostic evidence accuracy, Viewer contract fixes, and live Docker compatibility verification across Omada `5.15.24.19` and `6.2.14.11` (**370 passing tests**, **54 read-only + 78 opt-in write = 132 tools**, zero runtime dependencies).
+
+### Fixed
+
+- **Scoped rollback & safety guards:** Versioned (`v2`) write snapshots record controller ID, base URL, site ID, and resource identity; `rollback_from_snapshot` rejects cross-controller/cross-site restores (even with `force=true`), keeps unscoped legacy snapshots preview-only, runs management-LAN and switch-port anti-stranding guards on restore, and unblocks older snapshots once newer writes are rolled back.
+- **Session-bound single-use confirmations:** Write confirmations require a fresh, expiring, single-use token bound to tool, scope, normalized arguments, target, and observed pre-write state.
+- **Deep write verification & audit resilience:** `set_ap_ssid_overrides` and write handlers verify intended fields on read-back and `reauth_prepare`; `OmadaClient.write` distinguishes `verified`, `accepted`, and `uncertain` outcomes and preserves outcome/snapshot context if `audit.jsonl` fails.
+- **Switch LAG & pagination completeness:** Shared switch helpers resolve `insight/switch/detail` LAG fallbacks before building port membership, `OmadaClient.paginate` flags repeated pages as truncated, and switch mutations require complete safety evidence.
+- **Privacy & share-safe outputs:** Hotspot voucher listings/snapshots redact redeemable codes, and `omada-mcp --doctor --json --share-safe` (referenced by the issue template) strips controller URLs, usernames, controller/site IDs, and local paths.
+- **Config drift & projections:** `get_config_snapshot` records per-section collection status instead of substituting `[]` on error, `diff_config_snapshots` reports skipped/unavailable sections explicitly without false deletions, and `vpns`/`wireguard`/`wireguardPeers`/`ddns` use whitelisted typed projections.
+- **Viewer client filtering & diagnostics:** Validates raw source values before projection, keeps unknown activity visible without overclaiming `totalRowsExact`, fixes `diagnose_wan` no-gateway messages, separates client-direct logs from shared AP/switch events in `diagnose_client`, qualifies client-count DHCP estimates in `network_audit`, preserves partial `audit_all_sites` results, and checkpoints `replace_ip_group` swaps for recovery.
+- **CI, Docker lab & MCP Registry packaging:** Fixed `scripts/docker_lab_init.py` password length (15 chars) for Omada `5.15.24.19` wizard setup, updated `compat.yml` PR triggers/paths, fixed `workflow_dispatch` Docker tagging in `publish.yml`, and added `io.modelcontextprotocol.server.name` to `Dockerfile` (verified in CI).
+
 ## [2.4.0] - 2026-11-17
 
 Resumable bounded client queries, opt-in field projection, and token-efficient envelopes (**312 passing tests**, **54 read-only + 78 opt-in write = 132 tools**, zero runtime dependencies).

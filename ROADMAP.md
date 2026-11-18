@@ -1,8 +1,8 @@
 # Roadmap
 
-As of `v2.4.0`, the shipped control surface provides **54 read-only tools** and
+As of `v2.4.1`, the shipped control surface provides **54 read-only tools** and
 **78 explicitly allowlisted opt-in write tools** (**132 tools total**, zero
-runtime dependencies, **312 unit tests**). Priorities are driven by successful
+runtime dependencies, **370 unit tests**). Priorities are driven by successful
 user adoption and verifiable controller behavior.
 
 Each item lists the evidence that it matters, so it can be re-prioritised when
