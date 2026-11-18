@@ -87,7 +87,7 @@ jobs:
           omada-mcp --list-tools --all | python -c "import json,sys; d=json.load(sys.stdin); assert len(d['tools'])==135, len(d['tools'])"
 
       - name: Verify clean uvx execution from built wheel
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
 
       - name: Run uv tool smoke check
         run: |
