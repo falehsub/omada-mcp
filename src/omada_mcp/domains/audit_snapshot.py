@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from .._projections import project_controller_row
@@ -26,7 +27,7 @@ from ._write_fetchers import (
     _fetch_schedules,
 )
 from .clients_read import _fetch_clients
-from .devices_read import _list_devices, _list_wlans
+from .devices_read import _list_devices, _list_ssids_detail, _list_wlans
 from .networks_read import (
     _DHCP_RES_SCHEMA,
     _SERVICES_SCHEMA,
@@ -284,7 +285,7 @@ _SNAPSHOT_DEFAULT_OBJECTS: tuple[str, ...] = ("networks", "acls", "groups", "wla
 
 
 _SNAPSHOT_ALL_OBJECTS: tuple[str, ...] = (
-    "networks", "acls", "groups", "schedules", "wlans", "devices", "clients",
+    "networks", "acls", "groups", "schedules", "wlans", "ssids", "devices", "clients",
     "dhcpReservations", "portForwards", "staticRoutes", "mdnsRules", "services",
     "rateLimitProfiles", "poeSchedules", "wirelessFeature", "rfPlanning",
     "vpns", "wireguard", "wireguardPeers", "ddns", "trafficRules", "qos",
@@ -364,6 +365,7 @@ def _get_config_snapshot_impl(
     }
     snapshot: dict[str, Any] = {
         "site": {"name": site.name, "id": site.site_id},
+        "capturedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "objects": selected,
         "warnings": warnings,
         "sectionStatus": status,
@@ -400,6 +402,7 @@ def _get_config_snapshot_impl(
         "groups": _groups,
         "schedules": lambda: [project_controller_row("schedules", row) for row in _fetch_schedules(client, site)],
         "wlans": lambda: _list_wlans(client, strict=True),
+        "ssids": lambda: _list_ssids_detail(client, strict=True),
         "devices": lambda: _list_devices(client),
         "clients": lambda: _fetch_clients(client, limit=0),
         "dhcpReservations": lambda: _list_dhcp_reservations(client, strict=True),
@@ -554,6 +557,7 @@ _SNAPSHOT_SCHEMA: dict[str, Any] = {
             },
             "required": ["name", "id"],
         },
+        "capturedAt": {"type": "string"},
         "objects": {"type": "array", "items": {"type": "string"}},
         "sectionStatus": {"type": "object", "additionalProperties": _SECTION_STATUS_SCHEMA},
         "networks": {"type": "array", "items": {"type": "object"}},
@@ -582,6 +586,7 @@ _SNAPSHOT_SCHEMA: dict[str, Any] = {
         },
         "schedules": {"type": "array", "items": {"type": "object"}},
         "wlans": {"type": "array", "items": {"type": "object"}},
+        "ssids": {"type": "array", "items": {"type": "object"}},
         "devices": {"type": "array", "items": {"type": "object"}},
         "clients": {"type": "array", "items": {"type": "object"}},
         "dhcpReservations": {"type": "array", "items": _DHCP_RES_SCHEMA},
@@ -613,7 +618,7 @@ _DIFF_VOLATILE_KEYS: frozenset[str] = frozenset({
     "channel", "noiseLevel", "activity", "power", "poePower", "temperature",
     "temp", "speed", "rxPackets", "txPackets", "rxErrors", "txErrors",
     "rxDrops", "txDrops", "rxRetryPkts", "txRetryPkts", "expired",
-    "warnings", "aclDisableReliable", "warning",
+    "warnings", "aclDisableReliable", "warning", "capturedAt",
 })
 
 
@@ -645,7 +650,7 @@ def _diff_item_identity(section: str, item: Any) -> tuple[str, str]:
         return f"mac:{mac}", label or mac
     if section == "networks" and item.get("vlan") is not None:
         return f"vlan:{item['vlan']}:{item.get('name') or ''}", label or f"vlan-{item['vlan']}"
-    if section == "wlans":
+    if section in ("wlans", "ssids"):
         grp = str(item.get("wlanGroup") or item.get("wlanId") or "")
         name = str(item.get("name") or "")
         if grp or name:
@@ -674,6 +679,16 @@ def _diff_field_changes(before: Any, after: Any, prefix: str = "") -> dict[str, 
     if before != after:
         return {prefix or "value": {"before": before, "after": after}}
     return {}
+
+
+def _materialized_keys(delta: Mapping[str, Mapping[str, Any]]) -> list[str]:
+    """Return fields that transitioned from omitted (None) to an explicit empty/false default."""
+    return sorted(
+        path
+        for path, entry in delta.items()
+        if entry.get("before") is None
+        and (entry.get("after") is False or entry.get("after") == "" or entry.get("after") == {})
+    )
 
 
 def _diff_object_list(
@@ -712,7 +727,11 @@ def _diff_object_list(
         label, after_val = after_map[key]
         delta = _diff_field_changes(before_val, after_val)
         if delta:
-            changed.append({"key": key, "label": label, "changes": delta})
+            entry: dict[str, Any] = {"key": key, "label": label, "changes": delta}
+            mat = _materialized_keys(delta)
+            if mat:
+                entry["materializedKeys"] = mat
+            changed.append(entry)
 
     return {
         "hasChanges": bool(added or removed or changed),
@@ -830,6 +849,7 @@ def _diff_config_snapshots(
 
     sections_out: dict[str, dict[str, Any]] = {}
     sections_skipped: dict[str, dict[str, dict[str, str]]] = {}
+    materialized_defaults: list[dict[str, Any]] = []
     total_added = 0
     total_removed = 0
     total_changed = 0
@@ -845,7 +865,13 @@ def _diff_config_snapshots(
             b_clean = _strip_volatile_and_redact(baseline.get(section) or {})
             c_clean = _strip_volatile_and_redact(target_snapshot.get(section) or {})
             delta = _diff_field_changes(b_clean, c_clean)
-            sec_changed = [{"key": section, "label": section, "changes": delta}] if delta else []
+            sec_changed: list[dict[str, Any]] = []
+            if delta:
+                obj_entry: dict[str, Any] = {"key": section, "label": section, "changes": delta}
+                mat = _materialized_keys(delta)
+                if mat:
+                    obj_entry["materializedKeys"] = mat
+                sec_changed.append(obj_entry)
             sec_diff: dict[str, Any] = {
                 "hasChanges": bool(sec_changed),
                 "added": [],
@@ -858,8 +884,22 @@ def _diff_config_snapshots(
             sec_diff = _diff_object_list(section, b_items, c_items)
             meta_delta = _diff_field_changes(b_meta, c_meta)
             if meta_delta:
-                sec_diff["changed"].append({"key": f"{section}:settings", "label": "settings", "changes": meta_delta})
+                meta_entry: dict[str, Any] = {"key": f"{section}:settings", "label": "settings", "changes": meta_delta}
+                mat_meta = _materialized_keys(meta_delta)
+                if mat_meta:
+                    meta_entry["materializedKeys"] = mat_meta
+                sec_diff["changed"].append(meta_entry)
                 sec_diff["hasChanges"] = True
+
+        for ch_item in sec_diff["changed"]:
+            mat_fields = ch_item.get("materializedKeys")
+            if mat_fields:
+                materialized_defaults.append({
+                    "section": section,
+                    "key": ch_item["key"],
+                    "label": ch_item["label"],
+                    "fields": list(mat_fields),
+                })
 
         sections_out[section] = sec_diff
         total_added += len(sec_diff["added"])
@@ -872,6 +912,8 @@ def _diff_config_snapshots(
         "comparedSource": "live" if live_used else "snapshot",
         "baselineSite": deep_redact(base_site),
         "currentSite": deep_redact(curr_site),
+        "baselineCapturedAt": baseline.get("capturedAt") if isinstance(baseline.get("capturedAt"), str) else None,
+        "currentCapturedAt": target_snapshot.get("capturedAt") if isinstance(target_snapshot.get("capturedAt"), str) else None,
         "crossSite": cross_site,
         "sectionsCompared": list(sections_out),
         "sectionsSkipped": sections_skipped,
@@ -882,6 +924,7 @@ def _diff_config_snapshots(
             "removed": total_removed,
             "changed": total_changed,
         },
+        "materializedDefaults": materialized_defaults,
         "sections": sections_out,
     }
 
@@ -892,6 +935,8 @@ _DIFF_CONFIG_SCHEMA: dict[str, Any] = {
         "comparedSource": {"type": "string", "enum": ["live", "snapshot"]},
         "baselineSite": {"type": ["object", "null"]},
         "currentSite": {"type": ["object", "null"]},
+        "baselineCapturedAt": {"type": ["string", "null"]},
+        "currentCapturedAt": {"type": ["string", "null"]},
         "crossSite": {"type": "boolean"},
         "sectionsCompared": {"type": "array", "items": {"type": "string"}},
         "sectionsSkipped": {
@@ -912,6 +957,19 @@ _DIFF_CONFIG_SCHEMA: dict[str, Any] = {
                 "changed": {"type": "integer", "minimum": 0},
             },
             "required": ["sectionsChanged", "added", "removed", "changed"],
+        },
+        "materializedDefaults": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "section": {"type": "string"},
+                    "key": {"type": "string"},
+                    "label": {"type": "string"},
+                    "fields": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["section", "key", "label", "fields"],
+            },
         },
         "sections": {"type": "object"},
     },

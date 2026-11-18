@@ -340,8 +340,8 @@ Full generated parameter & safety reference across all 135 tools: [`docs/tools-r
 | `diagnose_wan` | `maskWanIp?`, `hours?` | Composite WAN troubleshooter correlating link/failover, latency/loss, VPN state, and WAN log events |
 | `network_audit` | — | Composite one-call health audit: pending firmware, offline devices, PoE budget >= 85%, uplink speed mismatches, AP retry spikes, WAN loss/failover, unexpected VLAN clients, unisolated VLANs, DHCP pool utilization, and stable finding codes |
 | `explain_error` | `code`, `endpoint?` | Structured decoder for Omada `errorCode` values (`-1600`, `-33717`, `-33726`, `-1505`, `-1001`, `-30109`, `-41011`, `-44116`, …) with ambiguity notes and fixes |
-| `get_config_snapshot` | `objects?` | Read-only snapshot merging `networks`, `acls`, `groups` (`ipGroups`, `portGroups`, `macGroups`), `schedules`, `wlans`, `devices`, and optional `clients`, `dhcpReservations`, `portForwards`, `staticRoutes`, `mdnsRules`, `services` |
-| `diff_config_snapshots` | `baseline`, `current?`, `objects?` | Deterministic drift diff between two `get_config_snapshot` payloads (or `baseline` vs live site when `current` is omitted), stripping volatile telemetry |
+| `get_config_snapshot` | `objects?` | Read-only snapshot merging `networks`, `acls`, `groups` (`ipGroups`, `portGroups`, `macGroups`), `schedules`, `wlans`, `devices`, and optional `ssids`, `clients`, `dhcpReservations`, `portForwards`, `staticRoutes`, `mdnsRules`, `services`, `wirelessFeature`, … with `capturedAt` |
+| `diff_config_snapshots` | `baseline`, `current?`, `objects?` | Deterministic drift diff between two `get_config_snapshot` payloads (or `baseline` vs live site when `current` is omitted), flagging `materializedDefaults` and stripping volatile telemetry |
 
 ### Opt-in write tools (`OMADA_READ_ONLY=false` + `OMADA_WRITE_TOOLS`)
 
