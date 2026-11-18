@@ -27,12 +27,14 @@ from .devices_read import (
     _DEVICE_SCHEMA,
     _PORT_PROFILE_SCHEMA,
     _RF_SCAN_SCHEMA,
+    _SSID_DETAIL_SCHEMA,
     _SWITCH_PORTS_SCHEMA,
     _WLAN_GROUP_SCHEMA,
     _WLAN_SCHEMA,
     _get_ap_radios,
     _get_device,
     _get_rf_scan,
+    _get_ssid,
     _get_switch_ports,
     _list_devices,
     _list_port_profiles,
@@ -200,6 +202,22 @@ READ_TOOLS: list[Tool] = [
         input_schema=_EMPTY,
         output_schema=_list_output_schema(_WLAN_SCHEMA),
         handler=_list_wlans,
+    ),
+    Tool(
+        name="get_ssid",
+        title="Get SSID configuration",
+        description=("Get non-secret configuration for one SSID (band steering, load balance, "
+                    "PMF, 802.11r, Wi-Fi calling, VLAN, and schedule flags)."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "ssid": {"type": "string", "description": "SSID ID or exact name"},
+                "wlanGroup": {"type": "string", "description": "Optional WLAN group ID or name"},
+            },
+            "required": ["ssid"],
+        },
+        output_schema=_SSID_DETAIL_SCHEMA,
+        handler=_get_ssid,
     ),
     Tool(
         name="get_site_info",

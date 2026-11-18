@@ -8,7 +8,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..client import OmadaClient, OmadaError
-from ._common import as_int, deep_redact, resolve_device_detail, resolve_raw_device
+from ._common import (
+    as_int,
+    as_mapping,
+    deep_redact,
+    parse_band_steering_mode,
+    resolve_device_detail,
+    resolve_raw_device,
+)
 from ._write_common import (
     _SSID_BAND_BITS,
     _SSID_SERVER_ONLY_KEYS,
@@ -27,6 +34,7 @@ from ._write_common import (
 from ._write_fetchers import (
     _fetch_clients_filtered,
     _fetch_rate_limit_profiles,
+    _fetch_schedules,
     _fetch_ssids,
     _fetch_wlan_groups,
     _omada_mac,
@@ -264,13 +272,27 @@ def update_ssid(
     broadcast: bool | None = None,
     pmfMode: Any = None,
     enable11r: bool | None = None,
+    bandSteering: Any = None,
+    loadBalance: bool | None = None,
+    wifiCalling: bool | None = None,
+    condBroadcast: bool | None = None,
+    macFilterEnable: bool | None = None,
+    rateLimitEnable: bool | None = None,
+    rateLimitProfile: str | None = None,
+    wlanScheduleEnable: bool | None = None,
+    schedule: str | None = None,
+    mloEnable: bool | None = None,
     dryRun: bool = True,
     confirm: str | None = None,
 ) -> dict[str, Any]:
     """Update an SSID via full-object PATCH (``setting/wlans/{wlanId}/ssids/{ssidId}``)."""
     if all(
         v is None
-        for v in (name, bands, psk, vlanId, guest, broadcast, pmfMode, enable11r)
+        for v in (
+            name, bands, psk, vlanId, guest, broadcast, pmfMode, enable11r,
+            bandSteering, loadBalance, wifiCalling, condBroadcast, macFilterEnable,
+            rateLimitEnable, rateLimitProfile, wlanScheduleEnable, schedule, mloEnable,
+        )
     ) and not clearVlan:
         raise OmadaError("specify at least one SSID setting to update")
 
@@ -317,6 +339,69 @@ def update_ssid(
         diff["enable11r"] = {"before": before_safe.get("enable11r"), "after": bool(enable11r)}
         patch_body["enable11r"] = bool(enable11r)
         expected["enable11r"] = bool(enable11r)
+    if bandSteering is not None:
+        bs_mode = parse_band_steering_mode(bandSteering)
+        cur_bs = dict(as_mapping(patch_body.get("bandSteeringForMultiBand")))
+        cur_bs["mode"] = bs_mode
+        diff["bandSteeringForMultiBand"] = {
+            "before": before_safe.get("bandSteeringForMultiBand"),
+            "after": copy.deepcopy(cur_bs),
+        }
+        patch_body["bandSteeringForMultiBand"] = cur_bs
+        expected["bandSteeringForMultiBand"] = {"mode": bs_mode}
+    if loadBalance is not None:
+        lb_val = bool(loadBalance)
+        diff["loadBalance"] = {"before": before_safe.get("loadBalance"), "after": lb_val}
+        patch_body["loadBalance"] = lb_val
+        expected["loadBalance"] = lb_val
+    if wifiCalling is not None:
+        wc_val = bool(wifiCalling)
+        diff["wifiCallingEnable"] = {"before": before_safe.get("wifiCallingEnable"), "after": wc_val}
+        patch_body["wifiCallingEnable"] = wc_val
+        expected["wifiCallingEnable"] = wc_val
+    if condBroadcast is not None:
+        cb_val = bool(condBroadcast)
+        diff["condBroadcastCtrl"] = {"before": before_safe.get("condBroadcastCtrl"), "after": cb_val}
+        patch_body["condBroadcastCtrl"] = cb_val
+        expected["condBroadcastCtrl"] = cb_val
+    if macFilterEnable is not None:
+        mf_val = bool(macFilterEnable)
+        diff["macFilterEnable"] = {"before": before_safe.get("macFilterEnable"), "after": mf_val}
+        patch_body["macFilterEnable"] = mf_val
+        expected["macFilterEnable"] = mf_val
+    if rateLimitProfile is not None or rateLimitEnable is not None:
+        rl_en = True if rateLimitEnable is None else bool(rateLimitEnable)
+        cur_rl = dict(as_mapping(patch_body.get("rateLimit")))
+        if rateLimitProfile is not None:
+            prof = _resolve_by_id_or_name(_fetch_rate_limit_profiles(client, site), rateLimitProfile, label="rate limit profile")
+            cur_rl["rateLimitProfileId"] = str(prof["id"])
+        cur_rl["enable"] = rl_en
+        diff["rateLimitEnable"] = {"before": before_safe.get("rateLimitEnable"), "after": rl_en}
+        patch_body["rateLimitEnable"] = rl_en
+        expected["rateLimitEnable"] = rl_en
+        if rateLimitProfile is not None or "rateLimit" in target_raw:
+            diff["rateLimit"] = {"before": before_safe.get("rateLimit"), "after": copy.deepcopy(cur_rl)}
+            patch_body["rateLimit"] = cur_rl
+            exp_rl: dict[str, Any] = {"enable": rl_en}
+            if rateLimitProfile is not None:
+                exp_rl["rateLimitProfileId"] = cur_rl["rateLimitProfileId"]
+            expected["rateLimit"] = exp_rl
+    if schedule is not None or wlanScheduleEnable is not None:
+        ws_en = True if wlanScheduleEnable is None else bool(wlanScheduleEnable)
+        diff["wlanScheduleEnable"] = {"before": before_safe.get("wlanScheduleEnable"), "after": ws_en}
+        patch_body["wlanScheduleEnable"] = ws_en
+        expected["wlanScheduleEnable"] = ws_en
+        if schedule is not None:
+            sched_obj = _resolve_by_id_or_name(_fetch_schedules(client, site), schedule, label="schedule")
+            sid_val = str(sched_obj["id"])
+            diff["wlanScheduleId"] = {"before": before_safe.get("wlanScheduleId"), "after": sid_val}
+            patch_body["wlanScheduleId"] = sid_val
+            expected["wlanScheduleId"] = sid_val
+    if mloEnable is not None:
+        mlo_val = bool(mloEnable)
+        diff["mloEnable"] = {"before": before_safe.get("mloEnable"), "after": mlo_val}
+        patch_body["mloEnable"] = mlo_val
+        expected["mloEnable"] = mlo_val
     if clearVlan:
         new_vs = {"mode": 0, "customConfig": {"bridgeVlan": 1}, "currentVlanId": None}
         diff["vlanSetting"] = {"before": before_safe.get("vlanSetting"), "after": new_vs}
@@ -380,8 +465,13 @@ def update_ssid(
         if ok:
             return True, None, None
         re_body = {k: copy.deepcopy(v) for k, v in live.items() if k not in _SSID_SERVER_ONLY_KEYS}
-        for k in expected:
-            re_body[k] = copy.deepcopy(patch_body[k])
+        for k, exp_v in expected.items():
+            if isinstance(exp_v, Mapping) and isinstance(re_body.get(k), Mapping):
+                merged = dict(re_body[k])
+                merged.update(copy.deepcopy(dict(exp_v)))
+                re_body[k] = merged
+            else:
+                re_body[k] = copy.deepcopy(patch_body[k])
         if clearVlan or vlanId is not None:
             re_body["vlanSetting"] = copy.deepcopy(patch_body["vlanSetting"])
         return False, re_body, _redact_ssid(live)
@@ -1272,6 +1362,219 @@ def run_wlan_optimization(
         after=after_out,
         diff=diff,
         snapshot=final_snap,
+        warnings=warnings,
+        rollback=rollback,
+    )
+
+
+def _fetch_wireless_feature_doc(client: OmadaClient, site_id: str) -> tuple[str, dict[str, Any]]:
+    for ep in (f"sites/{site_id}/setting/wireless/feature", f"sites/{site_id}/setting"):
+        try:
+            raw = client.api_result(ep)
+            if isinstance(raw, Mapping) and raw:
+                return ep, dict(raw)
+        except OmadaError:
+            continue
+    raise OmadaError(
+        "wireless radio features endpoint is unavailable on this controller",
+        hint="Verify site settings access on the controller.",
+    )
+
+
+def _summarize_wireless_feature(raw: Mapping[str, Any]) -> dict[str, Any]:
+    return deep_redact({
+        "roaming": dict(as_mapping(raw.get("roaming"))),
+        "bandSteering": dict(as_mapping(raw.get("bandSteering"))),
+        "bandSteeringForMultiBand": dict(as_mapping(raw.get("bandSteeringForMultiBand"))),
+        "airtimeFairness": dict(as_mapping(raw.get("airtimeFairness"))),
+        "mesh": dict(as_mapping(raw.get("mesh"))),
+        "lldp": dict(as_mapping(raw.get("lldp"))),
+        "advancedFeature": dict(as_mapping(raw.get("advancedFeature"))),
+    })
+
+
+def set_wifi_radio_features(
+    client: OmadaClient,
+    fastRoaming80211r: bool | None = None,
+    aiRoamingEnable: bool | None = None,
+    dualBand11kReportEnable: bool | None = None,
+    forceDisassociationEnable: bool | None = None,
+    nonStickRoamingEnable: bool | None = None,
+    nonPingPongRoamingEnable: bool | None = None,
+    bandSteeringEnable: bool | None = None,
+    connectionThreshold: int | None = None,
+    differenceThreshold: int | None = None,
+    maxFailures: int | None = None,
+    multiBandMode: Any = None,
+    atf2g: bool | None = None,
+    atf5g: bool | None = None,
+    atf6g: bool | None = None,
+    meshEnable: bool | None = None,
+    autoFailoverEnable: bool | None = None,
+    lldpEnable: bool | None = None,
+    advancedFeatureEnable: bool | None = None,
+    dryRun: bool = True,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Update site-level Wi-Fi roaming, band steering, ATF, and mesh features."""
+    if all(
+        v is None
+        for v in (
+            fastRoaming80211r, aiRoamingEnable, dualBand11kReportEnable,
+            forceDisassociationEnable, nonStickRoamingEnable, nonPingPongRoamingEnable,
+            bandSteeringEnable, connectionThreshold, differenceThreshold, maxFailures,
+            multiBandMode, atf2g, atf5g, atf6g, meshEnable, autoFailoverEnable,
+            lldpEnable, advancedFeatureEnable,
+        )
+    ):
+        raise OmadaError("specify at least one wireless radio feature setting to update")
+
+    def _validate_int(val: int | None, name: str, lo: int, hi: int) -> int | None:
+        if val is None:
+            return None
+        if isinstance(val, bool) or not isinstance(val, int) or not (lo <= val <= hi):
+            raise OmadaError(f"{name} must be an integer between {lo} and {hi}")
+        return val
+
+    conn_thresh = _validate_int(connectionThreshold, "connectionThreshold", 1, 100)
+    diff_thresh = _validate_int(differenceThreshold, "differenceThreshold", 0, 100)
+    max_fail = _validate_int(maxFailures, "maxFailures", 1, 100)
+    mb_mode = parse_band_steering_mode(multiBandMode) if multiBandMode is not None else None
+
+    site = _site(client)
+    target_id = f"wireless-feature:{site.site_id}"
+    _require_confirm("set_wifi_radio_features", target_id, dryRun, confirm)
+
+    endpoint, live_raw = _fetch_wireless_feature_doc(client, site.site_id)
+    before_summary = _summarize_wireless_feature(live_raw)
+    patch_body = copy.deepcopy(live_raw)
+    expected: dict[str, dict[str, Any]] = {}
+
+    updates_by_block: dict[str, dict[str, Any]] = {
+        "roaming": {
+            "fastRoamingEnable": fastRoaming80211r,
+            "aiRoamingEnable": aiRoamingEnable,
+            "dualBand11kReportEnable": dualBand11kReportEnable,
+            "forceDisassociationEnable": forceDisassociationEnable,
+            "nonStickRoamingEnable": nonStickRoamingEnable,
+            "nonPingPongRoamingEnable": nonPingPongRoamingEnable,
+        },
+        "bandSteering": {
+            "enable": bandSteeringEnable,
+            "connectionThreshold": conn_thresh,
+            "differenceThreshold": diff_thresh,
+            "maxFailures": max_fail,
+        },
+        "bandSteeringForMultiBand": {
+            "mode": mb_mode,
+        },
+        "airtimeFairness": {
+            "enable2g": atf2g,
+            "enable5g": atf5g,
+            "enable6g": atf6g,
+        },
+        "mesh": {
+            "meshEnable": meshEnable,
+            "autoFailoverEnable": autoFailoverEnable,
+        },
+        "lldp": {"enable": lldpEnable},
+        "advancedFeature": {"enable": advancedFeatureEnable},
+    }
+
+    for block_name, fields in updates_by_block.items():
+        block_changes = {k: (bool(v) if isinstance(v, bool) else v) for k, v in fields.items() if v is not None}
+        if not block_changes:
+            continue
+        merged = dict(as_mapping(patch_body.get(block_name)))
+        merged.update(block_changes)
+        patch_body[block_name] = merged
+        expected[block_name] = block_changes
+
+    after_summary = _summarize_wireless_feature(patch_body)
+    diff = _field_diff(before_summary, after_summary, sorted(expected.keys()))
+    warnings: list[str] = []
+    if meshEnable is False:
+        warnings.append("WARNING: Disabling site mesh will disconnect any wirelessly meshed APs.")
+
+    rollback_args: dict[str, Any] = {"dryRun": True}
+    arg_back_map = {
+        ("roaming", "fastRoamingEnable"): "fastRoaming80211r",
+        ("roaming", "aiRoamingEnable"): "aiRoamingEnable",
+        ("roaming", "dualBand11kReportEnable"): "dualBand11kReportEnable",
+        ("roaming", "forceDisassociationEnable"): "forceDisassociationEnable",
+        ("roaming", "nonStickRoamingEnable"): "nonStickRoamingEnable",
+        ("roaming", "nonPingPongRoamingEnable"): "nonPingPongRoamingEnable",
+        ("bandSteering", "enable"): "bandSteeringEnable",
+        ("bandSteering", "connectionThreshold"): "connectionThreshold",
+        ("bandSteering", "differenceThreshold"): "differenceThreshold",
+        ("bandSteering", "maxFailures"): "maxFailures",
+        ("bandSteeringForMultiBand", "mode"): "multiBandMode",
+        ("airtimeFairness", "enable2g"): "atf2g",
+        ("airtimeFairness", "enable5g"): "atf5g",
+        ("airtimeFairness", "enable6g"): "atf6g",
+        ("mesh", "meshEnable"): "meshEnable",
+        ("mesh", "autoFailoverEnable"): "autoFailoverEnable",
+        ("lldp", "enable"): "lldpEnable",
+        ("advancedFeature", "enable"): "advancedFeatureEnable",
+    }
+    for (block_name, field_key), arg_name in arg_back_map.items():
+        if block_name in expected and field_key in expected[block_name]:
+            prev_val = as_mapping(before_summary.get(block_name)).get(field_key)
+            if prev_val is not None:
+                rollback_args[arg_name] = prev_val
+    rollback = {"tool": "set_wifi_radio_features", "arguments": rollback_args} if len(rollback_args) > 1 else None
+
+    if dryRun:
+        return _dry_run_result(
+            tool_name="set_wifi_radio_features",
+            target_id=target_id,
+            before=before_summary,
+            after=after_summary,
+            diff=diff,
+            warnings=warnings,
+            rollback=rollback,
+        )
+
+    def _read_back() -> dict[str, Any]:
+        return dict(client.api_result(endpoint) or {})
+
+    def _verify(_before: Any, after_row: Any) -> tuple[bool, str | None]:
+        if not isinstance(after_row, Mapping):
+            return False, "wireless feature read-back did not return a JSON object"
+        return _match_fields(after_row, expected)
+
+    def _reauth_prepare() -> tuple[bool, dict[str, Any] | None, Any]:
+        live_now = _read_back()
+        ok, _ = _verify(live_raw, live_now)
+        if ok:
+            return True, None, None
+        re_body = copy.deepcopy(live_now)
+        for bname, bchanges in expected.items():
+            merged = dict(as_mapping(re_body.get(bname)))
+            merged.update(copy.deepcopy(bchanges))
+            re_body[bname] = merged
+        return False, re_body, _summarize_wireless_feature(live_now)
+
+    write_res = client.write(
+        endpoint,
+        method="PATCH",
+        data=patch_body,
+        tool_name="set_wifi_radio_features",
+        target=target_id,
+        before=before_summary,
+        snapshot_payload={"endpoint": endpoint, "expectedKeys": expected, "before": before_summary},
+        read_back=_read_back,
+        verify_fn=_verify,
+        reauth_prepare=_reauth_prepare,
+        fields_changed=sorted(expected.keys()),
+    )
+    return _committed_result(
+        tool_name="set_wifi_radio_features",
+        target_id=target_id,
+        before=write_res["before"],
+        after=_summarize_wireless_feature(write_res["after"]),
+        diff=diff,
+        snapshot=write_res["snapshot"],
         warnings=warnings,
         rollback=rollback,
     )

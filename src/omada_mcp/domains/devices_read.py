@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from .._projections import project_controller_row
 from ..client import OmadaClient, OmadaError
-from ._common import PROFILE_TYPE_LABELS, resolve_raw_device, try_paginate
+from ._common import (
+    PMF_MODE_LABELS,
+    PROFILE_TYPE_LABELS,
+    decode_band_steering_mode,
+    resolve_raw_device,
+    try_paginate,
+)
 from ._device_helpers import collect_ap_radios_data, collect_rf_scan_data, collect_switch_ports_data
 from ._tool_model import _pick, _site, as_int_or_none, normalize_mac
 from ._write_fetchers import _fetch_devices, _fetch_ssids, _fetch_wlan_groups
@@ -32,6 +39,8 @@ def project_device(device: dict[str, Any]) -> dict[str, Any]:
 _WLAN_FIELDS: tuple[str, ...] = (
     "id", "name", "ssid", "band", "enabled", "guest", "security", "vlanId",
     "networkName", "hideSsid", "macFilterEnable", "rateLimitEnable",
+    "pmfMode", "enable11r", "loadBalance", "wifiCallingEnable",
+    "condBroadcastCtrl", "wlanScheduleEnable", "mloEnable",
 )
 
 
@@ -54,6 +63,12 @@ def project_wlan(wlan: dict[str, Any], group_name: str | None = None) -> dict[st
             vid = vlan_cfg["customConfig"].get("bridgeVlan")
         if vid is not None:
             projected["vlanId"] = vid
+    bs = wlan.get("bandSteeringForMultiBand")
+    if isinstance(bs, dict) and "mode" in bs:
+        projected["bandSteeringMode"] = bs["mode"]
+        label = decode_band_steering_mode(bs["mode"])
+        if label is not None:
+            projected["bandSteering"] = label
     if group_name:
         projected["wlanGroup"] = group_name
     psk_setting = wlan.get("pskSetting")
@@ -109,6 +124,85 @@ def _list_wlans(client: OmadaClient, *, strict: bool = False) -> list[dict[str, 
         if not strict:
             projected.append(project_wlan(row))
     return projected
+
+
+def _get_ssid(
+    client: OmadaClient,
+    ssid: str,
+    wlanGroup: str | None = None,
+) -> dict[str, Any]:
+    """Read detailed non-secret settings for one SSID in a WLAN group."""
+    needle = str(ssid or "").strip()
+    if not needle:
+        raise OmadaError("ssid identifier must be non-empty")
+    site = _site(client)
+    groups = _fetch_wlan_groups(client, site)
+    if wlanGroup is not None and str(wlanGroup).strip():
+        want_grp = str(wlanGroup).strip().lower()
+        selected_groups = [
+            g for g in groups
+            if str(g.get("id") or "").strip().lower() == want_grp
+            or str(g.get("name") or "").strip().lower() == want_grp
+        ]
+        if len(selected_groups) > 1:
+            ids = ", ".join(str(g.get("id") or "?") for g in selected_groups)
+            raise OmadaError(f"WLAN group {wlanGroup!r} matched multiple groups ({ids}); specify exact id")
+        if not selected_groups:
+            raise OmadaError(f"no WLAN group matches {wlanGroup!r}")
+    else:
+        selected_groups = list(groups)
+
+    lower = needle.lower()
+    exact_id_matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    name_matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for grp in selected_groups:
+        if any(k in grp for k in ("ssid", "band", "security", "securityKey", "pskSetting")):
+            grp_meta: dict[str, Any] = {
+                "id": str(grp.get("wlanId") or grp.get("id") or ""),
+                "name": str(grp.get("wlanGroup") or ""),
+            }
+            s_rows = [grp]
+        else:
+            gid = str(grp.get("id") or "")
+            if not gid:
+                continue
+            grp_meta = grp
+            s_rows = _fetch_ssids(client, site, gid)
+        for s_row in s_rows:
+            if str(s_row.get("id") or "").strip().lower() == lower:
+                exact_id_matches.append((grp_meta, s_row))
+            elif str(s_row.get("name") or s_row.get("ssid") or "").strip().lower() == lower:
+                name_matches.append((grp_meta, s_row))
+
+    matches = exact_id_matches or name_matches
+    if len(matches) > 1:
+        places = ", ".join(
+            f"{grp.get('name') or grp.get('id')}:{row.get('id') or row.get('name')}"
+            for grp, row in matches
+        )
+        raise OmadaError(f"SSID {ssid!r} matched multiple entries ({places}); specify wlanGroup or exact id")
+    if not matches:
+        raise OmadaError(f"no SSID matches {ssid!r}", hint="run list_wlans to inspect configured SSIDs and WLAN groups")
+
+    grp, raw_ssid = matches[0]
+    grp_name = str(grp.get("name") or "")
+    summary = project_wlan(raw_ssid, group_name=grp_name or None)
+    safe_full = project_controller_row("ssid", raw_ssid)
+    out = {**safe_full, **summary}
+    out["wlanId"] = str(grp.get("id") or "")
+    out.setdefault("id", str(raw_ssid.get("id") or ""))
+    out.setdefault("name", str(raw_ssid.get("name") or raw_ssid.get("ssid") or ""))
+    pmf = as_int_or_none(out.get("pmfMode"))
+    if pmf is not None and pmf in PMF_MODE_LABELS:
+        out["pmfModeLabel"] = PMF_MODE_LABELS[pmf]
+    if "bandSteeringForMultiBand" in safe_full:
+        bs_mode = safe_full["bandSteeringForMultiBand"].get("mode") if isinstance(safe_full["bandSteeringForMultiBand"], dict) else None
+        bs_label = decode_band_steering_mode(bs_mode)
+        if bs_mode is not None:
+            out["bandSteeringMode"] = bs_mode
+        if bs_label is not None:
+            out["bandSteering"] = bs_label
+    return out
 
 
 def _get_switch_ports(
@@ -280,10 +374,35 @@ _WLAN_SCHEMA: dict[str, Any] = {
         "hideSsid": {"type": "boolean"},
         "macFilterEnable": {"type": "boolean"},
         "rateLimitEnable": {"type": "boolean"},
+        "pmfMode": {"type": "integer"},
+        "enable11r": {"type": "boolean"},
+        "loadBalance": {"type": "boolean"},
+        "wifiCallingEnable": {"type": "boolean"},
+        "condBroadcastCtrl": {"type": "boolean"},
+        "wlanScheduleEnable": {"type": "boolean"},
+        "mloEnable": {"type": "boolean"},
+        "bandSteeringMode": {"type": "integer"},
+        "bandSteering": {"type": "string"},
         "wlanGroup": {"type": "string"},
         "hasPresharedKey": {"type": "boolean"},
     },
     "required": ["hasPresharedKey"],
+}
+
+_SSID_DETAIL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        **_WLAN_SCHEMA["properties"],
+        "wlanId": {"type": "string"},
+        "pmfModeLabel": {"type": "string"},
+        "bandSteeringForMultiBand": {"type": "object"},
+        "vlanSetting": {"type": "object"},
+        "rateLimit": {"type": "object"},
+        "macFilterPolicy": {"type": ["integer", "string"]},
+        "macFilterId": {"type": "string"},
+        "wlanScheduleId": {"type": "string"},
+    },
+    "required": ["id", "name", "wlanId", "hasPresharedKey"],
 }
 
 

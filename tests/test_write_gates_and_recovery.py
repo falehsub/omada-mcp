@@ -48,11 +48,11 @@ class WriteConfigTests(unittest.TestCase):
     def test_tool_name_sets_match_tools_module(self):
         ro_names = {t.name for t in TOOLS if t.read_only}
         wr_names = {t.name for t in TOOLS if not t.read_only}
-        self.assertEqual(len(ro_names), 54)
-        self.assertEqual(len(wr_names), 78)
+        self.assertEqual(len(ro_names), 55)
+        self.assertEqual(len(wr_names), 79)
         self.assertEqual(config_mod._READ_ONLY_TOOL_NAMES, ro_names)
         self.assertEqual(set(WRITE_TOOL_NAMES), wr_names)
-        self.assertEqual(len(TOOLS), 132)
+        self.assertEqual(len(TOOLS), 134)
 
     def test_parse_write_tools_validation(self):
         self.assertEqual(parse_write_tools(None), ())
@@ -167,7 +167,7 @@ class GateAndProtocolTests(unittest.TestCase):
                 tmp, read_only=False, write_tools=("set_client_fixed_ip",)
             )
             listed = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]
-            self.assertEqual(len(listed), 55)
+            self.assertEqual(len(listed), 56)
             names = {t["name"] for t in listed}
             self.assertIn("set_client_fixed_ip", names)
             self.assertNotIn("release_client_fixed_ip", names)
@@ -302,6 +302,7 @@ class GateAndProtocolTests(unittest.TestCase):
             "upsert_rate_limit_profile": (False, False, True),
             "delete_rate_limit_profile": (False, True, True),
             "set_ap_ssid_overrides": (False, False, True),
+            "set_wifi_radio_features": (False, False, True),
             "run_wlan_optimization": (False, True, False),
             "upsert_switch_lag": (False, True, True),
             "delete_switch_lag": (False, True, True),
@@ -326,7 +327,7 @@ class GateAndProtocolTests(unittest.TestCase):
             self.assertEqual((t.read_only, t.destructive, t.idempotent), (ro, dest, idemp), name)
         self.assertEqual(set(TOOL_MAP) - set(expected), {
             "list_devices", "list_clients", "list_wifi_clients", "list_wired_clients",
-            "get_device", "get_client", "list_wlans", "get_site_info",
+            "get_device", "get_client", "list_wlans", "get_ssid", "get_site_info",
             "network_audit", "explain_error",
             "list_blocked_clients", "list_rate_limit_profiles",
             "list_schedules", "list_controller_users", "get_controller_status",

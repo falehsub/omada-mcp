@@ -56,7 +56,12 @@ _CABLE_TEST = _fields('port', 'status', 'cableState', 'cableLength', 'cableStatu
 _SHAPES = {
     'ssid': {
         **_fields('id', 'name', 'band', 'guestNetEnable', 'security', 'broadcast',
-                  'pmfMode', 'enable11r', 'wlanScheduleEnable', 'mloEnable'),
+                  'pmfMode', 'enable11r', 'loadBalance', 'wifiCallingEnable',
+                  'condBroadcastCtrl', 'macFilterEnable', 'macFilterPolicy', 'macFilterId',
+                  'rateLimitEnable', 'wlanScheduleEnable', 'wlanScheduleId', 'mloEnable'),
+        'bandSteeringForMultiBand': _fields('mode'),
+        'rateLimit': _fields('enable', 'rateLimitProfileId', 'upLimitEnable', 'upLimit',
+                             'downLimitEnable', 'downLimit'),
         'vlanSetting': {**_fields('mode', 'currentVlanId'), 'customConfig': _fields('bridgeVlan')},
     },
     'networks': {**_NETWORK, 'collection': _NETWORK, 'interface': _NETWORK},

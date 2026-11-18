@@ -1259,6 +1259,42 @@ def rollback_from_snapshot(
                     revalidate=_guard_lag_restore,
                 )
 
+    if orig_tool == "set_wifi_radio_features" and isinstance(snap_data, Mapping):
+        snap_before = as_mapping(snap_data.get("before"))
+        exp_keys = as_mapping(snap_data.get("expectedKeys"))
+        ep = str(snap_data.get("endpoint") or f"sites/{site.site_id}/setting/wireless/feature")
+        live = dict(client.api_result(ep) or {})
+        payload = copy.deepcopy(live)
+        restore_exp: dict[str, dict[str, Any]] = {}
+        for block_name, bchanges in exp_keys.items():
+            if not isinstance(bchanges, Mapping):
+                continue
+            prev_block = as_mapping(snap_before.get(block_name))
+            merged = dict(as_mapping(payload.get(block_name)))
+            block_exp: dict[str, Any] = {}
+            for k in bchanges:
+                if k in prev_block:
+                    merged[k] = copy.deepcopy(prev_block[k])
+                    block_exp[k] = copy.deepcopy(prev_block[k])
+            if block_exp:
+                payload[block_name] = merged
+                restore_exp[block_name] = block_exp
+        live_view = {k: copy.deepcopy(live.get(k)) for k in restore_exp}
+        restore_view = {k: copy.deepcopy(payload.get(k)) for k in restore_exp}
+        return _run_restore(
+            method="PATCH",
+            endpoint=ep,
+            payload=payload,
+            live_before=live_view,
+            restore_preview=restore_view,
+            read_back_fn=lambda: dict(client.api_result(ep) or {}),
+            verify_fn=lambda _b, a: (
+                (isinstance(a, Mapping) and _match_fields(a, restore_exp))
+                if isinstance(a, Mapping)
+                else (False, "wireless feature read-back did not return a JSON object")
+            ),
+        )
+
     if orig_tool == "run_wlan_optimization" and isinstance(snap_data, Mapping):
         cfg_before = as_mapping(snap_data.get("configBefore"))
         if cfg_before and snap_data.get("action") == "configure":

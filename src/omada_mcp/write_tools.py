@@ -191,6 +191,7 @@ from .domains.wireless_write import (
     delete_ssid,
     run_wlan_optimization,
     set_ap_ssid_overrides,
+    set_wifi_radio_features,
     update_ssid,
     upsert_rate_limit_profile,
 )
@@ -246,6 +247,7 @@ __all__ = [
     "set_vlan_dhcp_pools",
     "set_vlan_isolation",
     "set_vpn_tunnel_status",
+    "set_wifi_radio_features",
     "start_rf_scan",
     "update_ap_radio",
     "update_client",
