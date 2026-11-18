@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-18
+
+Expanded Wi-Fi steering, RF survey impact & polling, SSID-level config drift tracking, and backwards-compatible schema guards (**383 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).
+
 ### Added
 
 - **`get_ssid` read tool:** Fetch detailed non-secret settings for an SSID in a WLAN group, decoding `bandSteering` (`disable`/`prefer_5g`/`balanced`/`site`), `pmfModeLabel`, rate limits, schedules, MAC filters, and `hasPresharedKey` without ever exposing PSK material.
