@@ -658,6 +658,27 @@ def start_rf_scan(
     )
 
 
+def _survey_trigger_verified(
+    survey_after: Any,
+    baseline_times: Mapping[str, Any],
+    target_bands: list[str],
+    *,
+    wait: bool,
+) -> bool:
+    """Return True when post-POST read-back proves the AP started or completed the RF scan."""
+    if not isinstance(survey_after, Mapping):
+        return False
+    if bool(survey_after.get("scanning")):
+        return True
+    if wait and not bool(survey_after.get("timedOut")):
+        return True
+    band_times = survey_after.get("bandTimes") or {}
+    return any(
+        band_times.get(band) is not None and band_times.get(band) != baseline_times.get(band)
+        for band in target_bands
+    )
+
+
 def survey_wifi(
     client: OmadaClient,
     deviceMac: str,
@@ -719,34 +740,48 @@ def survey_wifi(
             baseline_times=plan["baselineTimes"],
         ),
         verify_fn=lambda _before, survey_after: (isinstance(survey_after, Mapping), None),
-        verification_complete=lambda survey_after: (
-            bool(wait) and isinstance(survey_after, Mapping) and not bool(survey_after.get("timedOut"))
+        verification_complete=lambda survey_after: _survey_trigger_verified(
+            survey_after, plan["baselineTimes"], plan["targetBands"], wait=bool(wait),
         ),
     )
     survey = dict(write_res["after"]) if isinstance(write_res.get("after"), Mapping) else {}
+    scanning_now = bool(survey.get("scanning"))
+    timed_out_now = bool(survey.get("timedOut"))
+    trigger_verified = _survey_trigger_verified(
+        survey, plan["baselineTimes"], plan["targetBands"], wait=bool(wait),
+    )
+    scan_completed = not timed_out_now and not scanning_now and (bool(wait) or trigger_verified)
     warnings = [*plan["warnings"], *survey.get("warnings", [])]
+    after_out: dict[str, Any] = {
+        "mac": norm_mac,
+        "name": plan["apName"],
+        "impact": plan["impact"],
+        "rfSurveyTriggered": True,
+        "triggerVerified": trigger_verified,
+        "scanCompleted": scan_completed,
+        "status": survey.get("status"),
+        "statusLabel": survey.get("statusLabel"),
+        "scanning": scanning_now,
+        "timedOut": timed_out_now,
+        "polls": survey.get("polls"),
+        "elapsedSeconds": survey.get("elapsedSeconds"),
+        "bandStatuses": survey.get("bandStatuses"),
+        "bandStatusLabels": survey.get("bandStatusLabels"),
+        "bandTimes": survey.get("bandTimes"),
+        "channelCount": len(survey.get("channels") or []),
+        "channelsByBand": survey.get("channelsByBand"),
+        "rfScan": survey,
+    }
+    if scanning_now or timed_out_now:
+        after_out["resumeHint"] = (
+            f"Scan is still in progress; call get_rf_scan(mac={norm_mac!r}, wait=True, timeoutSeconds=600) "
+            "to collect results without re-triggering."
+        )
     return _committed_result(
         tool_name="survey_wifi",
         target_id=norm_mac,
         before=write_res["before"],
-        after={
-            "mac": norm_mac,
-            "name": plan["apName"],
-            "impact": plan["impact"],
-            "rfSurveyTriggered": True,
-            "status": survey.get("status"),
-            "statusLabel": survey.get("statusLabel"),
-            "scanning": survey.get("scanning"),
-            "timedOut": survey.get("timedOut"),
-            "polls": survey.get("polls"),
-            "elapsedSeconds": survey.get("elapsedSeconds"),
-            "bandStatuses": survey.get("bandStatuses"),
-            "bandStatusLabels": survey.get("bandStatusLabels"),
-            "bandTimes": survey.get("bandTimes"),
-            "channelCount": len(survey.get("channels") or []),
-            "channelsByBand": survey.get("channelsByBand"),
-            "rfScan": survey,
-        },
+        after=after_out,
         diff=diff,
         snapshot=write_res["snapshot"],
         warnings=list(dict.fromkeys(warnings)),
