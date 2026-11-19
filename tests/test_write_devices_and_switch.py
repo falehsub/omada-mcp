@@ -386,7 +386,7 @@ class Milestone2SwitchAndApTests(unittest.TestCase):
             # If read-back resets freq to another centre frequency, verification flags uncertain.
             orig_dispatch = ctrl._dispatch
 
-            def _reset_freq_on_put(method: str, raw_path: str, query: str, body: Any) -> tuple[int, bytes]:
+            def _reset_freq_on_put(method: str, raw_path: str, query: str, body: object) -> tuple[int, bytes]:
                 out = orig_dispatch(method, raw_path, query, body)
                 if method == "PUT" and raw_path.endswith("/config/radios"):
                     ctrl.eap_details["AA-BB-CC-00-00-03"]["radioSetting5g"]["freq"] = 5180
