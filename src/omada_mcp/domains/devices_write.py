@@ -244,6 +244,19 @@ def reboot_device(
     )
 
 
+def _parse_freq_mhz(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        num = int(value)
+        return num if num >= 0 else None
+    text = str(value).strip()
+    if text.lower().endswith("mhz"):
+        text = text[:-3].strip()
+    parsed = as_int(text, -1)
+    return parsed if parsed >= 0 else None
+
+
 def update_ap_radio(
     client: OmadaClient,
     deviceMac: str,
@@ -312,14 +325,24 @@ def update_ap_radio(
             )
             if not other_enabled:
                 warnings.append("WARNING: Disabling this radio leaves no enabled Wi-Fi radios on this AP.")
+    target_freq: int | None = None
     if channel is not None:
         new_rs["channel"] = target_wire_channel
         if target_wire_channel == "0":
+            target_freq = 0
             new_rs["freq"] = 0
-        elif validated.get("freq") is not None:
-            # Controllers build the band position from `freq`, not `channel`: a pinned channel
-            # without its centre frequency is accepted and then silently normalised back.
-            new_rs["freq"] = as_int(validated["freq"], 0) or validated["freq"]
+        else:
+            parsed_freq = _parse_freq_mhz(validated.get("freq"))
+            if parsed_freq is not None and parsed_freq > 0:
+                # Controllers build the band position from `freq`, not `channel`: a pinned channel
+                # without its centre frequency is accepted and then silently normalised back.
+                target_freq = parsed_freq
+                new_rs["freq"] = parsed_freq
+            else:
+                warnings.append(
+                    "AP channelInfo did not supply a centre frequency for this pinned channel; "
+                    "the controller may normalise it back."
+                )
     if channelWidth is not None:
         new_rs["channelWidth"] = validated["channelWidthCode"]
     if txPowerLevel is not None:
@@ -340,6 +363,7 @@ def update_ap_radio(
         return {
             "radioEnable": bool(rs.get("radioEnable", True)),
             "channel": rs.get("channel"),
+            "freq": rs.get("freq"),
             "channelWidth": CHANNEL_WIDTH_LABELS.get(wcode, wcode),
             "channelWidthCode": wcode,
             "txPowerLevel": TX_POWER_LEVEL_LABELS.get(as_int(plvl, -1), plvl),
@@ -389,6 +413,15 @@ def update_ap_radio(
             return False, f"{rs_key}.radioEnable expected {enabled!r}, got {tgt.get('radioEnable')!r}"
         if channel is not None and str(tgt.get("channel")) != str(target_wire_channel):
             return False, f"{rs_key}.channel expected {target_wire_channel!r}, got {tgt.get('channel')!r}"
+        if (
+            channel is not None
+            and target_wire_channel != "0"
+            and target_freq is not None
+            and tgt.get("freq") is not None
+        ):
+            got_freq = _parse_freq_mhz(tgt.get("freq"))
+            if got_freq != target_freq:
+                return False, f"{rs_key}.freq expected {target_freq!r}, got {tgt.get('freq')!r}"
         if channelWidth is not None and str(tgt.get("channelWidthCode")) != str(validated["channelWidthCode"]):
             return False, f"{rs_key}.channelWidth expected {validated['channelWidthCode']!r}, got {tgt.get('channelWidthCode')!r}"
         if txPowerLevel is not None and tgt.get("txPowerLevel") != after_view["txPowerLevel"]:
@@ -778,8 +811,8 @@ def survey_wifi(
     }
     if scanning_now or timed_out_now:
         after_out["resumeHint"] = (
-            f"Scan is still in progress; call get_rf_scan(mac={norm_mac!r}, wait=True, timeoutSeconds=600) "
-            "to collect results without re-triggering."
+            "Scan is still in progress; call get_rf_scan for this AP with wait=True, "
+            "timeoutSeconds=600 to collect results without re-triggering."
         )
     return _committed_result(
         tool_name="survey_wifi",

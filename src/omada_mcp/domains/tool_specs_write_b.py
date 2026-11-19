@@ -366,7 +366,8 @@ WRITE_TOOLS_B: list[Tool] = [
         title="Impact-aware AP Wi-Fi RF survey",
         description=(
             "Preview per-radio client disconnect impact on dryRun=true, then trigger an AP RF scan and "
-            "optionally poll until terminal status (returns per-band channel occupancy/interference; BSSIDs depend on AP firmware)."
+            "optionally poll up to timeoutSeconds (timedOut only indicates the wait window elapsed while "
+            "the scan kept running; triggerVerified/verified track AP trigger acceptance and scanCompleted tracks completion)."
         ),
         input_schema={
             "type": "object",

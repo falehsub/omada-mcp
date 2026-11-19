@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Configured AP radio width now takes precedence over stale telemetry (`get_ap_radios`):** `collect_ap_radios_data` now uses the configured `radioSetting*.channelWidth` label whenever an explicit width is set and only falls back to live `wp*.bandWidth` telemetry when the configured width is `AUTO` or empty, while also exposing `actualChannelWidth` so callers can inspect any provisioning lag directly.
+- **Pinned AP channel frequency hardening (`update_ap_radio`):** Parse string or `"<MHz> MHz"` frequency values from `channelInfo` cleanly, surface `freq` in `before`/`after`/`diff` radio summaries, verify `freq` read-back when the controller echoes `freq`, and warn when `channelInfo` omits a centre frequency for a pinned channel.
+- **RF survey polish (`survey_wifi`):** Omit the literal AP MAC from `after.resumeHint` (keeping the generic `wait=True, timeoutSeconds=600` guidance) and clarify in the tool description that `timedOut` reflects the polling window rather than trigger failure.
+
 ## [2.5.4] - 2026-11-19
 
 Pinned AP channel changes now apply on controllers that derive the band position from frequency (**386 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).

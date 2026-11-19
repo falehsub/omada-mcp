@@ -339,6 +339,87 @@ class Milestone2SwitchAndApTests(unittest.TestCase):
             self.assertEqual(str(pinned["channel"]), "11")
             self.assertEqual(int(pinned["freq"]), 2462)
 
+            # String "<MHz> MHz" centre frequencies in channelInfo are parsed to ints,
+            # surfaced in after, and verified on read-back.
+            band_5g_info = next(
+                b for b in ctrl.eap_channel_info["AA-BB-CC-00-00-03"]["data"] if b.get("radioId") == 1
+            )
+            ch116_entry = next(
+                c for c in band_5g_info["channelList"] if str(c.get("channelName", "")).startswith("116/")
+            )
+            ch116_entry["freq"] = "5580 MHz"
+            dry_5g = unwrap_ok(call_tool(server, "update_ap_radio", {
+                "deviceMac": "ap-living",
+                "band": "5g",
+                "channel": 116,
+                "channelWidth": "80",
+            }))
+            self.assertEqual(dry_5g["after"]["freq"], 5580)
+            res_5g = unwrap_ok(call_tool(server, "update_ap_radio", {
+                "deviceMac": "ap-living",
+                "band": "5g",
+                "channel": 116,
+                "channelWidth": "80",
+                "dryRun": False,
+                "confirm": dry_5g["confirmToken"],
+            }))
+            self.assertTrue(res_5g["verified"])
+            self.assertEqual(res_5g["after"]["freq"], 5580)
+            self.assertEqual(ctrl.eap_details["AA-BB-CC-00-00-03"]["radioSetting5g"]["freq"], 5580)
+
+            # If channelInfo omits freq for a pinned channel, warn explicitly.
+            ch36_entry = next(
+                c for c in band_5g_info["channelList"] if str(c.get("channelName", "")).startswith("36/")
+            )
+            saved_ch36_freq = ch36_entry.pop("freq", None)
+            try:
+                no_freq_dry = unwrap_ok(call_tool(server, "update_ap_radio", {
+                    "deviceMac": "ap-living",
+                    "band": "5g",
+                    "channel": 36,
+                }))
+                self.assertTrue(any("centre frequency" in w.lower() for w in no_freq_dry["warnings"]))
+            finally:
+                if saved_ch36_freq is not None:
+                    ch36_entry["freq"] = saved_ch36_freq
+
+            # If read-back resets freq to another centre frequency, verification flags uncertain.
+            orig_dispatch = ctrl._dispatch
+
+            def _reset_freq_on_put(method: str, raw_path: str, query: str, body: Any) -> tuple[int, bytes]:
+                out = orig_dispatch(method, raw_path, query, body)
+                if method == "PUT" and raw_path.endswith("/config/radios"):
+                    ctrl.eap_details["AA-BB-CC-00-00-03"]["radioSetting5g"]["freq"] = 5180
+                return out
+
+            ctrl._dispatch = _reset_freq_on_put  # type: ignore[method-assign]
+            try:
+                mismatch_dry = unwrap_ok(call_tool(server, "update_ap_radio", {
+                    "deviceMac": "ap-living",
+                    "band": "5g",
+                    "channel": 116,
+                    "channelWidth": "80",
+                }))
+                mismatch_raw = call_tool(server, "update_ap_radio", {
+                    "deviceMac": "ap-living",
+                    "band": "5g",
+                    "channel": 116,
+                    "channelWidth": "80",
+                    "dryRun": False,
+                    "confirm": mismatch_dry["confirmToken"],
+                })
+                mismatch_block = mismatch_raw.get("result") or {}
+                self.assertTrue(mismatch_block.get("isError"))
+                mismatch_sc = mismatch_block.get("structuredContent") or {}
+                self.assertFalse(mismatch_sc.get("verified"))
+                self.assertEqual(mismatch_sc.get("outcome"), "uncertain")
+                self.assertIn(
+                    "radioSetting5g.freq expected 5580, got 5180",
+                    mismatch_block["content"][0]["text"],
+                )
+            finally:
+                ctrl._dispatch = orig_dispatch  # type: ignore[method-assign]
+
             # RF scan warns on dryRun & posts scan command
             rf_dry = unwrap_ok(call_tool(server, "start_rf_scan", {"deviceMac": "ap-living", "bands": ["2g", "5g"]}))
             self.assertTrue(any("disconnect" in w.lower() for w in rf_dry["warnings"]))
