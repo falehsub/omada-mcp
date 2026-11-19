@@ -316,6 +316,10 @@ def update_ap_radio(
         new_rs["channel"] = target_wire_channel
         if target_wire_channel == "0":
             new_rs["freq"] = 0
+        elif validated.get("freq") is not None:
+            # Controllers build the band position from `freq`, not `channel`: a pinned channel
+            # without its centre frequency is accepted and then silently normalised back.
+            new_rs["freq"] = as_int(validated["freq"], 0) or validated["freq"]
     if channelWidth is not None:
         new_rs["channelWidth"] = validated["channelWidthCode"]
     if txPowerLevel is not None:
