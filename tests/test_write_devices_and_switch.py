@@ -321,6 +321,24 @@ class Milestone2SwitchAndApTests(unittest.TestCase):
             self.assertEqual(rad["after"]["txPowerLevel"], "medium")
             self.assertEqual(ctrl.eap_details["AA-BB-CC-00-00-03"]["radioSetting2g"], before_2g)
 
+            # A pinned channel must carry its centre frequency, or the controller silently
+            # normalises the radio back to its previous channel (live: 6.3.0.45, EAP725-Wall).
+            freq_dry = unwrap_ok(call_tool(server, "update_ap_radio", {
+                "deviceMac": "ap-living",
+                "band": "2g",
+                "channel": 11,
+            }))
+            unwrap_ok(call_tool(server, "update_ap_radio", {
+                "deviceMac": "ap-living",
+                "band": "2g",
+                "channel": 11,
+                "dryRun": False,
+                "confirm": freq_dry["confirmToken"],
+            }))
+            pinned = ctrl.eap_details["AA-BB-CC-00-00-03"]["radioSetting2g"]
+            self.assertEqual(str(pinned["channel"]), "11")
+            self.assertEqual(int(pinned["freq"]), 2462)
+
             # RF scan warns on dryRun & posts scan command
             rf_dry = unwrap_ok(call_tool(server, "start_rf_scan", {"deviceMac": "ap-living", "bands": ["2g", "5g"]}))
             self.assertTrue(any("disconnect" in w.lower() for w in rf_dry["warnings"]))

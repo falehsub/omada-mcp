@@ -1114,4 +1114,5 @@ def validate_ap_radio_change(
         "channelWidthLabel": CHANNEL_WIDTH_LABELS.get(target_width_code, target_width_code),
         "txPowerLevel": resolved_pow_level,
         "matchedChannel": matched_chan_entry.get("channelValue") if matched_chan_entry else None,
+        "freq": matched_chan_entry.get("freq") if matched_chan_entry else None,
     }, warnings

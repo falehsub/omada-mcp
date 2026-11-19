@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.5.4] - 2026-11-19
+
+Pinned AP channel changes now apply on controllers that derive the band position from frequency (**386 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).
+
+### Fixed
+
+- **Pinned channel changes were silently normalised back (`update_ap_radio`):** On Omada 6.3.0.45 with EAP725-Wall APs, the controller resolves a radio's band position from `radioSetting*.freq`, not from `channel`. A pinned channel was written without its centre frequency, so the controller accepted the `PUT eaps/{MAC}/config/radios`, left the radio on its previous channel, and the tool correctly reported `outcome="uncertain"` with `verified=false`. `update_ap_radio` now sends the centre frequency taken from the AP's own `channelInfo` alongside the channel, so pinned 2.4 GHz and 5 GHz channel changes apply and read back verified. Verified live: AP 2.4 GHz ch 1 -> 11 and 5 GHz ch 104 -> 116 / 160 -> 80 MHz.
+
 ## [2.5.3] - 2026-11-19
 
 Extended RF survey poll ceiling and decoupled trigger verification (**386 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).
