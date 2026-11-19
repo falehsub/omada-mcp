@@ -75,7 +75,7 @@ class V251LiveFixesTests(unittest.TestCase):
             self.assertEqual(row_5g["chanWidthLabel"], "40MHz")
             self.assertEqual(len(applied["after"]["rfScan"]["channelsByBand"]["5g"]), 1)
 
-            # Timeout during polling must report outcome='accepted' / verified=False rather than raising
+            # Timeout while scanning proves trigger succeeded (verified=True) while scanCompleted=False + resumeHint
             pv_to = unwrap_ok(
                 call_tool(
                     server,
@@ -107,9 +107,86 @@ class V251LiveFixesTests(unittest.TestCase):
                 )
             )
             self.assertTrue(timed_out_res["applied"])
-            self.assertFalse(timed_out_res["verified"])
-            self.assertEqual(timed_out_res["outcome"], "accepted")
+            self.assertTrue(timed_out_res["verified"])
+            self.assertEqual(timed_out_res["outcome"], "verified")
+            self.assertTrue(timed_out_res["after"]["triggerVerified"])
+            self.assertFalse(timed_out_res["after"]["scanCompleted"])
             self.assertTrue(timed_out_res["after"]["timedOut"])
+            self.assertIn("timeoutSeconds=600", timed_out_res["after"]["resumeHint"])
+
+            # timeoutSeconds=300 (beyond legacy 180s ceiling) completes a ~264s simulated 5 GHz scan cleanly
+            ctrl.eap_rf_scan["AA-BB-CC-00-00-03"].update({"status": 1, "status5g": 1})
+            pv_long = unwrap_ok(
+                call_tool(
+                    server,
+                    "survey_wifi",
+                    {
+                        "deviceMac": "AA-BB-CC-00-00-03",
+                        "bands": ["5g"],
+                        "wait": True,
+                        "timeoutSeconds": 300,
+                        "pollIntervalSeconds": 30,
+                        "dryRun": True,
+                    },
+                )
+            )
+            ctrl.rf_scan_post_poll_sequence = [
+                *([{"status": 2, "status5g": 2, "channel5g": []}] * 9),
+                {
+                    "status": 0,
+                    "status5g": 0,
+                    "time5g": 1795029999999,
+                    "channel5g": [{"chan": 36, "chanWidth": 2, "inter": -95, "util": 0}],
+                },
+            ]
+            long_res = unwrap_ok(
+                call_tool(
+                    server,
+                    "survey_wifi",
+                    {
+                        "deviceMac": "AA-BB-CC-00-00-03",
+                        "bands": ["5g"],
+                        "wait": True,
+                        "timeoutSeconds": 300,
+                        "pollIntervalSeconds": 30,
+                        "dryRun": False,
+                        "confirm": pv_long["confirmToken"],
+                    },
+                )
+            )
+            self.assertTrue(long_res["verified"])
+            self.assertTrue(long_res["after"]["scanCompleted"])
+            self.assertFalse(long_res["after"]["timedOut"])
+            self.assertGreater(long_res["after"]["elapsedSeconds"], 180.0)
+            self.assertEqual(long_res["after"]["channelsByBand"]["5g"][0]["chanWidthLabel"], "20MHz")
+
+            # wait=False with unchanged idle timestamps reports accepted / verified=False
+            ctrl.eap_rf_scan["AA-BB-CC-00-00-03"].update({"status": 0, "status5g": 0})
+            pv_nw = unwrap_ok(
+                call_tool(
+                    server,
+                    "survey_wifi",
+                    {"deviceMac": "AA-BB-CC-00-00-03", "bands": ["5g"], "wait": False, "dryRun": True},
+                )
+            )
+            ctrl.rf_scan_post_poll_sequence = []
+            nw_res = unwrap_ok(
+                call_tool(
+                    server,
+                    "survey_wifi",
+                    {
+                        "deviceMac": "AA-BB-CC-00-00-03",
+                        "bands": ["5g"],
+                        "wait": False,
+                        "dryRun": False,
+                        "confirm": pv_nw["confirmToken"],
+                    },
+                )
+            )
+            self.assertTrue(nw_res["applied"])
+            self.assertFalse(nw_res["verified"])
+            self.assertEqual(nw_res["outcome"], "accepted")
+            self.assertFalse(nw_res["after"]["triggerVerified"])
             # Reset rf_scan state to completed before the raw-scan check below
             ctrl.eap_rf_scan["AA-BB-CC-00-00-03"].update({"status": 1, "status5g": 1})
 

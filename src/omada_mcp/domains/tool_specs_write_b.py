@@ -374,7 +374,7 @@ WRITE_TOOLS_B: list[Tool] = [
                 "deviceMac": {"type": "string", "description": "Adopted AP MAC address or exact name"},
                 "bands": {"type": "array", "items": {"type": "string"}, "description": "Optional bands e.g. ['2g', '5g']"},
                 "wait": {"type": "boolean", "default": True, "description": "Poll until scan completes (default true)"},
-                "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 180, "default": 90, "description": "Max poll seconds"},
+                "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 600, "default": 90, "description": "Max poll seconds (up to 600; 5 GHz surveys can take ~4-5 min)"},
                 "pollIntervalSeconds": {"type": "integer", "minimum": 1, "maximum": 30, "default": 5, "description": "Poll interval seconds"},
                 **_WRITE_CONTROL_PROPS,
             },

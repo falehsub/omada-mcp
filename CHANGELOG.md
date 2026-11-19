@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.5.3] - 2026-11-19
+
+Extended RF survey poll ceiling and decoupled trigger verification (**386 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).
+
+### Fixed
+
+- **600 s RF scan polling limit (`get_rf_scan`, `survey_wifi`):** Raised `timeoutSeconds` maximum from `180` to `600` seconds so multi-minute 5 GHz hardware surveys (e.g. ~264 s measured on EAP725-Wall) can complete inside a single `wait=true` call.
+- **Decoupled RF trigger verification from scan completion (`survey_wifi`):** `survey_wifi` now marks `verified=true` / `outcome="verified"` whenever post-POST read-back proves the AP started scanning (`scanning=true`), advanced `bandTimes`, or finished cleanly, while reporting `after.scanCompleted` (`true`/`false`), `after.triggerVerified`, and `after.resumeHint` (`get_rf_scan(mac=..., wait=True, timeoutSeconds=600)`) when polling times out or `wait=false` so callers can distinguish active scans from failed triggers.
+
 ## [2.5.2] - 2026-11-18
 
 RF survey verification, terminal summary promotion, and channel-width decoding (**386 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).

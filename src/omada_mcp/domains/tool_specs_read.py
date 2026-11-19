@@ -566,7 +566,7 @@ READ_TOOLS: list[Tool] = [
             "properties": {
                 "mac": {"type": "string", "description": "Managed access point MAC address or exact name"},
                 "wait": {"type": "boolean", "default": False, "description": "Poll until scanning completes"},
-                "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 180, "default": 90, "description": "Max poll duration (s)"},
+                "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 600, "default": 90, "description": "Max poll duration (s, up to 600 for 5 GHz surveys)"},
                 "pollIntervalSeconds": {"type": "integer", "minimum": 1, "maximum": 30, "default": 5, "description": "Poll interval (s)"},
             },
             "required": ["mac"],

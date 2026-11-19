@@ -726,7 +726,7 @@ def poll_rf_scan_payload(
     stats_out: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Poll ``eaps/{MAC}/tools/rfScan`` until terminal status or timeout."""
-    timeout = max(1, min(int(timeout_seconds), 180))
+    timeout = max(1, min(int(timeout_seconds), 600))
     interval = max(1, min(int(poll_interval_seconds), 30))
     started_at = client._clock()
     deadline = started_at + timeout
@@ -946,7 +946,7 @@ def collect_rf_scan_data(
         )
         rf = rf_polled
         if timed_out:
-            warnings.append(f"RF scan remained in progress after {max(1, min(int(timeout_seconds), 180))}s timeout.")
+            warnings.append(f"RF scan remained in progress after {max(1, min(int(timeout_seconds), 600))}s timeout.")
 
     parsed = parse_rf_scan_payload(rf)
     return {
