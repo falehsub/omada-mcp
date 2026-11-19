@@ -37,6 +37,10 @@ python scripts/anonymize_capture.py capture.json --verify-clean --strict-private
 
 ## Reporting a New Controller Build
 
+### Operator-reported live home-network verification (`v2.5.0`–`v2.5.3`, 2026-11-19)
+
+The [2026-11-19 Hermes live validation record](live-validation-2026-11-19.md) documents verification across `v2.5.0`–`v2.5.3` on software controller `6.3.0.45` with adopted `EAP725-Wall` APs (`55` read-only + `80` opt-in write = `135` tools): `get_ssid`, `list_wlans` steering fields, `loadBalance`/`condBroadcastCtrl` `{"enable": false}` dict shapes, `set_wifi_radio_features` dry-run, `diff_config_snapshots`, `delete_ip_group(id=...)` schema alias, `get_rf_scan` (`chanWidthLabel` `2`/`3`/`5`/`7` -> `20MHz`/`40MHz`/`80MHz`/`160MHz` on `34` `5g` occupancy rows), and `survey_wifi` decoupled trigger verification + one-shot `360s` completion (`230–265s` measured on `EAP725-Wall`).
+
 ### Operator-reported live home-network verification (`v2.3.0`, 2026-11-16)
 
 The [dated Hermes validation record](live-validation-2026-11-16.md) documents a
