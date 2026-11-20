@@ -860,6 +860,13 @@ def collect_ap_radios_data(
             resolved_chan = resolved_chan if isinstance(resolved_chan, int) and resolved_chan > 0 else "auto"
 
         w_code = str(rs.get("channelWidth") or "")
+        configured_width = CHANNEL_WIDTH_LABELS.get(w_code, w_code)
+        actual_width = str(wp.get("bandWidth") or "")
+        effective_width = (
+            actual_width or configured_width
+            if not configured_width or configured_width.upper() == "AUTO"
+            else configured_width
+        )
         tx_pkts = as_int(rt.get("txPkts"), 0)
         rx_pkts = as_int(rt.get("rxPkts"), 0)
         tx_retries = as_int(rt.get("txRetryPkts"), 0)
@@ -874,8 +881,9 @@ def collect_ap_radios_data(
             "channelWireValue": raw_chan_val,
             "actualChannel": actual_str or None,
             "freq": rs.get("freq"),
-            "channelWidth": str(wp.get("bandWidth") or CHANNEL_WIDTH_LABELS.get(w_code, w_code)),
+            "channelWidth": effective_width,
             "channelWidthCode": w_code,
+            "actualChannelWidth": actual_width or None,
             "txPower": rs.get("txPower") if rs.get("txPower") is not None else wp.get("txPower"),
             "txPowerLevel": pow_level,
             "txPowerMode": TX_POWER_LEVEL_LABELS.get(as_int(pow_level, -1), ""),

@@ -113,6 +113,7 @@ class V251LiveFixesTests(unittest.TestCase):
             self.assertFalse(timed_out_res["after"]["scanCompleted"])
             self.assertTrue(timed_out_res["after"]["timedOut"])
             self.assertIn("timeoutSeconds=600", timed_out_res["after"]["resumeHint"])
+            self.assertNotIn("aa:bb:cc:00:00:03", timed_out_res["after"]["resumeHint"].lower())
 
             # timeoutSeconds=300 (beyond legacy 180s ceiling) completes a ~264s simulated 5 GHz scan cleanly
             ctrl.eap_rf_scan["AA-BB-CC-00-00-03"].update({"status": 1, "status5g": 1})

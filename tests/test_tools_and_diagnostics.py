@@ -617,7 +617,7 @@ class Milestone1DiagnosticsTests(unittest.TestCase):
         self.assertTrue(by_port[15]["carriesController"])
 
     def test_ap_radios_resolves_channel_index_and_width_flags(self):
-        server, _ = self._mock_server()
+        server, ctrl = self._mock_server()
         res = self._call(server, "get_ap_radios", {"mac": "AA-BB-CC-00-00-03"})
         by_band = {r["band"]: r for r in res["radios"]}
         self.assertEqual(by_band["5g"]["channelWireValue"], "9")
@@ -626,6 +626,21 @@ class Milestone1DiagnosticsTests(unittest.TestCase):
         ch36 = next(c for c in by_band["5g"]["availableChannels"] if c["channel"] == 36)
         self.assertEqual(ch36["widths"], ["20MHz", "40MHz", "80MHz", "160MHz"])
         self.assertNotIn("synthetic-test-passphrase-never-leak", json.dumps(res))
+
+        # Configured channelWidth overrides stale wp*.bandWidth telemetry, while AUTO falls back.
+        ap_detail = ctrl.eap_details["AA-BB-CC-00-00-03"]
+        ap_detail["radioSetting5g"]["channelWidth"] = "5"  # 80MHz configured
+        ap_detail["wp5g"]["bandWidth"] = "160MHz"         # stale live telemetry
+        updated_radios = self._call(server, "get_ap_radios", {"mac": "ap-living"})
+        b5_updated = next(r for r in updated_radios["radios"] if r["band"] == "5g")
+        self.assertEqual(b5_updated["channelWidth"], "80MHz")
+        self.assertEqual(b5_updated["actualChannelWidth"], "160MHz")
+
+        ap_detail["radioSetting5g"]["channelWidth"] = "6"  # AUTO configured
+        auto_radios = self._call(server, "get_ap_radios", {"mac": "ap-living"})
+        b5_auto = next(r for r in auto_radios["radios"] if r["band"] == "5g")
+        self.assertEqual(b5_auto["channelWidth"], "160MHz")
+        self.assertEqual(b5_auto["actualChannelWidth"], "160MHz")
 
         rf = self._call(server, "get_rf_scan", {"mac": "ap-living"})
         self.assertEqual(rf["mac"], "aa:bb:cc:00:00:03")
