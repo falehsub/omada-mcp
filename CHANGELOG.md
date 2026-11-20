@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.5.5] - 2026-11-20
+
+AP radio configured channel widths now override stale telemetry, pinned `freq` handling is hardened with read-back verification, and RF survey resume/description messaging is polished (**386 passing tests**, **55 read-only + 80 opt-in write = 135 tools**, zero runtime dependencies).
+
 ### Fixed
 
 - **Configured AP radio width now takes precedence over stale telemetry (`get_ap_radios`):** `collect_ap_radios_data` now uses the configured `radioSetting*.channelWidth` label whenever an explicit width is set and only falls back to live `wp*.bandWidth` telemetry when the configured width is `AUTO` or empty, while also exposing `actualChannelWidth` so callers can inspect any provisioning lag directly.
